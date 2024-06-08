@@ -1,3 +1,139 @@
+
+To create federated tables in the archive database, you need to replicate the schema of the tables in the main database. This includes the table structure, column definitions, data types, and indexes.
+
+### Steps to Get the Table Schema
+
+1. **Extract Table Schema from Main Database**: Use MySQL commands to extract the schema of the required tables.
+2. **Create Federated Tables in Archive Database**: Use the extracted schema to create federated tables in the archive database.
+
+### Step 1: Extract Table Schema from Main Database
+
+You can use the `SHOW CREATE TABLE` statement in MySQL to get the schema of the tables. Here's an example:
+
+```sql
+SHOW CREATE TABLE main_db.orders;
+SHOW CREATE TABLE main_db.order_items;
+```
+
+This will give you the `CREATE TABLE` statements for the `orders` and `order_items` tables.
+
+### Step 2: Create Federated Tables in Archive Database
+
+1. **Modify the `CREATE TABLE` Statements**: Change the `ENGINE` to `FEDERATED` and add the `CONNECTION` string to point to the main database tables.
+
+2. **Execute the Modified Statements** in the archive database.
+
+### Example: Extract and Modify Schema
+
+#### Step 1: Extract Table Schema
+
+Assume the result of `SHOW CREATE TABLE main_db.orders;` is:
+
+```sql
+CREATE TABLE `orders` (
+  `order_id` int NOT NULL,
+  `customer_id` int DEFAULT NULL,
+  `order_date` date DEFAULT NULL,
+  -- other columns
+  PRIMARY KEY (`order_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+And the result of `SHOW CREATE TABLE main_db.order_items;` is:
+
+```sql
+CREATE TABLE `order_items` (
+  `order_item_id` int NOT NULL,
+  `order_id` int DEFAULT NULL,
+  `product_id` int DEFAULT NULL,
+  `quantity` int DEFAULT NULL,
+  `order_date` date DEFAULT NULL,
+  -- other columns
+  PRIMARY KEY (`order_item_id`),
+  KEY `order_id` (`order_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+#### Step 2: Modify and Create Federated Tables
+
+Modify the `CREATE TABLE` statements to use the `FEDERATED` engine and add the `CONNECTION` string.
+
+**Federated Table for `orders`**:
+
+```sql
+CREATE TABLE archive_db.federated_orders (
+  `order_id` int NOT NULL,
+  `customer_id` int DEFAULT NULL,
+  `order_date` date DEFAULT NULL,
+  -- other columns
+  PRIMARY KEY (`order_id`)
+) ENGINE=FEDERATED DEFAULT CHARSET=utf8mb4
+CONNECTION='mysql://username:password@main_db_host:port/main_db/orders';
+```
+
+**Federated Table for `order_items`**:
+
+```sql
+CREATE TABLE archive_db.federated_order_items (
+  `order_item_id` int NOT NULL,
+  `order_id` int DEFAULT NULL,
+  `product_id` int DEFAULT NULL,
+  `quantity` int DEFAULT NULL,
+  `order_date` date DEFAULT NULL,
+  -- other columns
+  PRIMARY KEY (`order_item_id`),
+  KEY `order_id` (`order_id`)
+) ENGINE=FEDERATED DEFAULT CHARSET=utf8mb4
+CONNECTION='mysql://username:password@main_db_host:port/main_db/order_items';
+```
+
+### Automated Script to Extract and Create Federated Tables
+
+Here is a Bash script to automate this process:
+
+```sh
+#!/bin/bash
+
+# Database connection details
+USER="username"
+PASS="password"
+HOST="main_db_host"
+MAIN_DB="main_db"
+ARCHIVE_USER="archive_username"
+ARCHIVE_PASS="archive_password"
+ARCHIVE_HOST="archive_host"
+ARCHIVE_DB="archive_db"
+PORT="3306"
+
+# List of tables to be federated
+TABLES=("orders" "order_items")
+
+for TABLE in "${TABLES[@]}"
+do
+    # Extract the table schema from the main database
+    SCHEMA=$(mysql -u $USER -p$PASS -h $HOST -P $PORT -D $MAIN_DB -e "SHOW CREATE TABLE $TABLE;" | grep -v "Create Table" | grep -v "$TABLE" | sed 's/\\n/\n/g')
+
+    # Modify the schema for federated table creation
+    FEDERATED_SCHEMA=$(echo "$SCHEMA" | sed "s/ENGINE=InnoDB/ENGINE=FEDERATED/g" | sed "s/CREATE TABLE \`$TABLE\`/CREATE TABLE \`federated_$TABLE\`/g")
+    FEDERATED_SCHEMA="$FEDERATED_SCHEMA\nCONNECTION='mysql://$USER:$PASS@$HOST:$PORT/$MAIN_DB/$TABLE';"
+
+    # Create the federated table in the archive database
+    mysql -u $ARCHIVE_USER -p$ARCHIVE_PASS -h $ARCHIVE_HOST -P $PORT -D $ARCHIVE_DB -e "$FEDERATED_SCHEMA"
+done
+```
+
+### Summary
+
+1. **Extract Table Schema**: Use `SHOW CREATE TABLE` to extract the schema of the tables in the main database.
+2. **Modify Schema for Federated Tables**: Change the engine to `FEDERATED` and add the connection string.
+3. **Create Federated Tables**: Execute the modified `CREATE TABLE` statements in the archive database.
+
+This ensures that the federated tables in the archive database accurately reflect the structure of the tables in the main database.
+
+
+
+=#=#
+
 While some SQL databases support querying across multiple databases on the same server, querying across databases on different servers is more complex and typically requires using a data integration tool or middleware. However, if both databases are on the same server or if your database system supports federated queries, you can directly achieve this without extracting to CSV.
 
 ### MySQL Example with Federated Tables
