@@ -1,0 +1,82 @@
+To connect to the main database to extract data and then insert it into the archive database using shell scripts and SQL, you can follow these steps. This process involves using command-line tools provided by the database system (e.g., `mysql` for MySQL).
+
+### 1. **Set Up Database Connections**
+Ensure that you have the necessary permissions and network access to both the main database and the archive database.
+
+### 2. **Create SQL Scripts**
+Create SQL scripts to extract data from the main database and insert it into the archive database.
+
+### 3. **Create a Shell Script**
+Create a shell script to execute these SQL scripts sequentially.
+
+### Example for MySQL
+
+#### 1. SQL Script to Extract Data (`extract_data.sql`)
+```sql
+-- Extract data from the main database
+SELECT *
+INTO OUTFILE '/path/to/temp/data.csv'
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+FROM transactions
+WHERE transaction_date < DATE_SUB(CURDATE(), INTERVAL 6 MONTH);
+```
+
+#### 2. SQL Script to Insert Data (`insert_data.sql`)
+```sql
+-- Load data into the archive database
+LOAD DATA INFILE '/path/to/temp/data.csv'
+INTO TABLE archive_db.archived_transactions
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\n';
+```
+
+#### 3. Shell Script (`archive_data.sh`)
+```sh
+#!/bin/bash
+
+# Define database connection details
+MAIN_DB_USER="main_db_user"
+MAIN_DB_PASS="main_db_pass"
+MAIN_DB_NAME="main_db"
+MAIN_DB_HOST="main_db_host"
+
+ARCHIVE_DB_USER="archive_db_user"
+ARCHIVE_DB_PASS="archive_db_pass"
+ARCHIVE_DB_NAME="archive_db"
+ARCHIVE_DB_HOST="archive_db_host"
+
+# Extract data from main database
+mysql -u $MAIN_DB_USER -p$MAIN_DB_PASS -h $MAIN_DB_HOST $MAIN_DB_NAME < /path/to/extract_data.sql
+
+# Insert data into archive database
+mysql -u $ARCHIVE_DB_USER -p$ARCHIVE_DB_PASS -h $ARCHIVE_DB_HOST $ARCHIVE_DB_NAME < /path/to/insert_data.sql
+
+# Optional: Clean up temporary files
+rm /path/to/temp/data.csv
+
+# Optional: Log the operation
+echo "Archiving completed on $(date)" >> /path/to/archive_log.txt
+```
+
+### 4. Schedule the Script
+Use `cron` or another scheduling tool to run the script at regular intervals.
+
+#### Using `cron` to Schedule the Shell Script
+```sh
+# Open crontab
+crontab -e
+
+# Add the following line to schedule the script every Sunday at midnight
+0 0 * * 0 /path/to/archive_data.sh
+```
+
+### Best Practices
+- **Security**: Securely manage database credentials. Avoid hardcoding passwords directly in the scripts. Use environment variables or configuration files with appropriate permissions.
+- **Error Handling**: Add error handling in the shell script to manage failures gracefully.
+- **Data Validation**: Include validation steps to ensure data integrity during the transfer.
+- **Backup**: Ensure you have backups of both the main and archive databases before running the archiving process.
+
+By following these steps, you can automate the process of extracting data from the main database and inserting it into the archive database using shell scripts and SQL. This ensures efficient data management and helps maintain database performance.
