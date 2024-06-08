@@ -1,0 +1,147 @@
+To automate the archival process weekly for data older than 3 years, we can use MySQL federated tables to facilitate data transfer between the main and archive databases. This process involves the following steps:
+
+1. **Create Federated Tables**: Create federated tables in the main database to access the archive database tables.
+2. **Create Archive Tables**: Create the archive tables in the archive database with partitioning, compression, and appropriate indexing.
+3. **Automate the Archival Process**: Write a script to handle the data transfer and schedule it to run weekly.
+
+### Step 1: Create Federated Tables in Main Database
+
+Federated tables allow you to access data in a remote database as if it were a local table. 
+
+#### Example: Federated Table Definitions
+
+**Main Database (main_db)**
+
+```sql
+CREATE TABLE main_db.federated_archive_orders (
+    order_id INT NOT NULL,
+    customer_id INT,
+    order_date DATE,
+    -- other columns
+    PRIMARY KEY (order_id, order_date)
+) ENGINE=FEDERATED
+CONNECTION='mysql://username:password@archive_host:port/archive_db/archive_orders';
+
+CREATE TABLE main_db.federated_archive_order_items (
+    order_item_id INT NOT NULL,
+    order_id INT,
+    product_id INT,
+    quantity INT,
+    order_date DATE,
+    -- other columns
+    PRIMARY KEY (order_item_id, order_date),
+    INDEX (order_id),
+    FOREIGN KEY (order_id, order_date) REFERENCES main_db.federated_archive_orders(order_id, order_date)
+) ENGINE=FEDERATED
+CONNECTION='mysql://username:password@archive_host:port/archive_db/archive_order_items';
+```
+
+### Step 2: Create Archive Tables in Archive Database
+
+**Archive Database (archive_db)**
+
+```sql
+CREATE TABLE archive_db.archive_orders (
+    order_id INT NOT NULL,
+    customer_id INT,
+    order_date DATE,
+    -- other columns
+    PRIMARY KEY (order_id, order_date)
+) ENGINE=InnoDB ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8
+PARTITION BY RANGE (YEAR(order_date)) (
+    PARTITION p2020 VALUES LESS THAN (2021),
+    PARTITION p2021 VALUES LESS THAN (2022),
+    PARTITION p2022 VALUES LESS THAN (2023),
+    PARTITION pmax VALUES LESS THAN MAXVALUE
+);
+
+CREATE TABLE archive_db.archive_order_items (
+    order_item_id INT NOT NULL,
+    order_id INT,
+    product_id INT,
+    quantity INT,
+    order_date DATE,
+    -- other columns
+    PRIMARY KEY (order_item_id, order_date),
+    INDEX (order_id),
+    FOREIGN KEY (order_id, order_date) REFERENCES archive_db.archive_orders(order_id, order_date)
+) ENGINE=InnoDB ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8
+PARTITION BY RANGE (YEAR(order_date)) (
+    PARTITION p2020 VALUES LESS THAN (2021),
+    PARTITION p2021 VALUES LESS THAN (2022),
+    PARTITION p2022 VALUES LESS THAN (2023),
+    PARTITION pmax VALUES LESS THAN MAXVALUE
+);
+
+-- Create secondary indexes
+CREATE INDEX idx_order_date ON archive_db.archive_orders (order_date);
+CREATE INDEX idx_order_item_date ON archive_db.archive_order_items (order_date);
+```
+
+### Step 3: Automate the Archival Process
+
+Write a shell script to automate the data transfer process and schedule it with cron.
+
+#### Shell Script for Archival Process
+
+Create a script `archive_data.sh`:
+
+```sh
+#!/bin/bash
+
+# Database connection details
+USER="username"
+PASS="password"
+HOST="localhost"
+ARCHIVE_USER="archive_username"
+ARCHIVE_PASS="archive_password"
+ARCHIVE_HOST="archive_host"
+ARCHIVE_DB="archive_db"
+MAIN_DB="main_db"
+
+# Archive orders older than 3 years
+mysql -u $USER -p$PASS -h $HOST -D $MAIN_DB -e "
+INSERT INTO federated_archive_orders
+SELECT * FROM orders
+WHERE order_date < DATE_SUB(CURDATE(), INTERVAL 3 YEAR);
+"
+
+# Archive order items corresponding to archived orders
+mysql -u $USER -p$PASS -h $HOST -D $MAIN_DB -e "
+INSERT INTO federated_archive_order_items
+SELECT oi.*
+FROM order_items oi
+JOIN orders o ON oi.order_id = o.order_id
+WHERE o.order_date < DATE_SUB(CURDATE(), INTERVAL 3 YEAR);
+"
+
+# Optionally delete the archived data from main_db to free up space
+mysql -u $USER -p$PASS -h $HOST -D $MAIN_DB -e "
+DELETE FROM order_items
+WHERE order_id IN (SELECT order_id FROM orders WHERE order_date < DATE_SUB(CURDATE(), INTERVAL 3 YEAR));
+"
+
+mysql -u $USER -p$PASS -h $HOST -D $MAIN_DB -e "
+DELETE FROM orders
+WHERE order_date < DATE_SUB(CURDATE(), INTERVAL 3 YEAR);
+"
+```
+
+#### Scheduling with Cron
+
+Schedule the script to run weekly using cron:
+
+```sh
+# Open crontab
+crontab -e
+
+# Add the following line to schedule the script to run every Sunday at midnight
+0 0 * * 0 /path/to/archive_data.sh
+```
+
+### Summary
+
+1. **Federated Tables**: Use federated tables to facilitate data transfer between the main and archive databases.
+2. **Partitioned Archive Tables**: Create partitioned tables with compression and indexing in the archive database to manage and optimize storage and queries.
+3. **Automate with Shell Script**: Write a shell script to automate the archival process and schedule it using cron to run weekly.
+4. **Test and Monitor**: Ensure to test the entire process thoroughly and monitor performance to ensure it meets your requirements.
