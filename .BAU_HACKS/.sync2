@@ -1,0 +1,198 @@
+To create a Python module that listens to a JIRA filter, updates the respective database environment (prod, quality, or dev), and synchronizes the JIRA issues list, we can structure the code as follows:
+
+### Project Structure
+
+```
+jira_sync/
+├── config.py
+├── db_client.py
+├── jira_client.py
+├── sync_service.py
+├── main.py
+└── requirements.txt
+```
+
+### 1. `config.py`
+```python
+import os
+
+# Database configurations for different environments
+DB_CONFIG = {
+    'prod': {
+        'crud_svc_url': os.getenv("DB_PROD_CRUD_SVC_URL")
+    },
+    'quality': {
+        'crud_svc_url': os.getenv("DB_QUALITY_CRUD_SVC_URL")
+    },
+    'dev': {
+        'crud_svc_url': os.getenv("DB_DEV_CRUD_SVC_URL")
+    }
+}
+
+# JIRA configurations
+JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
+JIRA_USERNAME = os.getenv("JIRA_USERNAME")
+JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
+```
+
+### 2. `db_client.py`
+```python
+import requests
+
+class DbClient:
+    def __init__(self, crud_svc_url):
+        self.crud_svc_url = crud_svc_url
+
+    def update_issue(self, issue_data):
+        response = requests.post(f"{self.crud_svc_url}/update", json=issue_data)
+        if response.status_code != 200:
+            print(f"Failed to update issue: {response.text}")
+        return response.status_code == 200
+
+    def watch_updates(self):
+        response = requests.get(f"{self.crud_svc_url}/watch")
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"Failed to watch updates: {response.text}")
+            return []
+```
+
+### 3. `jira_client.py`
+```python
+import requests
+from config import JIRA_BASE_URL, JIRA_USERNAME, JIRA_API_TOKEN
+
+class JiraClient:
+    def __init__(self):
+        self.base_url = JIRA_BASE_URL
+        self.auth = (JIRA_USERNAME, JIRA_API_TOKEN)
+
+    def get_issues(self, jql_query):
+        headers = {"Content-Type": "application/json"}
+        response = requests.get(f"{self.base_url}/rest/api/2/search?jql={jql_query}", headers=headers, auth=self.auth)
+        if response.status_code == 200:
+            return response.json().get('issues', [])
+        else:
+            print(f"Failed to fetch issues: {response.text}")
+            return []
+
+    def update_issue_in_jira(self, jira_no, comment, status):
+        issue_url = f"{self.base_url}/rest/api/2/issue/{jira_no}"
+        payload = {
+            "update": {
+                "comment": [
+                    {
+                        "add": {
+                            "body": comment
+                        }
+                    }
+                ],
+                "status": [
+                    {
+                        "set": {
+                            "name": status
+                        }
+                    }
+                ]
+            }
+        }
+        headers = {"Content-Type": "application/json"}
+        response = requests.put(issue_url, json=payload, headers=headers, auth=self.auth)
+        if response.status_code == 204:
+            print(f"Successfully updated issue {jira_no} in JIRA")
+        else:
+            print(f"Failed to update issue {jira_no} in JIRA: {response.text}")
+```
+
+### 4. `sync_service.py`
+```python
+import re
+from jira_client import JiraClient
+from db_client import DbClient
+from config import DB_CONFIG
+
+class SyncService:
+    def __init__(self):
+        self.jira_client = JiraClient()
+
+    def extract_job_details(self, summary):
+        job_name_match = re.search(r'(P1XX|Q1XX|D1XX)', summary)
+        job_result_match = re.search(r'(Pass|Fail)', summary)
+        job_name = job_name_match.group(0) if job_name_match else None
+        job_result = job_result_match.group(0) if job_result_match else None
+        return job_name, job_result
+
+    def sync_issues(self, jql_query, environment):
+        issues = self.jira_client.get_issues(jql_query)
+        db_client = DbClient(DB_CONFIG[environment]['crud_svc_url'])
+
+        for issue in issues:
+            issue_data = {
+                "jira_no": issue["key"],
+                "summary": issue["fields"]["summary"],
+                "created_date": issue["fields"]["created"],
+                "description": issue["fields"]["description"],
+                "comments": [comment["body"] for comment in issue["fields"]["comment"]["comments"]],
+                "first_comment": issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else None,
+                "last_comment": issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else None
+            }
+
+            job_name, job_result = self.extract_job_details(issue_data["summary"])
+            if job_name and job_result:
+                issue_data["job_name"] = job_name
+                issue_data["job_result"] = job_result
+
+                if not db_client.update_issue(issue_data):
+                    print(f"Failed to update issue {issue_data['jira_no']} in {environment} environment")
+
+    def watch_and_update_jira(self, environment):
+        db_client = DbClient(DB_CONFIG[environment]['crud_svc_url'])
+        updates = db_client.watch_updates()
+
+        for update in updates:
+            jira_no = update.get('jira_no')
+            comment = update.get('update_comment')
+            status = update.get('update_status')
+            self.jira_client.update_issue_in_jira(jira_no, comment, status)
+```
+
+### 5. `main.py`
+```python
+import time
+from sync_service import SyncService
+
+def main():
+    sync_service = SyncService()
+
+    # Define your JQL query and environments
+    jql_query = 'project = YOUR_PROJECT AND filter = YOUR_FILTER_ID'
+    environments = ['prod', 'quality', 'dev']
+
+    while True:
+        # Sync issues for each environment
+        for env in environments:
+            sync_service.sync_issues(jql_query, env)
+            sync_service.watch_and_update_jira(env)
+
+        # Wait for a certain period before checking again (e.g., 5 minutes)
+        time.sleep(300)
+
+if __name__ == "__main__":
+    main()
+```
+
+### 6. `requirements.txt`
+```
+requests
+```
+
+### Explanation
+
+1. **Configuration**: `config.py` contains the necessary configuration for database environments and JIRA credentials.
+2. **Database Client**: `db_client.py` provides the functionality to update the respective database using a CRUD service API and to watch for updates on specific fields.
+3. **JIRA Client**: `jira_client.py` provides the functionality to fetch issues from JIRA based on a JQL query and update JIRA issues based on updates in the database.
+4. **Synchronization Service**: `sync_service.py` implements the logic to synchronize JIRA issues to the respective databases and includes methods to extract job details using regex patterns, as well as watching for updates in the database and reflecting those updates in JIRA.
+5. **Main Script**: `main.py` runs the synchronization service in a loop, checking for updates at regular intervals (e.g., every 5 minutes).
+
+This setup will continuously monitor the JIRA filter, update the respective databases, and reflect updates from the databases back to JIRA. You can adjust the `time.sleep(300)` interval in the `main.py` script to change how frequently the script checks for updates.

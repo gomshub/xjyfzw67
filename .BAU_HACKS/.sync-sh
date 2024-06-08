@@ -1,0 +1,311 @@
+#!/bin/bash
+
+# Configuration
+JIRA_URL="https://your-jira-instance"
+JIRA_API="/rest/api/2/search?jql=filter=YOUR_FILTER_ID"
+JIRA_ISSUE_API="/rest/api/2/issue"
+USERNAME="your-jira-username"
+PASSWORD="your-jira-password"
+RECIPIENT="recipient@example.com"
+SUBJECT="JIRA Issues Report"
+TEMP_JSON_FILE="/tmp/jira_issues.json"
+TEMP_HTML_FILE="/tmp/jira_issues.html"
+TEMP_COMMENT_FILE="/tmp/jira_comments.json"
+
+# Fetch JIRA issues
+response=$(curl -s -w "%{http_code}" -u $USERNAME:$PASSWORD -X GET -H "Content-Type: application/json" "$JIRA_URL$JIRA_API" -o $TEMP_JSON_FILE)
+http_code=$(tail -n1 <<< "$response")
+
+if [ "$http_code" -ne 200 ]; then
+  echo "Error: Failed to fetch JIRA issues. HTTP Status: $http_code"
+  exit 1
+fi
+
+# Check if there are issues
+if [ ! -s $TEMP_JSON_FILE ] || [ "$(jq '.total' $TEMP_JSON_FILE)" -eq 0 ]; then
+  echo "No JIRA issues found in the filter."
+  exit 0
+fi
+
+# Generate HTML content
+cat <<EOF > $TEMP_HTML_FILE
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>JIRA Issues Report</title>
+<style>
+  body { font-family: Arial, sans-serif; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ddd; padding: 8px; }
+  th { background-color: #f2f2f2; }
+  th { text-align: left; }
+  tr:nth-child(even) { background-color: #f9f9f9; }
+  tr:hover { background-color: #ddd; }
+</style>
+</head>
+<body>
+<h1>JIRA Issues Report</h1>
+<table>
+  <thead>
+    <tr>
+      <th>JIRA Number</th>
+      <th>Status</th>
+      <th>Summary</th>
+      <th>Created Date</th>
+      <th>Assignee</th>
+      <th>Description</th>
+      <th>Comments</th>
+    </tr>
+  </thead>
+  <tbody>
+EOF
+
+# Iterate through issues to fetch comments and append to HTML
+jq -r '.issues[] | .key' $TEMP_JSON_FILE | while read -r key; do
+  # Fetch comments for each issue
+  comments_response=$(curl -s -u $USERNAME:$PASSWORD -X GET -H "Content-Type: application/json" "$JIRA_URL$JIRA_ISSUE_API/$key/comment" -o $TEMP_COMMENT_FILE)
+  comment_http_code=$(tail -n1 <<< "$comments_response")
+
+  if [ "$comment_http_code" -ne 200 ]; then
+    echo "Error: Failed to fetch comments for issue $key. HTTP Status: $comment_http_code"
+    continue
+  fi
+
+  # Extract all comments and the first comment
+  all_comments=$(jq -r '.comments | map(.body) | join("<br><br>") | gsub("\n"; "<br>")' $TEMP_COMMENT_FILE)
+  first_comment=$(jq -r '.comments[0].body // "No comments"' $TEMP_COMMENT_FILE | sed ':a;N;$!ba;s/\n/<br>/g')
+
+  # Extract other fields and convert multi-line description to HTML format
+  issue_data=$(jq -r --arg key "$key" --arg all_comments "$all_comments" --arg first_comment "$first_comment" '
+    .issues[] | select(.key == $key) | 
+    "<tr><td><a href=\"'$JIRA_URL'/browse/\($key)\">\($key)</a></td>
+    <td>\(.fields.status.name)</td>
+    <td>\(.fields.summary)</td>
+    <td>\(.fields.created)</td>
+    <td>\(.fields.assignee.displayName // "Unassigned")</td>
+    <td>\(.fields.description // "" | gsub("\n|\r"; "<br>"))</td>
+    <td>All Comments: <br>\($all_comments)<br><br>First Comment: <br>\($first_comment)</td></tr>"' $TEMP_JSON_FILE)
+
+  echo "$issue_data" >> $TEMP_HTML_FILE
+done
+
+# Close HTML tags
+cat <<EOF >> $TEMP_HTML_FILE
+  </tbody>
+</table>
+</body>
+</html>
+EOF
+
+# Send email if there are issues
+if [ -s $TEMP_HTML_FILE ]; then
+  cat $TEMP_HTML_FILE | mailx -a 'Content-Type: text/html' -s "$SUBJECT" $RECIPIENT
+fi
+
+# Clean up
+rm -f $TEMP_JSON_FILE $TEMP_HTML_FILE $TEMP_COMMENT_FILE
+
+=#
+
+
+#!/bin/bash
+
+# Configuration
+JIRA_URL="https://your-jira-instance"
+JIRA_API="/rest/api/2/search?jql=filter=YOUR_FILTER_ID"
+JIRA_ISSUE_API="/rest/api/2/issue"
+USERNAME="your-jira-username"
+PASSWORD="your-jira-password"
+RECIPIENT="recipient@example.com"
+SUBJECT="JIRA Issues Report"
+TEMP_JSON_FILE="/tmp/jira_issues.json"
+TEMP_HTML_FILE="/tmp/jira_issues.html"
+TEMP_COMMENT_FILE="/tmp/jira_comments.json"
+
+# Fetch JIRA issues
+response=$(curl -s -w "%{http_code}" -u $USERNAME:$PASSWORD -X GET -H "Content-Type: application/json" "$JIRA_URL$JIRA_API" -o $TEMP_JSON_FILE)
+http_code=$(tail -n1 <<< "$response")
+
+if [ "$http_code" -ne 200 ]; then
+  echo "Error: Failed to fetch JIRA issues. HTTP Status: $http_code"
+  exit 1
+fi
+
+# Check if there are issues
+if [ ! -s $TEMP_JSON_FILE ] || [ "$(jq '.total' $TEMP_JSON_FILE)" -eq 0 ]; then
+  echo "No JIRA issues found in the filter."
+  exit 0
+fi
+
+# Generate HTML content
+cat <<EOF > $TEMP_HTML_FILE
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>JIRA Issues Report</title>
+<style>
+  body { font-family: Arial, sans-serif; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ddd; padding: 8px; }
+  th { background-color: #f2f2f2; }
+  th { text-align: left; }
+  tr:nth-child(even) { background-color: #f9f9f9; }
+  tr:hover { background-color: #ddd; }
+</style>
+</head>
+<body>
+<h1>JIRA Issues Report</h1>
+<table>
+  <thead>
+    <tr>
+      <th>JIRA Number</th>
+      <th>Status</th>
+      <th>Summary</th>
+      <th>Created Date</th>
+      <th>Assignee</th>
+      <th>Description</th>
+      <th>Last Comment</th>
+    </tr>
+  </thead>
+  <tbody>
+EOF
+
+# Append JSON data to HTML with formatted description and last comment
+jq -r '.issues[] | .key' $TEMP_JSON_FILE | while read -r key; do
+  # Fetch comments for each issue
+  comments_response=$(curl -s -w "%{http_code}" -u $USERNAME:$PASSWORD -X GET -H "Content-Type: application/json" "$JIRA_URL$JIRA_ISSUE_API/$key/comment" -o $TEMP_COMMENT_FILE)
+  comment_http_code=$(tail -n1 <<< "$comments_response")
+
+  if [ "$comment_http_code" -ne 200 ]; then
+    echo "Error: Failed to fetch comments for issue $key. HTTP Status: $comment_http_code"
+    continue
+  fi
+
+  # Get the latest comment
+  last_comment=$(jq -r '.comments[-1].body // "No comments"' $TEMP_COMMENT_FILE | sed ':a;N;$!ba;s/\n/<br>/g')
+
+  # Extract other fields and convert multi-line description to HTML format
+  issue_data=$(jq -r --arg key "$key" --arg last_comment "$last_comment" '
+    .issues[] | select(.key == $key) | 
+    "<tr><td><a href=\"'$JIRA_URL'/browse/\($key)\">\($key)</a></td>
+    <td>\(.fields.status.name)</td>
+    <td>\(.fields.summary)</td>
+    <td>\(.fields.created)</td>
+    <td>\(.fields.assignee.displayName // "Unassigned")</td>
+    <td>\(.fields.description // "" | gsub("\n|\r"; "<br>"))</td>
+    <td>\($last_comment)</td></tr>"' $TEMP_JSON_FILE)
+
+  echo "$issue_data" >> $TEMP_HTML_FILE
+done
+
+# Close HTML tags
+cat <<EOF >> $TEMP_HTML_FILE
+  </tbody>
+</table>
+</body>
+</html>
+EOF
+
+# Send email if there are issues
+if [ -s $TEMP_HTML_FILE ]; then
+  cat $TEMP_HTML_FILE | mailx -a 'Content-Type: text/html' -s "$SUBJECT" $RECIPIENT
+fi
+
+# Clean up
+rm -f $TEMP_JSON_FILE $TEMP_HTML_FILE $TEMP_COMMENT_FILE
+
+
+
+
+
+Here's a shell script that listens to a JIRA filter via requests, fetches the required details, and generates an HTML page with those details. This script uses `curl` for HTTP requests and `grep` for regex pattern matching.
+
+### Shell Script: `jira_watch.sh`
+
+```bash
+#!/bin/bash
+
+# Configuration
+JIRA_BASE_URL="https://your-jira-instance.atlassian.net"
+JIRA_USERNAME="your-jira-username"
+JIRA_API_TOKEN="your-jira-api-token"
+JQL_QUERY="project = YOUR_PROJECT AND filter = YOUR_FILTER_ID"
+OUTPUT_HTML="jira_issues.html"
+
+# Function to fetch issues from JIRA
+fetch_issues() {
+  curl -u "$JIRA_USERNAME:$JIRA_API_TOKEN" \
+       -X GET \
+       -H "Content-Type: application/json" \
+       "$JIRA_BASE_URL/rest/api/2/search?jql=$JQL_QUERY" \
+       -o issues.json
+}
+
+# Function to extract job details and generate HTML
+generate_html() {
+  echo "<html>" > $OUTPUT_HTML
+  echo "<head><title>JIRA Issues</title></head>" >> $OUTPUT_HTML
+  echo "<body>" >> $OUTPUT_HTML
+  echo "<h1>JIRA Issues</h1>" >> $OUTPUT_HTML
+  echo "<table border='1'>" >> $OUTPUT_HTML
+  echo "<tr><th>JIRA No.</th><th>Summary</th><th>Job Name</th><th>Job Result</th></tr>" >> $OUTPUT_HTML
+
+  # Loop through each issue and extract details
+  jq -c '.issues[]' issues.json | while read issue; do
+    jira_no=$(echo $issue | jq -r '.key')
+    summary=$(echo $issue | jq -r '.fields.summary')
+
+    job_name=$(echo $summary | grep -o -E '(P1XX|Q1XX|D1XX)')
+    job_result=$(echo $summary | grep -o -E '(Pass|Fail)')
+
+    echo "<tr><td>$jira_no</td><td>$summary</td><td>$job_name</td><td>$job_result</td></tr>" >> $OUTPUT_HTML
+  done
+
+  echo "</table>" >> $OUTPUT_HTML
+  echo "</body>" >> $OUTPUT_HTML
+  echo "</html>" >> $OUTPUT_HTML
+}
+
+# Main loop to watch for changes and update HTML
+while true; do
+  fetch_issues
+  generate_html
+  echo "Updated $OUTPUT_HTML"
+  
+  # Wait for a certain period before checking again (e.g., 5 minutes)
+  sleep 300
+done
+```
+
+### Explanation
+
+1. **Configuration**: Set the `JIRA_BASE_URL`, `JIRA_USERNAME`, `JIRA_API_TOKEN`, and `JQL_QUERY` with your JIRA instance details and the JQL query to fetch the issues. Set `OUTPUT_HTML` to the desired output HTML file name.
+
+2. **Fetch Issues**: The `fetch_issues` function uses `curl` to make an HTTP GET request to the JIRA API to fetch the issues based on the JQL query. The results are saved to `issues.json`.
+
+3. **Generate HTML**: The `generate_html` function processes the `issues.json` file using `jq` to parse the JSON and `grep` to extract the `job_name` and `job_result` from the summary. The details are then written to the HTML file in a table format.
+
+4. **Main Loop**: The script enters an infinite loop where it fetches the latest issues and updates the HTML file every 5 minutes (`300` seconds). You can adjust the sleep interval as needed.
+
+### Prerequisites
+
+Make sure you have `curl` and `jq` installed on your system. You can install `jq` using:
+
+```sh
+sudo apt-get install jq   # On Debian/Ubuntu
+sudo yum install jq       # On CentOS/RHEL
+brew install jq           # On macOS
+```
+
+### Running the Script
+
+Make the script executable and run it:
+
+```sh
+chmod +x jira_watch.sh
+./jira_watch.sh
+```
+
+This script will keep running, updating the HTML file with the latest JIRA issues and their details. The HTML file will contain a table with the JIRA number, summary, job name, and job result extracted from the summary using the specified regex patterns.

@@ -1,0 +1,56 @@
+You can achieve this task using a combination of shell scripting, grep, awk, and CSV formatting. Here's a step-by-step guide:
+
+### Step 1: Loop Through Log Files
+
+1. **List Log Files**:
+   - Use `ls` or `find` command to list log files in the directory.
+
+2. **Loop Through Log Files**:
+   - Use a loop to iterate over each log file.
+
+### Step 2: Search for Regex Patterns
+
+1. **Search for Regex Patterns**:
+   - Use `grep` command with the `-E` option to search for regex patterns in each log file.
+   - Pipe the output to `awk` to filter out lines that match the regex patterns and extract distinct rows without dates.
+
+### Step 3: Format Output to CSV
+
+1. **Format Output to CSV**:
+   - Use `echo` or `printf` to print the filenames and matched lines in CSV format.
+
+### Example Shell Script:
+
+```bash
+#!/bin/bash
+
+# Directory containing log files
+log_dir="/path/to/log/files"
+
+# Regex patterns to search for
+regex_patterns=("pattern1" "pattern2" "pattern3")
+
+# CSV output file
+csv_output="output.csv"
+
+# Loop through log files
+for logfile in "$log_dir"/*.log; do
+    filename=$(basename "$logfile")
+
+    # Loop through regex patterns
+    for pattern in "${regex_patterns[@]}"; do
+        # Search for regex pattern, filter out dates, and extract distinct rows
+        grep -E "$pattern" "$logfile" | awk '{sub(/\[[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\]/, ""); print}' | sort -u | while read -r line; do
+            # Output filename and matched line in CSV format
+            echo "$filename,$line" >> "$csv_output"
+        done
+    done
+done
+```
+
+### Notes:
+
+- Replace `/path/to/log/files` with the actual path to your log files directory.
+- Modify `regex_patterns` array to include your desired regex patterns.
+- Adjust the `csv_output` variable to specify the path and filename of the CSV output file.
+- This script will create a CSV file (`output.csv`) containing the filenames and matched lines for each regex pattern. Each row in the CSV file will contain the filename and matched line separated by a comma.

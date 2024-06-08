@@ -1,0 +1,1813 @@
+NOTES:
+
+look for all the subfolder name like reg expression „name*“    in s3 using python
+python
+import boto3
+import re
+
+# Create an S3 client
+s3 = boto3.client('s3')
+
+# Specify the bucket name
+bucket_name = 'your_bucket_name'
+
+# Compile the regular expression pattern
+pattern = re.compile(r'name.*')
+
+# List objects in the bucket
+response = s3.list_objects_v2(Bucket=bucket_name, Delimiter='/')
+
+# Extract the subfolder names matching the pattern
+subfolder_names = [obj['Prefix'] for obj in response.get('CommonPrefixes', []) if pattern.match(obj['Prefix'])]
+
+# Print the subfolder names
+for subfolder_name in subfolder_names:
+    print(subfolder_name)
+
+
+						=#=#=#=#=
+example code to remove duplicate rows in parquet file using python
+python
+import pandas as pd
+import pyarrow.parquet as pq
+
+# Read the Parquet file into a DataFrame
+df = pd.read_parquet('input_file.parquet')
+
+# Define the lookup value
+lookup_value = 'your_lookup_value'
+
+# Filter the DataFrame based on the lookup value
+matched_rows = df[df['column_name'] == lookup_value]
+
+# Save the matched rows without headers to a Parquet file
+matched_rows.to_parquet('output_file.parquet', index=False, header=False)
+
+python
+import pandas as pd
+import pyarrow.parquet as pq
+
+# Read the Parquet file into a DataFrame
+df = pd.read_parquet('input_file.parquet')
+
+# Drop duplicate rows
+df = df.drop_duplicates()
+
+# Save the deduplicated DataFrame back to a Parquet file
+df.to_parquet('output_file.parquet', index=False)
+
+
+=#=#=#
+Certainly! Here's an example code that searches for a value in all Parquet files in an S3 repository, appends all the matched row values (with headers only for the first matched row), and converts the matched rows to a Pandas DataFrame and then to a Parquet buffer:
+
+```python
+import pyarrow.parquet as pq
+import s3fs
+import pyarrow as pa
+import pandas as pd
+
+# Define the S3 bucket and the value you want to search for
+bucket_name = "your_bucket_name"
+value_to_search = "your_value"
+
+# Create an empty list to store the matched row values
+matched_row_values = []
+
+# Connect to the S3 bucket using s3fs
+s3 = s3fs.S3FileSystem(anon=False)
+
+# Iterate over each Parquet file in the S3 bucket
+for file in s3.glob(f"{bucket_name}/*.parquet"):
+    # Read the Parquet file
+    table = pq.read_table(f"s3://{file}", filesystem=s3)
+    
+    # Convert the table to a Pandas DataFrame
+    df = table.to_pandas()
+    
+    # Find rows matching the value
+    matched_rows = df[df["your_column_name"] == value_to_search]
+    
+    # Append the matched row values (with headers only for the first matched row)
+    if not matched_rows.empty:
+        matched_row_values.append(matched_rows.iloc[0].to_dict())
+        matched_row_values.extend(matched_rows.iloc[1:].to_dict(orient="records"))
+
+# Convert the list of dictionaries to a Pandas DataFrame
+df_matched = pd.DataFrame(matched_row_values)
+
+# Convert the Pandas DataFrame to a PyArrow Table
+table_matched = pa.Table.from_pandas(df_matched)
+
+# Create an empty Parquet buffer
+parquet_buffer = pa.BufferOutputStream()
+
+# Write the table to the Parquet buffer
+pq.write_table(table_matched, parquet_buffer)
+
+# Get the final Parquet buffer value
+buffer_value = parquet_buffer.getvalue()
+
+# Do something with the buffer_value, such as saving it to a file or uploading it to another location
+# For example, you can save it to a local file:
+with open("matched_rows.parquet", "wb") as f:
+    f.write(buffer_value.to_pybytes())
+```
+
+Remember to replace `'your_bucket_name'` with the actual name of your S3 bucket, `'your_value'` with the value you want to search for, and `'your_column_name'` with the name of the column you want to search in.
+
+This code will search for the specified value in all Parquet files within the S3 bucket, append all the matched row values (with headers only for the first matched row), and convert the matched rows to a Pandas DataFrame. Then it converts the Pandas DataFrame to a Parquet buffer using PyArrow. You can choose to save the buffer to a file, upload it to another location, or perform any other desired actions.
+
+
+
+
+						=#=#=#=#=#==#=#=#=
+
+To save only the matched rows for a lookup value without headers in a Parquet file using Python, you can modify the code as follows:
+
+```python
+import pandas as pd
+import pyarrow.parquet as pq
+
+# Read the Parquet file into a DataFrame
+df = pd.read_parquet('input_file.parquet')
+
+# Define the lookup value
+lookup_value = 'your_lookup_value'
+
+# Filter the DataFrame based on the lookup value
+matched_rows = df[df['column_name'] == lookup_value]
+
+# Save the matched rows without headers to a Parquet file
+matched_rows.to_parquet('output_file.parquet', index=False, header=False)
+```
+
+In this code, after reading the Parquet file into a DataFrame, you define the `lookup_value` variable as the value you want to match against. Then, you filter the DataFrame using `df[df['column_name'] == lookup_value]`, where `'column_name'` should be replaced with the actual name of the column you want to compare with the lookup value. Finally, you save the matched rows without headers to a Parquet file using `to_parquet()` with the `index=False` and `header=False` options.
+
+Make sure to replace `'input_file.parquet'` with the path to your input Parquet file and `'output_file.parquet'` with the desired path for the output Parquet file.
+
+=#
+
+python
+import pyarrow.parquet as pq
+import s3fs
+import pyarrow as pa
+
+# Define the S3 bucket and the value you want to search for
+bucket_name = "your_bucket_name"
+value_to_search = "your_value"
+
+# Create an empty list to store the matched row values
+matched_row_values = []
+
+# Connect to the S3 bucket using s3fs
+s3 = s3fs.S3FileSystem(anon=False)
+
+# Iterate over each Parquet file in the S3 bucket
+for file in s3.glob(f"{bucket_name}/*.parquet"):
+    # Read the Parquet file
+    table = pq.read_table(f"s3://{file}", filesystem=s3)
+    
+    # Convert the table to a Pandas DataFrame
+    df = table.to_pandas()
+    
+    # Find rows matching the value
+    matched_rows = df[df["your_column_name"] == value_to_search]
+    
+    # Get the matched row values as a list of dictionaries
+    matched_row_values.extend(matched_rows.to_dict(orient="records"))
+
+# Convert the list of dictionaries to a PyArrow Table
+table_matched = pa.Table.from_pandas(pd.DataFrame(matched_row_values))
+
+# Create an empty Parquet buffer
+parquet_buffer = pa.BufferOutputStream()
+
+# Append the matched rows to the Parquet buffer
+pq.write_table(table_matched, parquet_buffer, row_group_size=1000)
+
+# Get the final Parquet buffer value
+buffer_value = parquet_buffer.getvalue()
+
+# Do something with the buffer_value, such as saving it to a file or uploading it to another location
+# For example, you can save it to a local file:
+with open("matched_rows.parquet", "wb") as f:
+    f.write(buffer_value.to_pybytes())
+
+==#=#==
+Certainly! Here's an example solution code in Python that demonstrates how you can handle the "Couldn't deserialize thrift: TProtocolException while reading parquet buffer" error when working with Parquet files and Thrift serialization/deserialization:
+
+```python
+import pyarrow.parquet as pq
+import thriftpy2
+
+# Load the Thrift schema
+thrift_schema = thriftpy2.load("path/to/your/thrift/schema.thrift")
+
+# Define the Thrift object class
+ThriftObject = thrift_schema.thrift_object
+
+# Read the Parquet file
+parquet_file = pq.ParquetFile("path/to/your/parquet/file.parquet")
+
+# Iterate over the Parquet file's row groups
+for row_group in range(parquet_file.num_row_groups):
+    # Read a row group
+    table = parquet_file.read_row_group(row_group)
+
+    # Iterate over the rows in the row group
+    for i in range(table.num_rows):
+        # Get the Parquet buffer for the row
+        buffer = table[i].to_pydict()
+
+        try:
+            # Deserialize the Thrift object from the buffer
+            thrift_object = ThriftObject()
+            thrift_object.deserialize(buffer)
+            
+            # Process the deserialized Thrift object
+            # ...
+            
+        except thriftpy2.transport.TTransportException as e:
+            # Handle TProtocolException or other Thrift transport errors
+            print("Thrift deserialization error:", e)
+            
+        except Exception as e:
+            # Handle other exceptions
+            print("Error:", e)
+```
+
+In this example, we assume you have the `pyarrow` and `thriftpy2` libraries installed. Make sure to replace `"path/to/your/thrift/schema.thrift"` with the actual path to your Thrift schema file, and `"path/to/your/parquet/file.parquet"` with the path to your Parquet file.
+
+The code reads the Parquet file row by row, deserializes the Thrift object from each row's buffer, and performs any necessary processing. If a `TProtocolException` or any other Thrift transport exception occurs during deserialization, it will be caught and handled appropriately. Other exceptions will also be caught and can be handled as needed.
+
+Remember to adapt the code based on your specific requirements and the structure of your Thrift schema.
+
+==#=#=#=#
+
+
+python
+import boto3
+import pandas as pd
+import io
+
+def search_files_in_s3(bucket_name, start_date, end_date, field_name):
+    s3 = boto3.client('s3')
+
+    # List objects in the bucket
+    response = s3.list_objects_v2(Bucket=bucket_name)
+
+    # Create a buffer to store the result Parquet file
+    result_buffer = io.BytesIO()
+
+    # Iterate over objects and filter based on dates and file extension
+    for obj in response['Contents']:
+        key = obj['Key']
+        if key.endswith('.parquet'):
+            # Extract the date from the subfolder name
+            subfolder_date = key.split('/')[0]
+            if start_date <= subfolder_date <= end_date:
+                # Download the Parquet file to a buffer
+                parquet_buffer = io.BytesIO()
+                s3.download_fileobj(bucket_name, key, parquet_buffer)
+                parquet_buffer.seek(0)
+
+                # Read Parquet file into a DataFrame
+                df = pd.read_parquet(parquet_buffer)
+
+                # Filter the desired field and write to a result DataFrame
+                result_df = df[df[field_name].notna()]
+
+                # Write the result DataFrame to a Parquet file buffer
+                result_parquet_buffer = io.BytesIO()
+                result_df.to_parquet(result_parquet_buffer, index=False)
+                result_parquet_buffer.seek(0)
+
+                # Convert the result Parquet file buffer to a text buffer
+                result_text_buffer = io.StringIO()
+                result_df.to_csv(result_text_buffer, sep='\t', index=False)
+                result_text_buffer.seek(0)
+
+                # Append the result Parquet file buffer to the overall result buffer
+                result_buffer.write(result_parquet_buffer.getvalue())
+
+                # Clean up the temporary buffers
+                parquet_buffer.close()
+                result_parquet_buffer.close()
+                result_text_buffer.close()
+
+    # Return the content of the result buffer as a text buffer
+    result_buffer.seek(0)
+    return result_buffer.getvalue().decode()
+
+# Example usage
+bucket_name = 'your_bucket_name'
+start_date = '2023-01-01'
+end_date = '2023-01-31'
+field_name = 'desired_field_name'
+
+result_text_buffer = search_files_in_s3(bucket_name, start_date, end_date, field_name)
+
+if result_text_buffer:
+    print("The result Parquet file has been converted to text buffer successfully.")
+    print(result_text_buffer)
+else:
+    print("No matching files found in the specified date range.")
+
+# Clean up the result buffer
+result_buffer.close()
+
+
+=#=#=#=#=#=#=#=#
+
+python
+import boto3
+import pandas as pd
+
+def search_files_in_s3(bucket_name, start_date, end_date, field_name):
+    s3 = boto3.client('s3')
+
+    # List objects in the bucket
+    response = s3.list_objects_v2(Bucket=bucket_name)
+
+    # Iterate over objects and filter based on dates and file extension
+    for obj in response['Contents']:
+        key = obj['Key']
+        if key.endswith('.parquet'):
+            # Extract the date from the subfolder name
+            subfolder_date = key.split('/')[0]
+            if start_date <= subfolder_date <= end_date:
+                # Download the Parquet file to local storage
+                s3.download_file(bucket_name, key, 'temp.parquet')
+
+                # Read Parquet file into a DataFrame
+                df = pd.read_parquet('temp.parquet')
+
+                # Filter the desired field and write to a result DataFrame
+                result_df = df[df[field_name].notna()]
+
+                # Write the result DataFrame to a Parquet file
+                result_df.to_parquet('result.parquet')
+
+                # Convert the result Parquet file to a text file
+                result_df.to_csv('result.txt', sep='\t', index=False)
+
+                # Clean up the temporary Parquet file
+                os.remove('temp.parquet')
+
+                # Return the path of the result text file
+                return 'result.txt'
+
+    # If no files were found, return None
+    return None
+
+# Example usage
+bucket_name = 'your_bucket_name'
+start_date = '2023-01-01'
+end_date = '2023-01-31'
+field_name = 'desired_field_name'
+
+result_file_path = search_files_in_s3(bucket_name, start_date, end_date, field_name)
+
+if result_file_path:
+    print(f"The result file has been saved as {result_file_path}.")
+else:
+    print("No matching files found in the specified date range.")
+
+
+=#=#=#
+
+To copy all the subfolders from one subfolder to another subfolder in the same bucket in Amazon S3 using Python, you can use the `boto3` library. Here's an example code snippet that demonstrates how to accomplish this:
+
+```python
+import boto3
+
+def copy_subfolders(source_subfolder, destination_subfolder, bucket_name):
+    s3 = boto3.client('s3')
+    
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=source_subfolder, Delimiter='/')
+    
+    for folder in response.get('CommonPrefixes', []):
+        folder_name = folder.get('Prefix')
+        new_folder_name = folder_name.replace(source_subfolder, destination_subfolder)
+        
+        s3.put_object(Bucket=bucket_name, Key=new_folder_name)
+        
+        copy_files(folder_name, new_folder_name, bucket_name)
+```
+
+In the `copy_subfolders` function, you provide the names of the source subfolder, destination subfolder, and the bucket name as arguments. The function uses the `list_objects_v2` method with the `Delimiter` parameter set to `'/'` to retrieve a list of subfolders in the source subfolder. For each subfolder, it constructs a new folder name by replacing the source subfolder name with the destination subfolder name. It then uses the `put_object` method to create the new subfolder in the bucket.
+
+After creating the new subfolder, the function calls the `copy_files` function from the previous answer to copy all the files from the source subfolder to the corresponding subfolder in the destination subfolder.
+
+You'll need to have the `boto3` library installed and have AWS credentials properly configured for this code to work.
+
+=====#
+
+
+To copy files from one subfolder to another subfolder in the same bucket in Amazon S3 using Python, you can use the boto3 library. Here's an example code snippet that demonstrates how to accomplish this:
+
+```python
+import boto3
+
+def copy_files(source_subfolder, destination_subfolder, bucket_name):
+    s3 = boto3.client('s3')
+    
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=source_subfolder)
+    
+    for file in response['Contents']:
+        key = file['Key']
+        new_key = key.replace(source_subfolder, destination_subfolder)
+        
+        s3.copy_object(
+            Bucket=bucket_name,
+            CopySource={
+                'Bucket': bucket_name,
+                'Key': key
+            },
+            Key=new_key
+        )
+```
+
+In the `copy_files` function, you provide the names of the source subfolder, destination subfolder, and the bucket name as arguments. The function uses the `list_objects_v2` method to retrieve a list of objects in the source subfolder. For each object, it constructs a new key by replacing the source subfolder name with the destination subfolder name. Finally, it uses the `copy_object` method to copy the object to the new key in the same bucket.
+
+You'll need to have the `boto3` library installed and have AWS credentials properly configured for this code to work.
+
+========#
+
+To make a cURL request for uploading files present in remote network Windows machine using the `-F` option via a shell script, you can follow these steps:
+
+1. Install cURL if it is not already installed on your system. You can check if it is installed by running `curl --version` in the terminal. If it not installed, you can it using the package manager for your operating system.
+
+2. Create a shell script file (e.g., `upload.sh`) and open it in a text editor.
+
+3. Add the following code to the script:
+
+```bash
+#!/bin/bash
+
+# Set the remote Windows machine IP address or hostname
+remote_machine="REMOTE_MACHINE_IP_OR_HOSTNAME"
+
+# Set the remote file path where you want to upload the file
+remote_file_path="REMOTE_FILE_PATH"
+
+# Set the local file path of the file you want to upload
+local_file_path="LOCAL_FILE_PATH"
+
+# Make the cURL request to upload the file
+curl -F "file=@$local_file_path" "smb://$remote_machine/$remote_file_path"
+```
+
+Make sure to replace `REMOTE_MACHINE_IP_OR_HOSTNAME` with the IP address or hostname of the remote Windows machine, `REMOTE_FILE_PATH` with the desired file path on the remote machine, and `LOCAL_FILE_PATH` with the local file path of the file you want to upload.
+
+4. Save the script file and exit the text editor.
+
+5. Make the script executable by running the following command in the terminal:
+
+```bash
+chmod +x upload.sh
+```
+
+6. Run the script by executing the following command:
+
+```bash
+./upload.sh
+```
+
+The script will use cURL to upload the file from your local machine to the specified remote Windows machine using the `-F` option.
+
+###=====
+
+
+To read files for a particular date range on a remote Windows machine using a shell script, you can use the `smbclient` command-line tool. Here's an example script:
+
+```bash
+#!/bin/bash
+
+# Set the remote machine details
+remote_machine="192.168.1.100"
+remote_username="username"
+remote_password="password"
+
+# Set the date range
+start_date="2022-01-01"
+end_date="2022-01-31"
+
+# Connect to the remote machine and list files
+smbclient "//${remote_machine}/share" -U "${remote_username}%${remote_password}" -c "ls" | while read -r line; do
+    # Extract the file name and modification date
+    filename=$(echo "$line" | awk '{print $1}')
+    mod_date=$(echo "$line" | awk '{print $2}')
+
+    # Check if the file is within the date range
+    if [[ "$mod_date" >= "$start_date" && "$mod_date" <= "$end_date" ]]; then
+        # Read the file content
+        smbclient "//${remote_machine}/share" -U "${remote_username}%${remote_password}" -c "get "$filename" -" > "$filename"
+        echo "Read file: $filename"
+    fi
+done
+```
+
+Make sure to replace `192.168.1.100`, `username`, and `password` with the appropriate remote machine details. Also, adjust the `start_date` and `end_date` variables to define your desired date range.
+
+This script connects to the remote machine using the `smbclient` command, lists all files in the shared folder, and then iterates over each file. It extracts the file name and modification date using `awk` and checks if the modification date falls within the specified date range. If it does, the script uses `smbclient` to read the file content and saves it locally with the same filename. Finally, it prints a message for each file read.
+
+Note: Ensure that you have the `smbclient` package installed on your system before running this script.
+
+
+====####
+
+bash
+#!/bin/bash
+
+# Network Windows machine details
+USERNAME="your_username"
+PASSWORD="your_password"
+WORKGROUP="your_workgroup"
+SERVER="network_server"
+SHARE="shared_folder"
+
+# Connect to the network Windows machine and list files
+smbclient -U "${USERNAME}%${PASSWORD}" -W "${WORKGROUP}" -L "${SERVER}"
+
+# Read a specific file from the network Windows machine
+smbclient -U "${USERNAME}%${PASSWORD}" -W "${WORKGROUP}" "//${SERVER}/${SHARE}" -c "get file.txt"
+
+
+
+=====###
+
+
+To unzip a gz file and extract only the text data from .txt files while ignoring other file types, you can use the `tarfile` module in Python. Here's an example:
+
+```python
+import tarfile
+import os
+
+def extract_text_from_gz(file_path):
+    with tarfile.open(file_path, 'r:gz') as tar:
+        for member in tar.getmembers():
+            if os.path.splitext(member.name)[1] == '.txt':
+                file = tar.extractfile(member)
+                text_data = file.read().decode('utf-8')
+                print(text_data)
+                # process the text data further as needed
+
+# Usage example
+gz_file_path = '/path/to/file.gz'
+extract_text_from_gz(gz_file_path)
+```
+
+In this example, we use the `tarfile` module to open the gz file and iterate over its members. For each member, we check if the file extension is `.txt` using `os.path.splitext(member.name)[1]`. If it is a text file, we extract the file using `tar.extractfile(member)`, read its contents, decode them using the appropriate encoding (e.g., `utf-8`), and process the text data further as needed.
+
+You can modify the code inside the `if` condition to save the text data to a file, perform additional processing, or handle it according to your requirements.
+
+======###
+
+To unzip a gz file and extract only the text data using Python, you can use the `gzip` module. Here's an example:
+
+```python
+import gzip
+
+def extract_text_from_gz(file_path):
+    with gzip.open(file_path, 'rt') as gz_file:
+        text_data = gz_file.read()
+    return text_data
+
+# Usage example
+gz_file_path = '/path/to/file.gz'
+text_data = extract_text_from_gz(gz_file_path)
+print(text_data)
+```
+
+In this example, we define a function `extract_text_from_gz` that takes the path to the gz file as input. The function opens the gz file using `gzip.open` with the `'rt'` mode to read it as text. The `read()` method is then used to extract the text data from the gz file.
+
+You can call this function by providing the path to your gz file, and it will return the extracted text data as a string. Feel free to modify the code according to your specific requirements, such as saving the extracted text data to a file or processing it further.
+
+
+
+======#####
+
+
+
+Could we upload gz file as data-binary from a remote machine using curl? If so how to process this curl request and get the request gz file data and name and date using flask and unzip gz as buffer and extract txt file buffer and convert to parquet puffer and upload parquet buffer to s3 using Python ?
+
+Yes, you can upload a gz file as `data-binary` from a remote machine using curl. Here's an example of how you can modify the curl command:
+
+```bash
+curl -X POST -H "Content-Type: application/octet-stream" \
+     -H "name: $name" -H "date: $date" \
+     --data-binary "@http://example.com/remote-file.gz" http://example.com/upload
+```
+
+In this example, we're using `--data-binary` to specify the remote file's URL directly with `@http://example.com/remote-file.gz`. Replace the URL with the actual URL of the remote gz file.
+
+To process this curl request in Flask and handle the gz file as a buffer, you can modify the Flask app code as follows:
+
+```python
+from flask import Flask, request
+import gzip
+import shutil
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+import boto3
+
+app = Flask(__name__)
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    name = request.headers.get('name')
+    date = request.headers.get('date')
+    file = request.data
+
+    # Unzip the gz file from buffer and extract the txt file
+    with gzip.GzipFile(fileobj=file) as gz_file:
+        txt_buffer = gz_file.read()
+
+    # Convert txt buffer to parquet
+    df = pd.read_csv(pd.compat.StringIO(txt_buffer.decode('utf-8')))
+    table = pa.Table.from_pandas(df)
+    parquet_buffer = pa.BufferOutputStream()
+    pq.write_table(table, parquet_buffer)
+
+    # Upload parquet buffer to S3
+    s3_bucket = 'your-s3-bucket'
+    s3_key = f'path/in/s3/{name}.parquet'
+    s3_client = boto3.client('s3')
+    s3_client.upload_fileobj(parquet_buffer.getvalue(), s3_bucket, s3_key)
+
+    return 'Success'
+
+if __name__ == '__main__':
+    app.run()
+```
+
+In this updated Flask app code, we use `gzip.GzipFile` to create a GzipFile object from the gz file buffer. We then read the contents of the gz file using `gz_file.read()` and store it in the `txt_buffer`. We convert the txt buffer to a Pandas DataFrame and then to a Parquet buffer using PyArrow.
+
+Finally, we upload the Parquet buffer to an S3 bucket using the `boto3` library's `upload_fileobj` method, passing `parquet_buffer.getvalue()` as the file-like object.
+
+Remember to customize the S3 bucket details and any other parameters according to your specific requirements.
+
+
+
+====##
+
+To search files in S3 with subfolder names as dates and filter the parquet files within a specific date range, you can use the boto3 library in Python. Here's an example of how you can achieve this:
+
+1. Install the required libraries:
+```python
+pip install boto3
+pip install pyarrow
+```
+
+2. Import the necessary libraries:
+```python
+import boto3
+import pyarrow.parquet as pq
+import pyarrow as pa
+from datetime import datetime
+```
+
+3. Define the S3 bucket name and the date range:
+```python
+bucket_name = 'your_bucket_name'
+start_date = datetime.strptime('2022-01-01', '%Y-%m-%d')
+end_date = datetime.strptime('2022-01-31', '%Y-%m-%d')
+```
+
+4. Create a function to search for parquet files within the specified date range:
+```python
+def search_parquet_files(bucket, prefix, start_date, end_date):
+    s3 = boto3.client('s3')
+    paginator = s3.get_paginator('list_objects_v2')
+    operation_parameters = {'Bucket': bucket, 'Prefix': prefix}
+    page_iterator = paginator.paginate(**operation_parameters)
+
+    for page in page_iterator:
+        if 'Contents' in page:
+            for file in page['Contents']:
+                file_key = file['Key']
+                file_date = datetime.strptime(file_key.split('/')[-2], '%Y-%m-%d')
+                if start_date <= file_date <= end_date and file_key.endswith('.parquet'):
+                    yield file_key
+```
+
+5. Create a function to perform the lookup and write the matched rows to the result parquet file:
+```python
+def lookup_and_write_result(bucket, file_key, lookup_field, result_file):
+    s3 = boto3.client('s3')
+    obj = s3.get_object(Bucket=bucket, Key=file_key)
+    table = pq.read_table(obj['Body'])
+
+    # Perform the lookup on the desired field
+    result_table = table.filter(pa.field(lookup_field) == 'desired_value')
+
+    # Write the matched rows to the result parquet file
+    pq.write_table(result_table, result_file)
+```
+
+6. Iterate through the filtered parquet files and perform the lookup:
+```python
+for file_key in search_parquet_files(bucket_name, '', start_date, end_date):
+    lookup_and_write_result(bucket_name, file_key, 'lookup_field_name', 'result.parquet')
+```
+
+Make sure to replace `'your_bucket_name'` with the actual name of your S3 bucket and adjust the lookup field and desired value according to your requirements.
+
+Note: This code assumes that your parquet files are stored directly under the date subfolders in S3. If your files are stored in a different structure, you may need to modify the code accordingly.
+
+
+=========#
+To search files in an S3 bucket with subfolder names as dates and perform a search for files within a date range using Python, you can use the `boto3` library, which is the official AWS SDK for Python. Here's an example code snippet that demonstrates this:
+
+```python
+import boto3
+from datetime import datetime, timedelta
+
+def search_files_in_date_range(bucket_name, start_date, end_date):
+    s3_client = boto3.client('s3')
+
+    # Convert start and end dates to datetime objects
+    start_date = datetime.strptime(start_date, '%Y-%m-%d')
+    end_date = datetime.strptime(end_date, '%Y-%m-%d')
+
+    # Generate a list of dates within the range
+    date_range = [start_date + timedelta(days=x) for x in range((end_date - start_date).days + 1)]
+
+    # Iterate over each date in the range
+    for date in date_range:
+        # Convert date to folder name format (YYYY-mm-dd)
+        folder_name = date.strftime('%Y-%m-%d')
+
+        # List objects in the folder
+        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=folder_name)
+
+        # Check if any objects are found
+        if 'Contents' in response:
+            # Iterate over each object in the folder
+            for obj in response['Contents']:
+                # Print the object key (file path)
+                print(obj['Key'])
+
+# Usage example
+bucket_name = 'your-bucket-name'
+start_date = '2022-01-01'
+end_date = '2022-01-05'
+
+search_files_in_date_range(bucket_name, start_date, end_date)
+```
+
+Make sure to replace `'your-bucket-name'` with the actual name of your S3 bucket. Also, provide the desired start and end dates in the `start_date` and `end_date` variables, respectively. The code will list the object keys (file paths) for all files within the specified date range.
+
+===##
+
+s3 repo search for date range of files and do lookup
+
+
+To read Parquet files from a start date to an end date within S3 repo subfolders, and then filter and write the matched rows to a new Parquet file using Python, you can follow these steps:
+
+1. Install the necessary libraries:
+   ```python
+   pip install pyarrow
+   pip install s3fs
+   ```
+
+2. Import the required libraries:
+   ```python
+   import pyarrow.parquet as pq
+   import s3fs
+   import pandas as pd
+   ```
+
+3. Define the start and end dates:
+   ```python
+   start_date = '2022-01-01'
+   end_date = '2022-02-28'
+   ```
+
+4. Set up the S3 file system:
+   ```python
+   fs = s3fs.S3FileSystem()
+   bucket_name = 'your_bucket_name'
+   s3_folder = 'your_folder_path'
+   ```
+
+5. Get the list of files within the specified date range:
+   ```python
+   file_list = fs.glob(f's3://{bucket_name}/{s3_folder}/*/*.parquet')
+   filtered_files = [file for file in file_list if start_date <= file.split('/')[-2] <= end_date]
+   ```
+
+6. Read and filter the Parquet files:
+   ```python
+   matched_rows = []
+   for file in filtered_files:
+       table = pq.read_table(f's3://{bucket_name}/{file}', filesystem=fs)
+       df = table.to_pandas()
+       matched_rows.append(df[df['field_name'] == 'desired_value'])
+   matched_df = pd.concat(matched_rows)
+   ```
+
+7. Write the matched rows to a new Parquet file:
+   ```python
+   output_file = 'matched_rows.parquet'
+   pq.write_table(
+       pa.Table.from_pandas(matched_df),
+       f's3://{bucket_name}/{output_file}',
+       filesystem=fs
+   )
+   ```
+
+Make sure to replace `'your_bucket_name'` and `'your_folder_path'` with your actual S3 bucket name and folder path. Also, modify `'field_name'` and `'desired_value'` to match the specific field and value you want to filter for.
+
+This code will read all Parquet files within the specified date range, filter the rows based on the desired field and value, and write the matched rows to a new Parquet file.
+
+=====####
+
+To list files in a folder with a specified modified date range using the `find` command in a shell script, you can use the following script:
+
+```shell
+#!/bin/bash
+
+# Set the start and end dates in the desired format
+start_date="2022-01-01"
+end_date="2022-02-01"
+
+# Convert start and end dates to epoch time
+start_epoch=$(date -d "$start_date" +%s)
+end_epoch=$(date -d "$end_date" +%s)
+
+# Specify the folder path
+folder="/path/to/folder"
+
+# Use the find command to list files within the specified date range
+find "$folder" -type f -newermt "$start_date" ! -newermt "$end_date" -ls
+```
+
+Make sure to replace `/path/to/folder` with the actual path to the folder you want to search in. The script sets the start and end dates in the format `YYYY-MM-DD`, converts them to epoch time, and then uses the `find` command with the `-newermt` option to filter files modified within the specified date range. The `-ls` option is used to display detailed information about the files found.
+
+Save the script to a file (e.g., `list_files.sh`), make it executable (`chmod +x list_files.sh`), and then run it using `./list_files.sh` in the terminal.
+
+
+====###
+
+To parse a folder and its subfolders for files within a specific date range using a shell script, you can use the `find` command along with the `stat` command to get the file's modification date.
+
+Here's an example shell script that accomplishes this:
+
+```bash
+#!/bin/bash
+
+# Set the start and end month (format: YYYY-MM)
+start_month="2022-01"
+end_month="2022-03"
+
+# Function to check if a file falls within the specified date range
+is_within_date_range() {
+    file="$1"
+    start_date=$(date -d "$start_month-01" +%s)
+    end_date=$(date -d "$end_month-01 +1 month -1 day" +%s)
+    file_date=$(stat -c %Y "$file")
+
+    if [[ $file_date -ge $start_date && $file_date -le $end_date ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to parse a folder and its subfolders
+parse_folder() {
+    folder="$1"
+
+    # Loop through all files and folders in the current folder
+    for file in "$folder"/*; do
+        if [[ -d "$file" ]]; then
+            # Recursively parse subfolders
+            parse_folder "$file"
+        elif [[ -f "$file" ]]; then
+            # Check if the file falls within the specified date range
+            if is_within_date_range "$file"; then
+                echo "$file"
+            fi
+        fi
+    done
+}
+
+# Start parsing from the specified folder
+parse_folder "/path/to/folder"
+```
+
+Make sure to replace `/path/to/folder` with the actual path to the folder you want to parse. Also, update the `start_month` and `end_month` variables with the desired start and end months.
+
+This script will recursively search for files in the specified folder and its subfolders, and print the paths of the files that fall within the specified date range.
+
+=======#
+
+To upload a gz file as data and pass parameters using curl in a shell script for multiple files in a folder, you can use a loop to iterate over the files and send individual requests. Here's an example:
+
+```shell
+#!/bin/bash
+
+FOLDER_PATH="/path/to/folder"
+
+for FILE in $FOLDER_PATH/*.gz; do
+    FILENAME=$(basename $FILE)
+    DATE=$(date +%Y-%m-%d)
+    
+    curl -X POST \
+        -F "file=@$FILE" \
+        -F "name=$FILENAME" \
+        -F "date=$DATE" \
+        http://your-flask-api-endpoint
+done
+```
+
+In this script, `$FOLDER_PATH` represents the path to the folder containing the gz files. The loop iterates over each file in the folder, and for each file, it extracts the filename using `basename` and sets the current date using the `date` command. Then, it uses curl to send a POST request to your Flask API endpoint, passing the file, name, and date as form data.
+
+In your Flask application, you can receive this request and process the data using the `request` module. Here's an example of how you can handle the request and extract the file, name, and date:
+
+```python
+from flask import Flask, request
+import gzip
+import boto3
+
+app = Flask(__name__)
+
+@app.route('/', methods=['POST'])
+def upload_file():
+    file = request.files['file']
+    name = request.form.get('name')
+    date = request.form.get('date')
+
+    # Save the file to disk
+    file.save('/path/to/save/' + name)
+
+    # Unzip the gz file
+    with gzip.open('/path/to/save/' + name, 'rb') as f_in:
+        with open('/path/to/save/' + name[:-3], 'wb') as f_out:
+            f_out.write(f_in.read())
+
+    # Upload the unzipped file to S3
+    s3 = boto3.client('s3')
+    s3.upload_file('/path/to/save/' + name[:-3], 'your-bucket-name', name[:-3])
+
+    return 'File uploaded successfully.'
+
+if __name__ == '__main__':
+    app.run()
+```
+
+In this Flask application, the route `/` is defined to handle the POST request. The file, name, and date are extracted from the request using the `request.files` and `request.form` attributes. The file is then saved to disk, gzipped file is unzipped, and the unzipped file is uploaded to an S3 bucket using the `boto3` library.
+
+Please note that you will need to modify the file paths and S3 bucket name in the code to match your specific setup.
+
+
+====#
+
+To make a curl request to upload a file as data-binary and pass other data values like name and date, you can use the following command:
+
+```bash
+curl -X POST -F 'file=@/path/to/file' -F 'name=John' -F 'date=2022-01-01' http://localhost:5000/upload
+```
+
+This command uploads the file located at `/path/to/file` and includes the additional form fields `name` and `date` with their respective values.
+
+To read this request in a Python Flask request, you can use the `request` object provided by Flask. Here's an example of how you can access the uploaded file and the form fields:
+
+```python
+from flask import Flask, request
+
+app = Flask(__name__)
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    file = request.files['file']  # Access the uploaded file
+    name = request.form['name']   # Access the 'name' form field
+    date = request.form['date']   # Access the 'date' form field
+
+    # Process the uploaded file and form fields
+    # ...
+
+    return 'File uploaded successfully'
+
+if __name__ == '__main__':
+    app.run()
+```
+
+In the above example, the `request.files` dictionary is used to access the uploaded file, and the `request.form` dictionary is used to access the form fields. The keys `'file'`, `'name'`, and `'date'` correspond to the names used in the curl command.
+
+You can customize the route and field names according to your requirements.
+
+
+#######
+
+Certainly! Here's an example of how you can send and receive gzipped data using Python and the `requests` library:
+
+```python
+import requests
+import gzip
+
+# Send a gzipped file to a remote server
+def send_gzipped_data(url, data):
+    headers = {'Content-Encoding': 'gzip'}
+    gzipped_data = gzip.compress(data.encode())
+    response = requests.post(url, headers=headers, data=gzipped_data)
+    return response
+
+# Receive gzipped data from a remote server
+def receive_gzipped_data(url):
+    response = requests.get(url)
+    gzipped_data = response.content
+    data = gzip.decompress(gzipped_data).decode()
+    return data
+
+# Example usage
+url = 'https://example.com/api'
+data_to_send = 'Hello, world!'
+response = send_gzipped_data(url, data_to_send)
+received_data = receive_gzipped_data(url)
+print(received_data)
+```
+
+In this example, we are using the `requests` library to send and receive HTTP requests. We set the `Content-Encoding` header to `gzip` when sending the data to indicate that the data is gzipped. On the receiving end, we extract the gzipped data from the response and decompress it using the `gzip` module.
+
+=====#
+
+To get a gz file as buffer data into a variable using a shell script, you can use the following command:
+
+```
+variable=$(cat filename.gz | base64)
+```
+
+This command will read the contents of the gz file, encode it in base64 format, and store it in the variable. You can then use the variable as needed in your script.
+
+
+===#
+
+To unzip gz data buffer as txt data buffer using Python, you can use the `gzip` module. Here's an example:
+
+```python
+import gzip
+
+# Assuming you have the gz data buffer stored in a variable called gz_data_buffer
+
+# Create a BytesIO object to hold the gz data buffer
+gz_file = gzip.GzipFile(fileobj=gz_data_buffer)
+
+# Read the uncompressed text data buffer
+txt_data_buffer = gz_file.read()
+
+# Print the uncompressed text data
+print(txt_data_buffer)
+```
+
+In this example, we use the `gzip.GzipFile` class to create a file-like object from the gz data buffer. We then read the uncompressed text data from this file-like object. Finally, we can use the `txt_data_buffer` variable as needed in your Python script.
+
+=====#
+
+python
+import pandas as pd
+import boto3
+from io import BytesIO
+
+# Assuming you have a pandas DataFrame called 'data' containing your data
+
+# Convert DataFrame to Parquet format
+parquet_buffer = BytesIO()
+data.to_parquet(parquet_buffer, index=False)
+
+# Set up S3 client
+s3 = boto3.client('s3')
+
+# Define bucket and file path in S3
+bucket_name = 'your-bucket-name'
+file_name = 'data.parquet'
+
+# Upload Parquet data to S3
+s3.upload_fileobj(parquet_buffer, bucket_name, file_name)
+
+# Print the S3 object URL
+s3_url = f"https://{bucket_name}.s3.amazonaws.com/{file_name}"
+print("Uploaded data to S3:", s3_url)
+
+
+
+=====#
+
+
+Certainly! Here's an updated version of the shell script that recursively searches for zip files in a directory for a particular month and year, extracts them, and fetches the data within:
+
+```shell
+#!/bin/bash
+
+# Specify the directory to search
+directory="/path/to/directory"
+
+# Specify the target month and year (format: YYYY-MM)
+target_month="2023-09"
+
+# Get the start and end dates of the target month
+start_date="${target_month}-01"
+end_date=$(date -d "${target_month}-01 +1 month -1 day" +%Y-%m-%d)
+
+# Find zip files within the target month recursively
+files=$(find "$directory" -type f -name "*.zip" -newermt "$start_date" ! -newermt "$end_date + 1 day")
+
+# Loop through each zip file
+for file in $files; do
+  # Extract the file to a temporary directory
+  temp_dir=$(mktemp -d)
+  unzip "$file" -d "$temp_dir"
+
+  # Fetch and process the data
+  # Replace the echo statement with your desired data processing logic
+  echo "Fetching data from $file"
+  cat "$temp_dir/data.txt"  # Example: Assuming the data is stored in a file called data.txt
+
+  # Clean up the temporary directory
+  rm -rf "$temp_dir"
+done
+```
+
+Make sure to replace `/path/to/directory` with the actual directory path you want to search. Also, modify the `target_month` variable to specify the desired month and year in the format `YYYY-MM`. Adjust the data processing logic within the loop as per your specific requirements.
+
+
+
+====###
+
+
+
+Certainly! Here's a sample shell script that recursively searches for zip files in a directory, identifies the files from the previous date, extracts them, and fetches the data within:
+
+```shell
+#!/bin/bash
+
+# Specify the directory to search
+directory="/path/to/directory"
+
+# Get the previous date in YYYY-MM-DD format
+previous_date=$(date -d "yesterday" +%Y-%m-%d)
+
+# Find zip files from the previous date recursively
+files=$(find "$directory" -type f -name "*.zip" -newermt "$previous_date" ! -newermt "$previous_date + 1 day")
+
+# Loop through each zip file
+for file in $files; do
+  # Extract the file to a temporary directory
+  temp_dir=$(mktemp -d)
+  unzip "$file" -d "$temp_dir"
+
+  # Fetch and process the data
+  # Replace the echo statement with your desired data processing logic
+  echo "Fetching data from $file"
+  cat "$temp_dir/data.txt"  # Example: Assuming the data is stored in a file called data.txt
+
+  # Clean up the temporary directory
+  rm -rf "$temp_dir"
+done
+```
+
+Make sure to replace `/path/to/directory` with the actual directory path you want to search. Additionally, modify the data processing logic according to your specific requirements.
+
+
+
+
+
+
+
+====#
+python
+import boto3
+
+def sync_s3_subfolders(source_bucket, source_folder, destination_bucket, destination_folder):
+    s3_client = boto3.client('s3')
+
+    # Retrieve the list of objects in the source subfolder
+    response = s3_client.list_objects_v2(Bucket=source_bucket, Prefix=source_folder)
+    source_objects = response['Contents']
+
+    # Iterate through the objects and copy them to the destination subfolder
+    for obj in source_objects:
+        key = obj['Key']
+        destination_key = key.replace(source_folder, destination_folder, 1)  # Replace source folder with destination folder
+        copy_source = {'Bucket': source_bucket, 'Key': key}
+        s3_client.copy_object(CopySource=copy_source, Bucket=destination_bucket, Key=destination_key)
+
+    print("Data synchronization completed.")
+
+# Usage: Provide the names of the source and destination buckets, along with their subfolder paths
+source_bucket_name = 'your-source-bucket'
+source_folder_name = 'your-source-subfolder/'
+destination_bucket_name = 'your-destination-bucket'
+destination_folder_name = 'your-destination-subfolder/'
+
+sync_s3_subfolders(source_bucket_name, source_folder_name, destination_bucket_name, destination_folder_name)
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+python
+import os
+import boto3
+
+def upload_files_to_s3(bucket_name, directory_path):
+    s3_client = boto3.client('s3')
+
+    for root, dirs, files in os.walk(directory_path):
+        for file in files:
+            file_path = os.path.join(root, file)
+            s3_key = os.path.relpath(file_path, directory_path)
+            s3_client.upload_file(file_path, bucket_name, s3_key)
+
+# Example usage
+bucket_name = 'your-bucket-name'
+directory_path = '/path/to/your/directory'
+
+upload_files_to_s3(bucket_name, directory_path)
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+python
+import os
+import datetime
+import boto3
+
+def create_subfolder_with_date_format(bucket_name, file_path):
+    s3_client = boto3.client('s3')
+    
+    # Get the file's modification timestamp
+    file_timestamp = os.path.getmtime(file_path)
+    
+    # Convert the timestamp to datetime object
+    file_datetime = datetime.datetime.fromtimestamp(file_timestamp)
+    
+    # Generate the desired date format
+    date_format = file_datetime.strftime('%Y-%m-%d')
+    
+    # Create the subfolder using the date format
+    subfolder_path = f'{date_format}/'
+    s3_client.put_object(Bucket=bucket_name, Key=subfolder_path)
+    
+# Example usage
+bucket_name = 'your-bucket-name'
+file_path = '/path/to/your/file.txt'
+
+create_subfolder_with_date_format(bucket_name, file_path)
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+python
+import pyarrow.parquet as pq
+
+# Define the path to the input Parquet file
+input_file = 'input.parquet'
+
+# Define the path to the output Parquet file
+output_file = 'output.parquet'
+
+# Define the value you want to lookup
+lookup_value = 'your_lookup_value'
+
+# Read the input Parquet file
+table = pq.read_table(input_file)
+
+# Convert the Parquet table to a Pandas DataFrame
+df = table.to_pandas()
+
+# Filter the DataFrame based on the lookup value
+matched_rows = df[df['column_name'] == lookup_value]
+
+# Convert the filtered DataFrame back to a PyArrow Table
+output_table = pa.Table.from_pandas(matched_rows)
+
+# Write the output table to the output Parquet file
+pq.write_table(output_table, output_file)
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+To iterate and synchronize more than 1000 objects using a paginator from one S3 subfolder to another S3 subfolder using `boto3` in Python, you can follow these steps:
+
+1. Import the necessary libraries:
+
+```python
+import boto3
+```
+
+2. Create an S3 client:
+
+```python
+s3 = boto3.client('s3')
+```
+
+3. Use the `list_objects_v2` method to get a list of all objects in the source subfolder. Set the `Prefix` parameter to the source subfolder name:
+
+```python
+response = s3.list_objects_v2(Bucket='your_bucket_name', Prefix='source_subfolder/')
+```
+
+4. Check if the response contains any objects. If the response has more than 1000 objects, it means there are more objects that need to be paginated. Otherwise, you can proceed to the next step:
+
+```python
+if 'Contents' in response:
+    objects = response['Contents']
+    if response['KeyCount'] > 1000:
+        paginator = s3.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket='your_bucket_name', Prefix='source_subfolder/')
+        for page in pages:
+            objects.extend(page['Contents'])
+```
+
+5. Iterate through each object and copy it to the destination subfolder using the `copy_object` method:
+
+```python
+for obj in objects:
+    source_key = obj['Key']
+    destination_key = source_key.replace('source_subfolder/', 'destination_subfolder/')
+    s3.copy_object(Bucket='your_bucket_name', CopySource={'Bucket': 'your_bucket_name', 'Key': source_key}, Key=destination_key)
+```
+
+Note: Replace `your_bucket_name`, `source_subfolder`, and `destination_subfolder` with your actual bucket name, source subfolder, and destination subfolder, respectively.
+
+This code will iterate and synchronize more than 1000 objects from one S3 subfolder to another S3 subfolder using the `boto3` library in Python.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------7777
+
+python
+import boto3
+
+s3 = boto3.client('s3')
+
+def list_subfolders(bucket_name, prefix):
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix, Delimiter='/')
+    subfolders = [common_prefix['Prefix'].split('/')[0] for common_prefix in response.get('CommonPrefixes', [])]
+    return subfolders
+
+bucket_name = 'your_bucket_name'
+prefix = 'your_folder_prefix/'
+
+subfolders = list_subfolders(bucket_name, prefix)
+print(subfolders)
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+python
+import boto3
+
+s3 = boto3.client('s3')
+
+def list_subfolders(bucket_name, prefix):
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix, Delimiter='/')
+
+    subfolders = []
+    for common_prefix in response.get('CommonPrefixes', []):
+        subfolder_path = common_prefix['Prefix']
+        subfolder_name = subfolder_path.strip('/').split('/')[-1]
+        subfolders.append(subfolder_name)
+
+    return subfolders
+
+bucket_name = 'your_bucket_name'
+prefix = 'your_parent_folder/subfolder/'
+
+subfolders = list_subfolders(bucket_name, prefix)
+print(subfolders)
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+bash
+#!/bin/bash
+
+# Set the directory to list files from
+directory="/path/to/directory"
+
+# Iterate over files in the directory
+for file in "$directory"/*
+do
+  # Check if the file is a regular file
+  if [ -f "$file" ]
+  then
+    # Get the file's generated date
+    generated_date=$(stat -c %y "$file" | awk '{print $1}')
+    
+    # Print the file name and generated date
+    echo "File: $file, Generated Date: $generated_date"
+  fi
+done
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+python
+pip install pyarrow
+pip install s3fs
+
+python
+import pyarrow.parquet as pq
+import pyarrow as pa
+import s3fs
+
+
+python
+bucket_name = 'your_bucket_name'
+folder_paths = ['folder1/', 'folder2/', ...]  # Add the desired folder paths
+
+python
+lookup_value = 'your_lookup_value'
+
+python
+matched_data = []
+
+python
+s3 = s3fs.S3FileSystem()
+
+for folder_path in folder_paths:
+    full_path = f'{bucket_name}/{folder_path}'
+    files = s3.glob(f'{full_path}*.parquet')
+    
+    for file in files:
+        with s3.open(file, 'rb') as f:
+            table = pq.read_table(f)
+            df = table.to_pandas()
+            
+            # Perform the lookup on the desired field
+            matched_df = df[df['field_name'] == lookup_value]
+            
+            # Append the matched data
+            matched_data.append(matched_df)
+
+
+python
+output_df = pd.concat(matched_data)
+
+python
+output_table = pa.Table.from_pandas(output_df)
+pq.write_table(output_table, 'output.parquet')
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+===============================================
+
+python
+import boto3
+from concurrent.futures import ThreadPoolExecutor
+python
+s3 = boto3.client('s3')
+
+python
+def upload_file(file_path, bucket_name, key_prefix):
+    key = key_prefix + '/' + file_path.split('/')[-1]
+    s3.upload_file(file_path, bucket_name, key)
+
+
+python
+with ThreadPoolExecutor(max_workers=num_threads) as executor:
+    for file_path in file_paths:
+        executor.submit(upload_file, file_path, bucket_name, key_prefix)
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+================#
+
+python
+import boto3
+import pyarrow.parquet as pq
+import pyarrow as pa
+
+python
+s3 = boto3.client('s3')
+
+python
+def process_parquet_file(file_path):
+    # Download the Parquet file from S3
+    s3.download_file(bucket_name, file_path, 'temp.parquet')
+
+    # Read the Parquet file into a Pandas DataFrame
+    df = pq.read_table('temp.parquet').to_pandas()
+
+    # Perform the lookup on the desired field
+    matched_df = df[df['field_name'] == 'lookup_value']
+
+    return matched_df
+
+
+python
+matched_dfs = []
+for file_path in file_paths:
+    matched_df = process_parquet_file(file_path)
+    matched_dfs.append(matched_df)
+
+
+python
+output_df = pd.concat(matched_dfs)
+
+
+python
+output_table = pa.Table.from_pandas(output_df)
+pq.write_table(output_table, 'output.parquet')
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+python
+import os
+import boto3
+from datetime import datetime
+
+# Specify the directory path
+directory = '/path/to/directory/'
+
+# Connect to S3
+s3 = boto3.client('s3')
+
+# Get the current month
+current_month = datetime.now().strftime('%m')
+
+# Iterate through files in the directory
+for filename in os.listdir(directory):
+    file_path = os.path.join(directory, filename)
+    
+    # Check if the file's last modified month matches the current month
+    if datetime.fromtimestamp(os.path.getmtime(file_path)).strftime('%m') == current_month:
+        
+        # Upload the file to S3
+        s3.upload_file(file_path, 'your-bucket-name', filename)
+        print(f"Uploaded {filename} to S3.")
+
+
+------------—
+
+
+python
+import os
+import boto3
+from concurrent.futures import ThreadPoolExecutor
+
+# Set your AWS credentials and region
+aws_access_key_id = 'your_access_key_id'
+aws_secret_access_key = 'your_secret_access_key'
+region_name = 'your_region_name'
+
+# Set the S3 bucket name and folder path
+bucket_name = 'your_bucket_name'
+folder_path = 'your_folder_path'
+
+# Set the maximum number of workers (threads)
+max_workers = 10
+
+# Create an S3 client
+s3 = boto3.client('s3', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=region_name)
+
+
+def upload_file(file_path):
+    # Upload a file to S3
+    key = os.path.join(folder_path, os.path.basename(file_path))
+    s3.upload_file(file_path, bucket_name, key)
+    print(f"Uploaded {file_path} to S3")
+
+
+# Get a list of files in the folder
+folder = 'your_folder_path'
+file_paths = []
+for root, dirs, files in os.walk(folder):
+    for file in files:
+        file_paths.append(os.path.join(root, file))
+
+# Create a ThreadPoolExecutor
+with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    # Submit the upload tasks to the executor
+    for file_path in file_paths:
+        executor.submit(upload_file, file_path)
+
+# All tasks have been submitted, now wait for them to complete
+# The ThreadPoolExecutor automatically manages the worker threads
+
+print("All files uploaded!")
+
+
+-----------
+
+python
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+import boto3
+
+
+text_data = ['Line 1', 'Line 2', 'Line 3']  # Replace with your actual text data
+df = pd.DataFrame(text_data, columns=['TextColumn'])
+python
+table = pa.Table.from_pandas(df)
+
+python
+parquet_buffer = pa.BufferOutputStream()
+
+python
+pq.write_table(table, parquet_buffer)
+
+python
+s3_bucket_name = 'your_s3_bucket_name'
+s3_file_path = 's3_folder/parquet_file.parquet'
+s3_client = boto3.client('s3')
+parquet_buffer.seek(0)  # Reset the buffer position
+s3_client.upload_fileobj(parquet_buffer, s3_bucket_name, s3_file_path)
+
+
+-----------
+python
+import os
+import zipfile
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+import boto3
+from multiprocessing import Pool
+
+def extract_and_process_zip(zip_file):
+    extract_folder_path = 'path_to_extract_folder'  # Replace with your desired extract folder path
+    zip_file_path = os.path.join('path_to_zip_files', zip_file)  # Replace with the path to your zip files directory
+    
+    # Extract the zip file
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_folder_path)
+    
+    # Read the data from the extracted file
+    extracted_file_path = os.path.join(extract_folder_path, 'extracted_file.txt')  # Replace with the actual extracted file path
+    df = pd.read_csv(extracted_file_path)  # Replace with the appropriate method to read your extracted data
+    
+    # Convert DataFrame to PyArrow Table
+    table = pa.Table.from_pandas(df)
+    
+    # Write Parquet data to in-memory buffer
+    parquet_buffer = pa.BufferOutputStream()
+    pq.write_table(table, parquet_buffer)
+    
+    # Upload Parquet data to S3
+    s3_bucket_name = 'your_s3_bucket_name'
+    s3_file_path = f's3_folder/{zip_file}.parquet'
+    s3_client = boto3.client('s3')
+    
+    parquet_buffer.seek(0)  # Reset the buffer position
+    s3_client.upload_fileobj(parquet_buffer, s3_bucket_name, s3_file_path)
+    
+    # Clean up extracted files if needed
+    os.remove(extracted_file_path)
+
+# Get a list of zip files in the directory
+zip_files_directory = 'path_to_zip_files_directory'  # Replace with the path to your zip files directory
+zip_files = [f for f in os.listdir(zip_files_directory) if f.endswith('.zip')]
+
+# Process zip files in parallel
+num_processes = min(len(zip_files), os.cpu_count())  # Adjust the number of processes as per your system's capacity
+with Pool(num_processes) as pool:
+    pool.map(extract_and_process_zip, zip_files)
+
+
+-------
+
+python
+import zipfile
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+import boto3
+from multiprocessing import Pool
+import io
+
+def process_zip(zip_file):
+    s3_bucket_name = 'your_s3_bucket_name'
+    s3_folder = 's3_folder'
+    s3_client = boto3.client('s3')
+
+    with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+        for file_name in zip_ref.namelist():
+            if file_name.endswith('.txt'):
+                with zip_ref.open(file_name, 'r') as file:
+                    # Read the data from the file within the zip
+                    data = file.read().decode('utf-8')
+                    
+                    # Process the data (example: convert to DataFrame)
+                    df = pd.DataFrame({'Data': [data]})
+                    
+                    # Convert DataFrame to PyArrow Table
+                    table = pa.Table.from_pandas(df)
+                    
+                    # Write Parquet data to in-memory buffer
+                    parquet_buffer = io.BytesIO()
+                    pq.write_table(table, parquet_buffer)
+                    
+                    # Upload Parquet data to S3
+                    s3_file_path = f'{s3_folder}/{file_name[:-4]}.parquet'
+                    parquet_buffer.seek(0)  # Reset the buffer position
+                    s3_client.upload_fileobj(parquet_buffer, s3_bucket_name, s3_file_path)
+
+# List of zip file paths
+zip_files = ['path_to_zip_file1.zip', 'path_to_zip_file2.zip', ...]  # Replace with the actual zip file paths
+
+# Process zip files in parallel
+num_processes = min(len(zip_files), os.cpu_count())  # Adjust the number of processes as per your system's capacity
+with Pool(num_processes) as pool:
+    pool.map(process_zip, zip_files)
+
+
+========#
+
+Certainly! Here's an updated version of the code that unzips the gz file, untars the resulting file to a buffer, reads the buffer data as a txt file, and converts the txt data to a Parquet buffer using Python:
+
+```python
+import gzip
+import tarfile
+import io
+import pandas as pd
+import pyarrow as pa
+
+# Define the path to your gz file
+gz_file_path = "path/to/your/file.tar.gz"
+
+# Unzip the gz file
+with gzip.open(gz_file_path, 'rb') as gz_file:
+    tar_buffer = io.BytesIO(gz_file.read())
+
+# Extract the tar file from the buffer
+with tarfile.open(fileobj=tar_buffer, mode='r') as tar:
+    txt_file = tar.extractfile('data.txt')
+    txt_data = txt_file.read().decode()
+
+# Convert text data to a DataFrame (assuming it's in CSV format)
+df = pd.read_csv(io.StringIO(txt_data))
+
+# Write the DataFrame to a Parquet buffer
+parquet_buffer = io.BytesIO()
+table = pa.Table.from_pandas(df)
+pq.write_table(table, parquet_buffer)
+
+# Reset the buffer position to the beginning
+parquet_buffer.seek(0)
+
+# You can now use the parquet_buffer as needed
+```
+
+Make sure to replace `"path/to/your/file.tar.gz"` with the actual path to your gz file. This code unzips the gz file, untars the resulting file to a buffer, reads the buffer data as a txt file, converts it to a pandas DataFrame, and finally writes the DataFrame to a Parquet buffer named `parquet_buffer`. You can use `parquet_buffer` as needed for further processing or saving it to a file if desired.
+
+
+## tar file name
+
+python
+import gzip
+import tarfile
+import io
+
+# Define the path to your gz file
+gz_file_path = "path/to/your/file.tar.gz"
+
+# Unzip the gz file
+with gzip.open(gz_file_path, 'rb') as gz_file:
+    tar_buffer = io.BytesIO(gz_file.read())
+
+# Extract the files from the tar buffer
+with tarfile.open(fileobj=tar_buffer, mode='r') as tar:
+    for tarinfo in tar:
+        if tarinfo.isfile():
+            # Extract the file to a buffer
+            file_buffer = tar.extractfile(tarinfo).read()
+            # Get the filename of the extracted file
+            filename = tarinfo.name
+            
+            # Process the file or perform any desired operations
+            print("Extracted file:", filename)
+            print("File contents:", file_buffer)
+
+            # You can now use the filename and file_buffer as needed
+
+=========#
+
+read multiple parquet files in a s3 folder as txt data and return as gz file using Python
+
+To read multiple Parquet files from an S3 folder as text data and return them as a gzipped file using Python, you can utilize the `boto3` library for S3 operations and the `pyarrow` library for reading and converting Parquet files. Here's an example code snippet:
+
+```python
+import boto3
+import pyarrow.parquet as pq
+import gzip
+import io
+
+# Define your S3 bucket and folder path
+bucket_name = "your_bucket_name"
+folder_path = "your_folder_path"
+
+# Initialize the S3 client
+s3_client = boto3.client('s3')
+
+# List all Parquet files in the S3 folder
+response = s3_client.list_objects(Bucket=bucket_name, Prefix=folder_path)
+parquet_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.parquet')]
+
+# Read and concatenate the Parquet files as text data
+txt_data = ""
+for parquet_file in parquet_files:
+    # Read the Parquet file
+    obj = s3_client.get_object(Bucket=bucket_name, Key=parquet_file)
+    parquet_buffer = io.BytesIO(obj['Body'].read())
+    table = pq.read_table(parquet_buffer)
+    
+    # Convert to DataFrame and concatenate the text data
+    df = table.to_pandas()
+    txt_data += df.to_string(index=False)
+
+# Compress the text data as gzipped file
+gz_buffer = io.BytesIO()
+with gzip.GzipFile(fileobj=gz_buffer, mode='w') as gz_file:
+    gz_file.write(txt_data.encode('utf-8'))
+
+# Upload the gzipped file to S3
+s3_client.put_object(Body=gz_buffer.getvalue(), Bucket=bucket_name, Key="output/file.tar.gz")
+```
+
+Make sure to replace `"your_bucket_name"` with the name of your S3 bucket and `"your_folder_path"` with the path to your Parquet files within the bucket. The code lists all the Parquet files in the specified S3 folder, reads and concatenates them as text data, compresses the text data as a gzipped file, and uploads it back to S3 with the specified output file path.

@@ -1,0 +1,119 @@
+Understanding the permissions displayed by `getfacl` involves recognizing the structure and meaning of each line in the output. Here’s a detailed explanation of how to interpret these permissions:
+
+### Example Output
+```plaintext
+# file: /path/to/file_or_directory
+# owner: user
+# group: group
+user::rw-
+user:anotheruser:rwx
+group::r--
+mask::rwx
+other::r--
+default:user::rw-
+default:user:anotheruser:rwx
+default:group::r--
+default:mask::rwx
+default:other::r--
+```
+
+### Explanation of Each Line
+
+1. **File Information**:
+   ```plaintext
+   # file: /path/to/file_or_directory
+   ```
+   This line specifies the file or directory the ACLs are applied to.
+
+2. **Owner Information**:
+   ```plaintext
+   # owner: user
+   ```
+   This line shows the owner of the file or directory.
+
+3. **Group Information**:
+   ```plaintext
+   # group: group
+   ```
+   This line shows the group owner of the file or directory.
+
+4. **ACL Entries**:
+   Each ACL entry is composed of several parts: the entry type, the entity (user or group), and the permissions. Here are the common entry types and their meanings:
+
+   - **Entry for the file owner**:
+     ```plaintext
+     user::rw-
+     ```
+     This specifies the permissions for the owner of the file or directory (`rw-` means read and write).
+
+   - **Entry for a specific user**:
+     ```plaintext
+     user:anotheruser:rwx
+     ```
+     This specifies the permissions for a specific user (`anotheruser` in this case) on the file or directory (`rwx` means read, write, and execute).
+
+   - **Entry for the owning group**:
+     ```plaintext
+     group::r--
+     ```
+     This specifies the permissions for the owning group of the file or directory (`r--` means read-only).
+
+   - **Entry for a specific group**:
+     ```plaintext
+     group:anothergroup:rw-
+     ```
+     This specifies the permissions for a specific group (`anothergroup` in this case) on the file or directory (`rw-` means read and write).
+
+   - **Mask entry**:
+     ```plaintext
+     mask::rwx
+     ```
+     This specifies the maximum effective permissions for users (other than the owner) and groups. It acts as a filter for the permissions. In this case, `rwx` means that read, write, and execute permissions are allowed.
+
+   - **Entry for others**:
+     ```plaintext
+     other::r--
+     ```
+     This specifies the permissions for all other users (those who are neither the owner nor in the owning group) on the file or directory (`r--` means read-only).
+
+5. **Default ACL Entries**:
+   Default ACL entries apply only to directories and specify the default permissions for new files and subdirectories created within the directory.
+
+   - **Default entry for the file owner**:
+     ```plaintext
+     default:user::rw-
+     ```
+     This specifies the default permissions for the owner of new files or directories created within this directory (`rw-` means read and write).
+
+   - **Default entry for a specific user**:
+     ```plaintext
+     default:user:anotheruser:rwx
+     ```
+     This specifies the default permissions for a specific user (`anotheruser` in this case) on new files or directories created within this directory (`rwx` means read, write, and execute).
+
+   - **Default entry for the owning group**:
+     ```plaintext
+     default:group::r--
+     ```
+     This specifies the default permissions for the owning group of new files or directories created within this directory (`r--` means read-only).
+
+   - **Default mask entry**:
+     ```plaintext
+     default:mask::rwx
+     ```
+     This specifies the default maximum effective permissions for users (other than the owner) and groups for new files or directories created within this directory (`rwx` means read, write, and execute).
+
+   - **Default entry for others**:
+     ```plaintext
+     default:other::r--
+     ```
+     This specifies the default permissions for all other users (those who are neither the owner nor in the owning group) for new files or directories created within this directory (`r--` means read-only).
+
+### Summary of Permissions
+
+- `r` = Read permission
+- `w` = Write permission
+- `x` = Execute permission
+- `-` = No permission
+
+By understanding these elements, you can interpret and manage ACLs on your Linux filesystem effectively.

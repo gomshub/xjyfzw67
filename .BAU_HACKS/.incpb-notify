@@ -1,0 +1,319 @@
+
+#!/bin/bash
+
+# Configuration
+JIRA_URL="https://your-jira-instance/rest/api/2/search?jql=filter=YOUR_FILTER_ID"
+USERNAME="your-jira-username"
+PASSWORD="your-jira-password"
+RECIPIENT="recipient@example.com"
+SUBJECT="JIRA Issues Report"
+TEMP_JSON_FILE="/tmp/jira_issues.json"
+TEMP_HTML_FILE="/tmp/jira_issues.html"
+
+# Fetch JIRA issues
+response=$(curl -s -w "%{http_code}" -u $USERNAME:$PASSWORD -o $TEMP_JSON_FILE "$JIRA_URL")
+http_code=$(tail -n1 <<< "$response")
+
+if [ "$http_code" -ne 200 ]; then
+  echo "Error: Failed to fetch JIRA issues. HTTP Status: $http_code"
+  exit 1
+fi
+
+# Check if there are issues
+if [ ! -s $TEMP_JSON_FILE ] || [ "$(jq '.total' $TEMP_JSON_FILE)" -eq 0 ]; then
+  echo "No JIRA issues found in the filter."
+  exit 0
+fi
+
+# Generate HTML content
+cat <<EOF > $TEMP_HTML_FILE
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>JIRA Issues Report</title>
+<style>
+  body { font-family: Arial, sans-serif; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ddd; padding: 8px; }
+  th { background-color: #f2f2f2; }
+  th { text-align: left; }
+  tr:nth-child(even) { background-color: #f9f9f9; }
+  tr:hover { background-color: #ddd; }
+</style>
+</head>
+<body>
+<h1>JIRA Issues Report</h1>
+<table>
+  <thead>
+    <tr>
+      <th>JIRA Number</th>
+      <th>Status</th>
+      <th>Summary</th>
+      <th>Created Date</th>
+      <th>Assignee</th>
+      <th>Description</th>
+      <th>Last Comment</th>
+    </tr>
+  </thead>
+  <tbody>
+EOF
+
+# Append JSON data to HTML with formatted description
+jq -r '.issues[] | "<tr><td><a href=\"'$JIRA_URL'/browse/\(.key)\">\(.key)</a></td><td>\(.fields.status.name)</td><td>\(.fields.summary)</td><td>\(.fields.created)</td><td>\(.fields.assignee.displayName // "Unassigned")</td><td>\(.fields.description // "" | gsub("\n"; "<br>"))</td><td>\(.fields.comment.comments[-1].body // "No comments" | gsub("\n"; "<br>"))</td></tr>"' $TEMP_JSON_FILE >> $TEMP_HTML_FILE
+
+# Close HTML tags
+cat <<EOF >> $TEMP_HTML_FILE
+  </tbody>
+</table>
+</body>
+</html>
+EOF
+
+# Send email if there are issues
+if [ -s $TEMP_HTML_FILE ]; then
+  cat $TEMP_HTML_FILE | mailx -a 'Content-Type: text/html' -s "$SUBJECT" $RECIPIENT
+fi
+
+# Clean up
+rm -f $TEMP_JSON_FILE $TEMP_HTML_FILE
+
+
+
+
+
+.===#=
+Certainly! Below is a detailed guideline and shell script to achieve the described requirements.
+
+### Guidelines:
+
+1. **Fetch Data from JIRA API:**
+   - Use `curl` to interact with the JIRA REST API.
+   - Handle errors effectively by checking the HTTP status code.
+
+2. **Process JSON Data:**
+   - Parse the JSON response to extract the required fields (JIRA number, status, summary, created date, assignee, description, last comment).
+
+3. **Generate HTML:**
+   - Create an HTML file with CSS styles for an attractive layout.
+   - Ensure that the incident numbers are hyperlinked.
+
+4. **Send Email:**
+   - Use `sendmail` or `mailx` to send the email if there are issues found in the filter.
+
+5. **Error Handling:**
+   - Implement robust error handling for the `curl` request.
+
+### Shell Script:
+
+```sh
+#!/bin/bash
+
+# Configuration
+JIRA_URL="https://your-jira-instance/rest/api/2/search?jql=filter=YOUR_FILTER_ID"
+USERNAME="your-jira-username"
+PASSWORD="your-jira-password"
+RECIPIENT="recipient@example.com"
+SUBJECT="JIRA Issues Report"
+TEMP_JSON_FILE="/tmp/jira_issues.json"
+TEMP_HTML_FILE="/tmp/jira_issues.html"
+
+# Fetch JIRA issues
+response=$(curl -s -w "%{http_code}" -u $USERNAME:$PASSWORD -o $TEMP_JSON_FILE "$JIRA_URL")
+http_code=$(tail -n1 <<< "$response")
+
+if [ "$http_code" -ne 200 ]; then
+  echo "Error: Failed to fetch JIRA issues. HTTP Status: $http_code"
+  exit 1
+fi
+
+# Parse JSON and generate HTML
+jq -r '.issues[] | {key: .key, status: .fields.status.name, summary: .fields.summary, created: .fields.created, assignee: (.fields.assignee.displayName // "Unassigned"), description: (.fields.description // ""), lastComment: (.fields.comment.comments[-1].body // "No comments")}' $TEMP_JSON_FILE > $TEMP_HTML_FILE
+
+# Check if there are issues
+if [ ! -s $TEMP_HTML_FILE ]; then
+  echo "No JIRA issues found in the filter."
+  exit 0
+fi
+
+# Generate HTML content
+cat <<EOF > $TEMP_HTML_FILE
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>JIRA Issues Report</title>
+<style>
+  body { font-family: Arial, sans-serif; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ddd; padding: 8px; }
+  th { background-color: #f2f2f2; }
+  th { text-align: left; }
+  tr:nth-child(even) { background-color: #f9f9f9; }
+  tr:hover { background-color: #ddd; }
+</style>
+</head>
+<body>
+<h1>JIRA Issues Report</h1>
+<table>
+  <thead>
+    <tr>
+      <th>JIRA Number</th>
+      <th>Status</th>
+      <th>Summary</th>
+      <th>Created Date</th>
+      <th>Assignee</th>
+      <th>Description</th>
+      <th>Last Comment</th>
+    </tr>
+  </thead>
+  <tbody>
+EOF
+
+# Append JSON data to HTML
+jq -r '.[] | "<tr><td><a href=\"'$JIRA_URL'/browse/\(.key)\">\(.key)</a></td><td>\(.status)</td><td>\(.summary)</td><td>\(.created)</td><td>\(.assignee)</td><td>\(.description)</td><td>\(.lastComment)</td></tr>"' $TEMP_HTML_FILE >> $TEMP_HTML_FILE
+
+# Close HTML tags
+cat <<EOF >> $TEMP_HTML_FILE
+  </tbody>
+</table>
+</body>
+</html>
+EOF
+
+# Send email if there are issues
+if [ -s $TEMP_HTML_FILE ]; then
+  cat $TEMP_HTML_FILE | mailx -a 'Content-Type: text/html' -s "$SUBJECT" $RECIPIENT
+fi
+
+# Clean up
+rm -f $TEMP_JSON_FILE $TEMP_HTML_FILE
+```
+
+### Detailed Steps:
+
+1. **Configuration:**
+   - Set the JIRA API URL, credentials, recipient email, and temporary file paths.
+
+2. **Fetch Data:**
+   - Use `curl` to fetch data from the JIRA API.
+   - Capture the HTTP status code and handle errors accordingly.
+
+3. **Process JSON Data:**
+   - Use `jq` to parse the JSON response and extract required fields.
+   - Save the parsed data in a temporary HTML file.
+
+4. **Generate HTML:**
+   - Start with HTML boilerplate including CSS for styling.
+   - Use `jq` to dynamically append table rows with JIRA issue details.
+   - Ensure JIRA numbers are hyperlinked.
+
+5. **Send Email:**
+   - If the HTML file is not empty (i.e., there are issues), use `mailx` to send the email with the HTML content.
+
+6. **Clean Up:**
+   - Remove temporary files to keep the system clean.
+
+### Notes:
+- Ensure `jq` is installed on your system (`sudo apt-get install jq`).
+- Ensure `mailx` is installed and configured to send emails (`sudo apt-get install mailx`).
+
+This script should be run on a system with access to the JIRA instance and configured to send emails. Adjust paths, credentials, and JIRA URL according to your specific setup.
+
+
+
+
+=#=#=##
+
+You can enhance the HTML formatting in the script to create an attractive page with headers, table borders, and colspans. Here's an adapted version of the shell script with improved HTML formatting:
+
+```bash
+#!/bin/bash
+
+# JIRA credentials
+JIRA_USERNAME="your_username"
+JIRA_PASSWORD="your_password"
+JIRA_BASE_URL="https://your_company.atlassian.net"
+FILTER_ID="12345"  # Replace with your filter ID
+
+# API endpoint to fetch filter results
+API_URL="${JIRA_BASE_URL}/rest/api/2/search?jql=filter=${FILTER_ID}"
+
+# Make the API request and save the response to a file
+curl -u "${JIRA_USERNAME}:${JIRA_PASSWORD}" -X GET -H "Content-Type: application/json" "${API_URL}" > jira_filter_results.json
+
+# Check if there are issues in the filter
+TOTAL_ISSUES=$(jq '.total' jira_filter_results.json)
+if [ "$TOTAL_ISSUES" -eq 0 ]; then
+    echo "No issues found in the filter. Exiting."
+    exit 0
+fi
+
+# Extract required fields from JSON
+jq -r '.issues[] | [.key, .fields.status.name, .fields.summary, .fields.created, .fields.assignee.displayName, .fields.description, .fields.comment.comments[-1].body] | @csv' jira_filter_results.json > jira_issues.csv
+
+# Convert CSV to HTML table with attractive formatting
+cat <<EOF > jira_issues.html
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h1>JIRA Filter Results</h1>
+    <table>
+        <tr>
+            <th>Issue Key</th>
+            <th>Status</th>
+            <th>Summary</th>
+            <th>Created Date</th>
+            <th>Assignee</th>
+            <th>Description</th>
+            <th>Last Comment</th>
+        </tr>
+EOF
+
+while IFS=, read -r JIRA_KEY STATUS SUMMARY CREATED_DATE ASSIGNEE DESCRIPTION LAST_COMMENT; do
+    JIRA_LINK="${JIRA_BASE_URL}/browse/${JIRA_KEY}"
+    cat <<EOF >> jira_issues.html
+        <tr>
+            <td><a href='${JIRA_LINK}'>${JIRA_KEY}</a></td>
+            <td>${STATUS}</td>
+            <td>${SUMMARY}</td>
+            <td>${CREATED_DATE}</td>
+            <td>${ASSIGNEE}</td>
+            <td>${DESCRIPTION}</td>
+            <td>${LAST_COMMENT}</td>
+        </tr>
+EOF
+done < jira_issues.csv
+
+cat <<EOF >> jira_issues.html
+    </table>
+</body>
+</html>
+EOF
+
+# Send email with HTML content
+echo "JIRA Filter Results" | mail -a "Content-Type: text/html" -s "JIRA Filter Results" your_email@example.com < jira_issues.html
+```
+
+In this updated script:
+- The HTML table is styled using CSS to have borders, padding, and a header row with a different background color.
+- The HTML structure is defined using a heredoc syntax for better readability and maintainability.
+- The table content is generated with proper formatting and colspans to fit the content neatly in the display.
+
+Adjust the styling and formatting in the CSS section as needed to create an attractive HTML page for displaying JIRA filter results. Run this script in a Bamboo Script task to achieve the desired functionality.

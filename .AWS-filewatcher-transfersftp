@@ -1,0 +1,97 @@
+To set up an AWS file watcher that monitors an S3 bucket for new files and then transfers those files to a server, you can use a combination of AWS services like S3, Lambda, and EC2 or on-premises servers. Here’s a detailed step-by-step guide:
+
+### Step 1: Set Up the S3 Bucket
+
+1. **Create an S3 bucket**:
+   - Log in to the AWS Management Console.
+   - Navigate to the S3 service.
+   - Create a new bucket or use an existing one.
+
+### Step 2: Create an IAM Role for Lambda
+
+1. **Create an IAM role** with the necessary permissions for Lambda to access S3 and other AWS services:
+   - Go to the IAM service in the AWS Management Console.
+   - Click on "Roles" and then "Create role."
+   - Select "Lambda" as the trusted entity.
+   - Attach the following policies:
+     - `AmazonS3ReadOnlyAccess`
+     - `AWSLambdaBasicExecutionRole`
+   - Name the role and create it.
+
+### Step 3: Create an AWS Lambda Function
+
+1. **Create a Lambda function** that will be triggered by S3 events:
+   - Go to the Lambda service in the AWS Management Console.
+   - Click on "Create function."
+   - Choose "Author from scratch."
+   - Name your function and choose the runtime (e.g., Python 3.x).
+   - Select the IAM role created in Step 2.
+
+2. **Write the Lambda function code** to handle the file transfer:
+   - The function will download the file from S3 and transfer it to the destination server using an appropriate method (e.g., SCP, SFTP).
+
+Here is a sample Lambda function in Python that transfers files to a remote server using SCP:
+
+```python
+import json
+import paramiko
+import boto3
+import os
+
+s3 = boto3.client('s3')
+
+def lambda_handler(event, context):
+    # Get the bucket name and key from the event
+    bucket = event['Records'][0]['s3']['bucket']['name']
+    key = event['Records'][0]['s3']['object']['key']
+    
+    # Download the file from S3 to /tmp directory in Lambda
+    download_path = f"/tmp/{os.path.basename(key)}"
+    s3.download_file(bucket, key, download_path)
+    
+    # SCP the file to the remote server
+    remote_server = "your.remote.server"
+    remote_user = "your_user"
+    remote_password = "your_password"
+    remote_path = "/path/to/destination/"
+    
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(remote_server, username=remote_user, password=remote_password)
+    sftp = ssh.open_sftp()
+    sftp.put(download_path, os.path.join(remote_path, os.path.basename(key)))
+    sftp.close()
+    ssh.close()
+    
+    return {
+        'statusCode': 200,
+        'body': json.dumps('File transferred successfully')
+    }
+```
+
+### Step 4: Configure S3 to Trigger Lambda
+
+1. **Set up an event notification** in your S3 bucket to trigger the Lambda function when new files are uploaded:
+   - Go to your S3 bucket.
+   - Click on "Properties."
+   - Scroll down to "Event notifications."
+   - Click "Create event notification."
+   - Configure the event to trigger for "All object create events."
+   - Select the Lambda function you created.
+
+### Step 5: (Optional) Secure and Optimize the Setup
+
+1. **Use AWS Secrets Manager** to store credentials securely:
+   - Store the remote server credentials in AWS Secrets Manager.
+   - Modify the Lambda function to retrieve the credentials from Secrets Manager instead of hardcoding them.
+
+2. **Optimize the Lambda function**:
+   - Ensure the function handles errors gracefully and retries if needed.
+   - Use environment variables to store configuration values like the remote server address, user, and path.
+
+3. **Monitor the Lambda function**:
+   - Use Amazon CloudWatch to monitor the Lambda function and set up alarms for failures.
+
+### Summary
+
+By following these steps, you set up a system that automatically watches for new files in an S3 bucket and transfers them to a remote server using a Lambda function. This approach leverages the scalability and reliability of AWS services to automate file transfers efficiently and securely. Adjust the example code and configurations as needed to fit your specific requirements and environment.

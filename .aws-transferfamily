@@ -1,0 +1,91 @@
+Using AWS Transfer Family to delete files from the source server after they have been successfully transferred to the destination can be accomplished by setting up an SFTP server through AWS Transfer Family and automating the deletion process with a script. Here’s a detailed guide on how to achieve this:
+
+### Prerequisites
+
+1. **AWS Account**: Ensure you have an AWS account.
+2. **AWS CLI**: Ensure AWS CLI is installed and configured.
+3. **Source Server**: The external server where the files are currently located.
+4. **Destination Server**: The internal server where the files will be moved.
+
+### Steps
+
+#### Step 1: Set Up AWS Transfer Family
+
+1. **Create an SFTP Server**:
+    - Go to the AWS Management Console.
+    - Navigate to AWS Transfer Family.
+    - Click on “Create server” and choose SFTP as the protocol.
+    - Configure your identity provider (service-managed or custom).
+    - Link the server to your S3 bucket where the files will be temporarily stored.
+
+2. **Create a User**:
+    - Under the created SFTP server, create a new user.
+    - Set the home directory to the S3 bucket.
+
+#### Step 2: Automate File Transfer from Source Server to S3
+
+1. **Install SFTP Client**:
+    - Ensure the source server has an SFTP client like `sftp` or `scp`.
+
+2. **Transfer Files to S3 via SFTP**:
+    - Use a script to transfer files from the source server to the S3 bucket. Here’s a sample script using `sftp`:
+
+```bash
+#!/bin/bash
+
+# Variables
+SFTP_USER="your_sftp_user"
+SFTP_SERVER="your_sftp_server_endpoint"
+LOCAL_DIR="/path/to/local/files"
+REMOTE_DIR="/"
+
+# Transfer files to SFTP
+sftp $SFTP_USER@$SFTP_SERVER <<EOF
+put -r $LOCAL_DIR/* $REMOTE_DIR
+EOF
+
+# Check if the transfer was successful
+if [ $? -eq 0 ]; then
+    # Delete local files after successful transfer
+    rm -rf $LOCAL_DIR/*
+else
+    echo "File transfer failed!"
+    exit 1
+fi
+```
+
+#### Step 3: Download Files from S3 to Internal Server
+
+1. **Install AWS CLI on Internal Server**:
+    - Ensure your internal server has AWS CLI installed and configured with appropriate IAM permissions.
+
+2. **Download Files from S3**:
+    - Use a script to download files from the S3 bucket to your internal server. Here’s a sample script:
+
+```bash
+#!/bin/bash
+
+# Variables
+BUCKET_NAME="your_bucket_name"
+DEST_DIR="/path/to/destination"
+
+# Download files from S3
+aws s3 cp s3://$BUCKET_NAME/ $DEST_DIR --recursive
+
+# Check if the download was successful
+if [ $? -eq 0 ]; then
+    # Optionally, remove files from S3 to clean up
+    aws s3 rm s3://$BUCKET_NAME/ --recursive
+else
+    echo "File download failed!"
+    exit 1
+fi
+```
+
+### Step 4: Clean Up S3 (Optional)
+
+After confirming that the files have been successfully transferred to the internal server, you can optionally clean up the S3 bucket as shown in the script above.
+
+### Summary
+
+This method involves setting up AWS Transfer Family for SFTP, automating the file transfer process from the source server to S3, and then downloading the files from S3 to the internal server. The scripts provided help automate the process, including the deletion of files from the source server after a successful transfer. Adjust the scripts and configurations as necessary to fit your specific requirements.

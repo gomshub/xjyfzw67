@@ -1,0 +1,507 @@
+
+To frame the HTML page and push it to Artifactory only if there are any issues, you can modify the `sync_service.py` to return the list of issues fetched and processed. The main script should then check if there are any issues before generating the HTML page and pushing it to Artifactory.
+
+Here is the modified and complete solution:
+
+### 1. `config.py`
+```python
+import os
+
+# Database configurations for different environments
+DB_CONFIG = {
+    'prod': {
+        'crud_svc_url': os.getenv("DB_PROD_CRUD_SVC_URL")
+    },
+    'quality': {
+        'crud_svc_url': os.getenv("DB_QUALITY_CRUD_SVC_URL")
+    },
+    'dev': {
+        'crud_svc_url': os.getenv("DB_DEV_CRUD_SVC_URL")
+    }
+}
+
+# JIRA configurations
+JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
+JIRA_USERNAME = os.getenv("JIRA_USERNAME")
+JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
+
+# Artifactory configuration
+ARTIFACTORY_URL = os.getenv("ARTIFACTORY_URL")
+ARTIFACTORY_USERNAME = os.getenv("ARTIFACTORY_USERNAME")
+ARTIFACTORY_API_KEY = os.getenv("ARTIFACTORY_API_KEY")
+```
+
+### 2. `db_client.py`
+```python
+import requests
+
+class DbClient:
+    def __init__(self, crud_svc_url):
+        self.crud_svc_url = crud_svc_url
+
+    def update_issue(self, issue_data):
+        response = requests.post(f"{self.crud_svc_url}/update", json=issue_data)
+        if response.status_code != 200:
+            print(f"Failed to update issue: {response.text}")
+        return response.status_code == 200
+```
+
+### 3. `jira_client.py`
+```python
+import requests
+from config import JIRA_BASE_URL, JIRA_USERNAME, JIRA_API_TOKEN
+
+class JiraClient:
+    def __init__(self):
+        self.base_url = JIRA_BASE_URL
+        self.auth = (JIRA_USERNAME, JIRA_API_TOKEN)
+
+    def get_issues(self, jql_query):
+        headers = {"Content-Type": "application/json"}
+        response = requests.get(f"{self.base_url}/rest/api/2/search?jql={jql_query}", headers=headers, auth=self.auth)
+        if response.status_code == 200:
+            return response.json().get('issues', [])
+        else:
+            print(f"Failed to fetch issues: {response.text}")
+            return []
+```
+
+### 4. `sync_service.py`
+```python
+import re
+from jira_client import JiraClient
+from db_client import DbClient
+from config import DB_CONFIG
+
+class SyncService:
+    def __init__(self):
+        self.jira_client = JiraClient()
+
+    def extract_job_details(self, summary):
+        job_name_match = re.search(r'(P1XX|Q1XX|D1XX)', summary)
+        job_result_match = re.search(r'(Pass|Fail)', summary)
+        job_name = job_name_match.group(0) if job_name_match else None
+        job_result = job_result_match.group(0) if job_result_match else None
+        return job_name, job_result
+
+    def sync_issues(self, jql_query, environment):
+        issues = self.jira_client.get_issues(jql_query)
+        db_client = DbClient(DB_CONFIG[environment]['crud_svc_url'])
+
+        processed_issues = []
+        for issue in issues:
+            issue_data = {
+                "jira_no": issue["key"],
+                "summary": issue["fields"]["summary"],
+                "description": issue["fields"]["description"],
+                "comments": [comment["body"] for comment in issue["fields"]["comment"]["comments"]],
+                "first_comment": issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else None,
+                "last_comment": issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else None
+            }
+
+            job_name, job_result = self.extract_job_details(issue_data["summary"])
+            if job_name and job_result:
+                issue_data["job_name"] = job_name
+                issue_data["job_result"] = job_result
+
+                if db_client.update_issue(issue_data):
+                    processed_issues.append(issue_data)
+                else:
+                    print(f"Failed to update issue {issue_data['jira_no']} in {environment} environment")
+        
+        return processed_issues
+```
+
+### 5. `html_generator.py`
+```python
+from jinja2 import Template
+
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JIRA Issues Report</title>
+    <style>
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border: 1px solid #ddd; text-align: left; }
+        th { background-color: #f4f4f4; }
+    </style>
+</head>
+<body>
+    <h1>JIRA Issues Report</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA No</th>
+                <th>Summary</th>
+                <th>Description</th>
+                <th>Comments</th>
+                <th>First Comment</th>
+                <th>Last Comment</th>
+                <th>Job Name</th>
+                <th>Job Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in issues %}
+            <tr>
+                <td>{{ issue.jira_no }}</td>
+                <td>{{ issue.summary }}</td>
+                <td>{{ issue.description }}</td>
+                <td>{{ issue.comments|join(', ') }}</td>
+                <td>{{ issue.first_comment }}</td>
+                <td>{{ issue.last_comment }}</td>
+                <td>{{ issue.job_name }}</td>
+                <td>{{ issue.job_result }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
+"""
+
+def generate_html(issues, output_file):
+    template = Template(HTML_TEMPLATE)
+    html_content = template.render(issues=issues)
+    with open(output_file, 'w') as file:
+        file.write(html_content)
+```
+
+### 6. `artifactory_client.py`
+```python
+import requests
+from config import ARTIFACTORY_URL, ARTIFACTORY_USERNAME, ARTIFACTORY_API_KEY
+
+class ArtifactoryClient:
+    def __init__(self):
+        self.base_url = ARTIFACTORY_URL
+        self.auth = (ARTIFACTORY_USERNAME, ARTIFACTORY_API_KEY)
+
+    def upload_file(self, file_path, artifactory_path):
+        with open(file_path, 'rb') as file:
+            response = requests.put(f"{self.base_url}/{artifactory_path}", data=file, auth=self.auth)
+            if response.status_code not in [200, 201]:
+                print(f"Failed to upload file to Artifactory: {response.text}")
+            return response.status_code in [200, 201]
+```
+
+### 7. `run_sync_service.sh`
+```sh
+#!/bin/bash
+
+# Activate virtual environment if needed
+# source /path/to/your/virtualenv/bin/activate
+
+# Navigate to the directory containing your Python modules
+cd /path/to/your/module
+
+# Run the sync service
+python -c "
+from sync_service import SyncService
+from html_generator import generate_html
+from artifactory_client import ArtifactoryClient
+
+sync_service = SyncService()
+
+# Define your JQL query and environments
+jql_query = 'project = YOUR_PROJECT AND filter = YOUR_FILTER_ID'
+environments = ['prod', 'quality', 'dev']
+
+# Sync issues for each environment
+all_issues = []
+for env in environments:
+    issues = sync_service.sync_issues(jql_query, env)
+    all_issues.extend(issues)
+
+# Generate HTML report only if there are any issues
+if all_issues:
+    output_file = '/path/to/output/jira_issues_report.html'
+    generate_html(all_issues, output_file)
+
+    # Upload HTML report to Artifactory
+    artifactory_client = ArtifactoryClient()
+    artifactory_path = 'path/in/artifactory/jira_issues_report.html'
+    if artifactory_client.upload_file(output_file, artifactory_path):
+        print('HTML report successfully uploaded to Artifactory')
+    else:
+        print('Failed to upload HTML report to Artifactory')
+else:
+    print('No issues to report')
+"
+```
+
+### Summary
+1. **Configuration**: Set up the necessary configurations in `config.py`.
+2. **Database Client**: Implement a database client (`db_client.py`) to update the respective database using a CRUD service.
+3. **JIRA Client**: Implement a JIRA client (`jira_client.py`) to fetch issues based on a JQL query.
+4. **Synchronization Service**: Implement the main synchronization logic (`sync_service.py`) to process updates for different environments and return the processed issues.
+5. **HTML Generator**: Generate an HTML report from the issue data (`html_generator.py`).
+6. **Artifactory Client**: Upload the generated HTML report to Artifactory (`artifactory_client.py`).
+7. **Shell Script**: Use a shell script (`run_sync_service.sh`) to run the sync service, generate the HTML report only if there are issues, and upload the report to Artifactory.
+
+Replace placeholder values like JQL
+
+
+
+
+
+
+=#=#=#
+
+
+To achieve the desired functionality, we can break down the solution into several components:
+
+1. **Fetch Issues from JIRA**: Use the JIRA API to fetch issues based on a filter.
+2. **Parse Issues**: Extract relevant details from each issue.
+3. **Update Database**: Update the respective database environment via a CRUD service API.
+4. **Generate HTML**: Create an HTML page with the issue details.
+5. **Push HTML to Artifactory**: Upload the generated HTML page to Artifactory.
+
+### Project Structure
+
+```
+jira_sync/
+│
+├── config.py
+├── db_client.py
+├── jira_client.py
+├── sync_service.py
+├── html_generator.py
+├── artifactory_client.py
+└── run_sync_service.sh
+```
+
+### 1. `config.py`
+```python
+import os
+
+# Database configurations for different environments
+DB_CONFIG = {
+    'prod': {
+        'crud_svc_url': os.getenv("DB_PROD_CRUD_SVC_URL")
+    },
+    'quality': {
+        'crud_svc_url': os.getenv("DB_QUALITY_CRUD_SVC_URL")
+    },
+    'dev': {
+        'crud_svc_url': os.getenv("DB_DEV_CRUD_SVC_URL")
+    }
+}
+
+# JIRA configurations
+JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
+JIRA_USERNAME = os.getenv("JIRA_USERNAME")
+JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
+
+# Artifactory configuration
+ARTIFACTORY_URL = os.getenv("ARTIFACTORY_URL")
+ARTIFACTORY_USERNAME = os.getenv("ARTIFACTORY_USERNAME")
+ARTIFACTORY_API_KEY = os.getenv("ARTIFACTORY_API_KEY")
+```
+
+### 2. `db_client.py`
+```python
+import requests
+
+class DbClient:
+    def __init__(self, crud_svc_url):
+        self.crud_svc_url = crud_svc_url
+
+    def update_issue(self, issue_data):
+        response = requests.post(f"{self.crud_svc_url}/update", json=issue_data)
+        if response.status_code != 200:
+            print(f"Failed to update issue: {response.text}")
+        return response.status_code == 200
+```
+
+### 3. `jira_client.py`
+```python
+import requests
+from config import JIRA_BASE_URL, JIRA_USERNAME, JIRA_API_TOKEN
+
+class JiraClient:
+    def __init__(self):
+        self.base_url = JIRA_BASE_URL
+        self.auth = (JIRA_USERNAME, JIRA_API_TOKEN)
+
+    def get_issues(self, jql_query):
+        headers = {"Content-Type": "application/json"}
+        response = requests.get(f"{self.base_url}/rest/api/2/search?jql={jql_query}", headers=headers, auth=self.auth)
+        if response.status_code == 200:
+            return response.json().get('issues', [])
+        else:
+            print(f"Failed to fetch issues: {response.text}")
+            return []
+```
+
+### 4. `sync_service.py`
+```python
+import re
+from jira_client import JiraClient
+from db_client import DbClient
+from config import DB_CONFIG
+
+class SyncService:
+    def __init__(self):
+        self.jira_client = JiraClient()
+
+    def extract_job_details(self, summary):
+        job_name_match = re.search(r'(P1XX|Q1XX|D1XX)', summary)
+        job_result_match = re.search(r'(Pass|Fail)', summary)
+        job_name = job_name_match.group(0) if job_name_match else None
+        job_result = job_result_match.group(0) if job_result_match else None
+        return job_name, job_result
+
+    def sync_issues(self, jql_query, environment):
+        issues = self.jira_client.get_issues(jql_query)
+        db_client = DbClient(DB_CONFIG[environment]['crud_svc_url'])
+
+        for issue in issues:
+            issue_data = {
+                "jira_no": issue["key"],
+                "summary": issue["fields"]["summary"],
+                "description": issue["fields"]["description"],
+                "comments": [comment["body"] for comment in issue["fields"]["comment"]["comments"]],
+                "first_comment": issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else None,
+                "last_comment": issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else None
+            }
+
+            job_name, job_result = self.extract_job_details(issue_data["summary"])
+            if job_name and job_result:
+                issue_data["job_name"] = job_name
+                issue_data["job_result"] = job_result
+
+                if not db_client.update_issue(issue_data):
+                    print(f"Failed to update issue {issue_data['jira_no']} in {environment} environment")
+```
+
+### 5. `html_generator.py`
+```python
+from jinja2 import Template
+
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JIRA Issues Report</title>
+    <style>
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border: 1px solid #ddd; text-align: left; }
+        th { background-color: #f4f4f4; }
+    </style>
+</head>
+<body>
+    <h1>JIRA Issues Report</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA No</th>
+                <th>Summary</th>
+                <th>Description</th>
+                <th>Comments</th>
+                <th>First Comment</th>
+                <th>Last Comment</th>
+                <th>Job Name</th>
+                <th>Job Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in issues %}
+            <tr>
+                <td>{{ issue.jira_no }}</td>
+                <td>{{ issue.summary }}</td>
+                <td>{{ issue.description }}</td>
+                <td>{{ issue.comments|join(', ') }}</td>
+                <td>{{ issue.first_comment }}</td>
+                <td>{{ issue.last_comment }}</td>
+                <td>{{ issue.job_name }}</td>
+                <td>{{ issue.job_result }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
+"""
+
+def generate_html(issues, output_file):
+    template = Template(HTML_TEMPLATE)
+    html_content = template.render(issues=issues)
+    with open(output_file, 'w') as file:
+        file.write(html_content)
+```
+
+### 6. `artifactory_client.py`
+```python
+import requests
+from config import ARTIFACTORY_URL, ARTIFACTORY_USERNAME, ARTIFACTORY_API_KEY
+
+class ArtifactoryClient:
+    def __init__(self):
+        self.base_url = ARTIFACTORY_URL
+        self.auth = (ARTIFACTORY_USERNAME, ARTIFACTORY_API_KEY)
+
+    def upload_file(self, file_path, artifactory_path):
+        with open(file_path, 'rb') as file:
+            response = requests.put(f"{self.base_url}/{artifactory_path}", data=file, auth=self.auth)
+            if response.status_code not in [200, 201]:
+                print(f"Failed to upload file to Artifactory: {response.text}")
+            return response.status_code in [200, 201]
+```
+
+### 7. `run_sync_service.sh`
+```sh
+#!/bin/bash
+
+# Activate virtual environment if needed
+# source /path/to/your/virtualenv/bin/activate
+
+# Navigate to the directory containing your Python modules
+cd /path/to/your/module
+
+# Run the sync service
+python -c "
+from sync_service import SyncService
+from html_generator.py import generate_html
+from artifactory_client import ArtifactoryClient
+
+sync_service = SyncService()
+
+# Define your JQL query and environments
+jql_query = 'project = YOUR_PROJECT AND filter = YOUR_FILTER_ID'
+environments = ['prod', 'quality', 'dev']
+
+# Sync issues for each environment
+all_issues = []
+for env in environments:
+    issues = sync_service.sync_issues(jql_query, env)
+    all_issues.extend(issues)
+
+# Generate HTML report
+output_file = '/path/to/output/jira_issues_report.html'
+generate_html(all_issues, output_file)
+
+# Upload HTML report to Artifactory
+artifactory_client = ArtifactoryClient()
+artifactory_path = 'path/in/artifactory/jira_issues_report.html'
+if artifactory_client.upload_file(output_file, artifactory_path):
+    print('HTML report successfully uploaded to Artifactory')
+else:
+    print('Failed to upload HTML report to Artifactory')
+"
+```
+
+### Explanation:
+
+1. **`config.py`**: Contains configuration for database, JIRA, and Artifactory.
+2. **`db_client.py`**: Provides functionality to update the respective database using a CRUD service.
+3. **`jira_client.py`**: Fetches issues from JIRA based on a JQL query.
+4. **`sync_service.py`**: Syncs JIRA issues to the respective databases.
+5. **`html_generator.py`**: Generates an HTML report from the issue data.
+6. **`artifactory_client.py`**: Uploads the generated HTML report to Artifactory.
+7. **`run_sync_service.sh`**: Shell script to run the sync service,

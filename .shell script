@@ -1,0 +1,346 @@
+
+To list the file with the pattern `file-<yyyymmdd>.text` which has the most recent date in a directory and rename it to `file.txt`, you can use the following bash command in Linux:
+
+```bash
+# List all files matching the pattern, sort them by the date in the filename, and get the most recent one
+recent_file=$(ls file-*.text 2>/dev/null | sort -t '-' -k 2 -nr | head -n 1)
+
+# Check if a file was found
+if [ -n "$recent_file" ]; then
+  # Rename the most recent file to file.txt
+  mv "$recent_file" file.txt
+else
+  echo "No files matching the pattern were found."
+fi
+```
+
+Here's a breakdown of what this script does:
+
+1. `ls file-*.text 2>/dev/null`: List all files matching the pattern `file-*.text`. The `2>/dev/null` part suppresses error messages if no files match the pattern.
+2. `sort -t '-' -k 2 -nr`: Sort the files by the date part of the filename. The `-t '-'` specifies that the delimiter is a hyphen, `-k 2` sorts based on the second field (which is the date part), and `-nr` sorts numerically in reverse order (newest date first).
+3. `head -n 1`: Select the first file from the sorted list, which is the most recent one.
+4. `if [ -n "$recent_file" ]; then`: Check if a file was found (i.e., `recent_file` is not empty).
+5. `mv "$recent_file" file.txt`: Rename the most recent file to `file.txt`.
+6. `echo "No files matching the pattern were found."`: Output a message if no matching files are found.
+
+
+
+=#=#=
+BAU
+
+To achieve the requirement of getting a list of JIRA issues with their status and summary from a JIRA filter using the REST API via Bamboo, converting the output JSON to HTML, and sending an email with the HTML page, you can follow these steps:
+
+1. **Create a Bamboo Script Task**:
+   - Set up a Bamboo Script task in your Bamboo plan.
+   - Use a shell script as the task script.
+
+2. **Shell Script**:
+   - Here's a sample shell script that accomplishes the steps:
+
+```bash
+#!/bin/bash
+
+# JIRA credentials
+JIRA_USERNAME="your_username"
+JIRA_PASSWORD="your_password"
+JIRA_BASE_URL="https://your_company.atlassian.net"
+FILTER_ID="12345"  # Replace with your filter ID
+
+# API endpoint to fetch filter results
+API_URL="${JIRA_BASE_URL}/rest/api/2/search?jql=filter=${FILTER_ID}"
+
+# Make the API request and save the response to a file
+curl -u "${JIRA_USERNAME}:${JIRA_PASSWORD}" -X GET -H "Content-Type: application/json" "${API_URL}" > jira_filter_results.json
+
+# Extract JIRA numbers, status, and summary from JSON
+jq -r '.issues[] | [.key, .fields.status.name, .fields.summary] | @csv' jira_filter_results.json > jira_issues.csv
+
+# Convert CSV to HTML table
+echo "<table>" > jira_issues.html
+cat jira_issues.csv | awk -F ',' '{print "<tr><td>" $1 "</td><td>" $2 "</td><td>" $3 "</td></tr>"}' >> jira_issues.html
+echo "</table>" >> jira_issues.html
+
+# Send email with HTML content
+echo "JIRA Filter Results" | mail -a "Content-Type: text/html" -s "JIRA Filter Results" your_email@example.com < jira_issues.html
+```
+
+3. **Adjustments**:
+   - Replace placeholders like `your_username`, `your_password`, `your_company`, `FILTER_ID`, and `your_email@example.com` with your actual details.
+   - Customize the script based on your specific JIRA data structure and requirements.
+
+4. **Execution**:
+   - Run this script as a Bamboo Script task in your Bamboo plan.
+   - Make sure Bamboo has the necessary permissions to access the JIRA API and send emails.
+
+This script fetches JIRA filter results, extracts JIRA numbers, status, and summary, converts the data to an HTML table, and sends an email with the HTML content. Adjust the script as needed for your specific use case.
+
+
+
+=#=#=
+
+
+#!/bin/bash
+
+# Define the string variable and the replacement substring
+string="Hello * World. This is a * test."
+replacement="foo"
+
+# Replace * with the replacement substring using parameter expansion
+new_string="${string//\*/$replacement}"
+
+# Print the new string to verify the changes
+echo "$new_string"
+
+sed "s/\*/your_replacement_string/g" input.txt > output.txt
+
+#!/bin/bash
+
+# Define the directory and the regex pattern
+directory="/path/to/your/folder"
+pattern="your_regex_pattern"
+
+# Use ls to list files and grep to match the pattern
+ls "$directory" | grep -E "$pattern"
+
+
+=#=#
+#!/bin/bash
+
+# Define the directory and the regex pattern
+directory="/path/to/your/folder"
+pattern="[0-9]+\.txt"
+
+# Use find to list files and grep to match the pattern
+find "$directory" -type f | grep -E "$pattern"
+
+
+=#=##
+
+bash
+#!/bin/bash
+
+# Remove empty lines at the end of the file
+sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' your_file.csv
+
+
+
+
+#!/bin/bash
+
+# Read the first line of the file
+header=$(head -n 1 file.csv)
+
+# Remove double quotes from the header
+new_header=$(echo "$header" | sed 's/"//g')
+
+# Replace the header line with the modified one
+sed -i "1s/.*/$new_header/" file.csv
+
+
+=#=#=#
+You can achieve this using a shell script with awk. Here's an example script that reads a CSV file, adjusts the number of columns in each row to match the number of columns in the header row, and then writes the updated data back to the same file:
+
+```bash
+#!/bin/bash
+
+# Get the number of columns in the header row
+numCols=$(head -n 1 input.csv | awk -F, '{print NF}')
+
+# Update the CSV file in place
+awk -v numCols="$numCols" -F, '{
+    while (NF < numCols) {
+        $0 = $0 ", "
+    }
+    while (NF > numCols) {
+        sub(/,[^,]*$/, "")
+    }
+    print
+}' input.csv > temp.csv && mv temp.csv input.csv
+```
+
+In this script:
+- The `head -n 1 input.csv | awk -F, '{print NF}'` command is used to get the number of columns in the header row.
+- The `awk` command is used to iterate through each row in the CSV file.
+- If the number of columns in a row is less than the number of columns in the header row, the script appends an empty cell to the row.
+- If the number of columns in a row is more than the number of columns in the header row, the script removes the extra columns from the row.
+- The updated data is written to a temporary file `temp.csv`, and then the temporary file is renamed to `input.csv` to update the original file in place.
+
+Make sure to replace `input.csv` with the path to your input CSV file in the script. After running this script, the number of columns in each row of the CSV file should match the number of columns in the header row.
+
+=##=
+
+
+
+You can remove spaces or tabs at the end of each line in a CSV file using a shell script by using the `sed` command. Here's an example script:
+
+```bash
+#!/bin/bash
+
+input_file="input.csv"
+output_file="output.csv"
+
+sed 's/[[:blank:]]*$//' "$input_file" > "$output_file"
+```
+
+In this script:
+- Replace `input.csv` with the name of your input file.
+- The `sed` command is used with the regular expression `[[:blank:]]*$` to remove any spaces or tabs at the end of each line.
+- The modified content is then saved to the output file specified by `output.csv`.
+- Run the script in your terminal to remove spaces or tabs at the end of each line in the CSV file.
+
+
+=#=#=
+To achieve this in a shell script, you can use tools like `awk` or `sed` to remove empty rows and ensure that each row has the same number of columns as the header. Here's a basic outline of how you can do this:
+
+1. Remove empty rows using `awk`:
+```bash
+awk 'NF > 0' input.csv > temp.csv
+```
+
+2. Count the number of columns in the header row and adjust other rows to match this count:
+```bash
+num_cols=$(head -n 1 temp.csv | awk -F, '{print NF}')
+awk -F, -v num_cols="$num_cols" 'NF != num_cols {for (i=NF+1; i<=num_cols; i++) $i = ""; print}' temp.csv > output.csv
+```
+
+3. Replace the original file with the modified file:
+```bash
+mv output.csv input.csv
+```
+
+Make sure to replace `input.csv` with the actual name of your CSV file. This script will remove empty rows and adjust rows with fewer columns than the header to match the header's column count.
+
+=#=#
+To make the columns count of rows the same as the header in a CSV file by either removing or appending empty columns, you can use the following script:
+
+```bash
+awk -F, 'NR==1 {cols=NF} NF < cols {for(i=NF+1; i<=cols; i++) $i=""} 1' input.csv > output.csv
+```
+
+This script checks each row, and if the number of columns in a row is less than the number of columns in the header, it appends empty columns to that row until the column count matches the header. If the row has more columns than the header, those extra columns will be removed. The modified content is then written to output.csv.
+
+
+
+
+=##=#=#
+To compare if the lines of two files are matching irrespective of their order, you can use the `sort` command along with `diff`. Here's a shell script that accomplishes this:
+
+```bash
+#!/bin/bash
+
+file1="file1.txt"
+file2="file2.txt"
+
+if diff <(sort $file1) <(sort $file2) &> /dev/null; then
+    echo "The lines in the files match irrespective of order."
+else
+    echo "The lines in the files do not match irrespective of order."
+fi
+```
+
+Save this script in a file, such as `compare_lines.sh`, and make it executable using `chmod +x compare_lines.sh`. Run the script with `./compare_lines.sh` in the terminal to compare the lines of the two files, disregarding their order, and see if they match.
+
+=#=#=#
+
+
+You can use the `diff` command in a shell script to compare two text files and print the unmatched lines. Here's an example script:
+
+```bash
+#!/bin/bash
+
+file1="file1.txt"
+file2="file2.txt"
+
+# Compare the files and output the unmatched lines to a new file
+diff --new-line-format="" --unchanged-line-format="" $file1 $file2 > unmatched_lines.txt
+
+# Display the unmatched lines
+cat unmatched_lines.txt
+```
+
+Save this script in a file, for example, `compare_files.sh`, and make it executable using the command `chmod +x compare_files.sh`. Then you can run the script using `./compare_files.sh` in the terminal to compare the two text files and print the unmatched lines.
+
+#==#
+
+
+You can use the `comm` command in a shell script to compare two text files and print the matched lines. Here's an example script:
+
+```bash
+#!/bin/bash
+
+file1="file1.txt"
+file2="file2.txt"
+
+# Compare the files and output the matched lines
+comm -12 <(sort $file1) <(sort $file2)
+```
+
+Save this script in a file, for example, `compare_matched_lines.sh`, and make it executable using the command `chmod +x compare_matched_lines.sh`. Then you can run the script using `./compare_matched_lines.sh` in the terminal to compare the two text files and print the matched lines.
+
+
+
+=#=#
+
+
+
+To loop over a list of lines in a text file using a shell script, you can use a `while` loop in combination with the `read` command. Here's an example of how you can achieve this:
+
+```bash
+#!/bin/bash
+
+# Assuming your text file is named "list.txt"
+file="list.txt"
+
+# Check if the file exists
+if [ -f "$file" ]; then
+    while IFS= read -r line; do
+        # Process each line here
+        echo "Processing line: $line"
+    done < "$file"
+else
+    echo "File not found: $file"
+fi
+```
+
+In this script:
+- `while` loop reads each line from the file specified by `file`.
+- `read -r line` reads each line from the file and stores it in the variable `line`.
+- `IFS=` prevents leading/trailing whitespace from being trimmed.
+- `echo "Processing line: $line"` is where you can perform operations on each line. Replace this with your actual processing logic.
+
+Remember to replace `"list.txt"` with the actual path to your text file. This script will read each line from the file and process it as needed.
+
+
+
+
+
+=#=#=#=
+
+
+
+To check if an HTTP response shows that a session is not valid and renew the session using a shell script, you can use tools like cURL and jq (a lightweight and flexible command-line JSON processor). Here's a general outline of how you can achieve this:
+
+1. Make an HTTP request to check the session validity using cURL and save the response to a file:
+
+```bash
+curl -s -o response.json -X GET http://your-api-endpoint
+```
+
+2. Check if the session is invalid in the response JSON using jq:
+
+```bash
+invalid_session=$(jq -r '.error' response.json)
+```
+
+3. If the session is invalid, renew the session by making a new HTTP request to obtain a new session token:
+
+```bash
+if [[ "$invalid_session" == "Session not valid" ]]; then
+    # Add logic to renew the session, e.g., by making another request to obtain a new session token
+    curl -s -o new_token.json -X POST http://your-auth-endpoint
+fi
+```
+
+4. You can then proceed with your original request using the new session token.
+
+Remember to replace `http://your-api-endpoint` with your actual API endpoint and `http://your-auth-endpoint` with your actual authentication endpoint. This is a basic outline, and you may need to adapt it to suit your specific requirements and API endpoints.

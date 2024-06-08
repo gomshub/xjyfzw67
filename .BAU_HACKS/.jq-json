@@ -1,0 +1,49 @@
+To extract specific values from JSON using `jq` and apply a `grep` with a regex pattern to further filter the data, you can combine the functionalities of both tools in a shell script. Here's an example:
+
+Let's say you have the following JSON data:
+
+```json
+{
+  "employees": [
+    {
+      "name": "Alice",
+      "age": 30
+    },
+    {
+      "name": "Bob",
+      "age": 35
+    },
+    {
+      "name": "Charlie",
+      "age": 40
+    }
+  ]
+}
+```
+
+And you want to extract the names of employees whose names start with the letter 'B'. You can use the following script:
+
+```bash
+#!/bin/bash
+
+json_data='{"employees":[{"name":"Alice","age":30},{"name":"Bob","age":35},{"name":"Charlie","age":40}]}'
+
+filtered_names=$(echo "$json_data" | jq -r '.employees[] | select(.name | test("^B")) | .name')
+
+echo "$filtered_names"
+```
+
+In this script:
+
+1. We define the JSON data as a variable `json_data`.
+2. We use `jq` to iterate over each employee object, select only those with a name starting with 'B' using the `select` function and the `test` function with a regex pattern `^B`.
+3. We extract the name of the filtered employees using the `.name` attribute.
+4. The `filtered_names` variable will contain the names of employees whose names start with 'B'.
+
+When you run this script, you will get the following output:
+
+```
+Bob
+```
+
+You can adjust the JSON data, the filtering criteria, and the regex pattern to suit your specific requirements. This approach allows you to efficiently extract and filter data from JSON using `jq` in combination with `grep` and regex patterns.

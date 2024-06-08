@@ -1,0 +1,90 @@
+Using AWS Storage Gateway to delete files from the source server after they have been transferred to the destination involves setting up a File Gateway, configuring it to transfer files to Amazon S3, and then implementing a post-transfer cleanup process. Here’s a step-by-step guide:
+
+### Step 1: Set Up AWS Storage Gateway
+
+1. **Create a File Gateway**:
+    - Log in to the AWS Management Console.
+    - Navigate to the Storage Gateway service.
+    - Click "Create gateway."
+    - Choose "File Gateway" and follow the prompts to create and configure your gateway. You can deploy the gateway on-premises as a VM or in AWS as an EC2 instance.
+
+2. **Activate the Gateway**:
+    - During the setup, you will be prompted to activate the gateway and connect it to your AWS account.
+    - Select the appropriate region and configure the gateway settings.
+
+3. **Configure File Shares**:
+    - After activating the gateway, create a file share that maps to an S3 bucket.
+    - Configure the file share with NFS or SMB protocols as needed.
+    - Set permissions and configure other settings like storage class and object metadata.
+
+### Step 2: Transfer Files to AWS Storage Gateway
+
+1. **Mount the File Share**:
+    - On your source server, mount the file share provided by the Storage Gateway.
+    - Use appropriate commands depending on whether you are using NFS or SMB.
+
+    For NFS:
+    ```bash
+    sudo mount -t nfs -o nolock <gateway_ip>:/<file_share> /mnt/file_share
+    ```
+
+    For SMB:
+    ```bash
+    sudo mount -t cifs //<gateway_ip>/<file_share> /mnt/file_share -o username=<your_username>,password=<your_password>
+    ```
+
+2. **Transfer Files**:
+    - Copy files from the source server to the mounted file share.
+    ```bash
+    cp /path/to/source/files/* /mnt/file_share/
+    ```
+
+### Step 3: Automate File Deletion after Transfer
+
+To automate the deletion of files from the source server after they are successfully transferred to the destination, you can use a script. Here's a basic example using a shell script:
+
+1. **Create the Script**:
+    ```bash
+    #!/bin/bash
+
+    SOURCE_DIR="/path/to/source/files"
+    MOUNT_DIR="/mnt/file_share"
+
+    # Transfer files to AWS Storage Gateway
+    cp $SOURCE_DIR/* $MOUNT_DIR/
+
+    # Check if the transfer was successful
+    if [ $? -eq 0 ]; then
+        # Delete files from the source directory
+        rm -rf $SOURCE_DIR/*
+        echo "Files transferred and deleted successfully."
+    else
+        echo "File transfer failed!"
+        exit 1
+    fi
+    ```
+
+2. **Make the Script Executable**:
+    ```bash
+    chmod +x /path/to/your/script.sh
+    ```
+
+3. **Schedule the Script (Optional)**:
+    - You can use cron jobs to run this script at regular intervals. Edit the crontab file using `crontab -e` and add a line to schedule the script.
+
+    ```bash
+    # Example: Run the script every day at 2 AM
+    0 2 * * * /path/to/your/script.sh
+    ```
+
+### Step 4: Verify the Setup
+
+1. **Check File Transfer**:
+    - Ensure files are successfully transferred to the S3 bucket by accessing the bucket via the AWS Management Console or using the AWS CLI.
+
+2. **Check File Deletion**:
+    - Verify that files are deleted from the source directory after transfer.
+
+### Summary
+
+By following these steps, you set up AWS Storage Gateway to facilitate the transfer of files from a source server to an S3 bucket. A script is used to automate the transfer process and delete the files from the source server after a successful transfer. This setup helps in maintaining efficient data management and ensuring the source server's storage space is not continuously filled up with transferred files. Adjust the scripts and configurations as needed to suit your specific requirements and environment.

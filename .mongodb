@@ -1,0 +1,87 @@
+Setting up MongoDB involves several steps, including installation, configuration, and starting the MongoDB server. Here's a step-by-step guide to set up MongoDB on a Linux-based system:
+
+### Step 1: Install MongoDB
+
+#### Step 1.1: Import MongoDB Public Key
+
+1. Open a terminal.
+
+2. Import the MongoDB public GPG key:
+   ```bash
+   wget -qO - https://www.mongodb.org/static/pgp/server-5.0.asc | sudo apt-key add -
+   ```
+
+#### Step 1.2: Create MongoDB Repository
+
+1. Create the `/etc/apt/sources.list.d/mongodb-org-5.0.list` file:
+   ```bash
+   echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/5.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-5.0.list
+   ```
+
+#### Step 1.3: Install MongoDB
+
+1. Update the package index:
+   ```bash
+   sudo apt-get update
+   ```
+
+2. Install the MongoDB packages:
+   ```bash
+   sudo apt-get install -y mongodb-org
+   ```
+
+### Step 2: Start MongoDB Service
+
+1. Start the MongoDB service:
+   ```bash
+   sudo systemctl start mongod
+   ```
+
+2. Enable MongoDB to start on boot:
+   ```bash
+   sudo systemctl enable mongod
+   ```
+
+### Step 3: Verify MongoDB Installation
+
+1. Check the MongoDB service status:
+   ```bash
+   sudo systemctl status mongod
+   ```
+
+2. Verify that MongoDB has started successfully and is running.
+
+### Step 4: Access MongoDB Shell
+
+1. Open the MongoDB shell by typing:
+   ```bash
+   mongo
+   ```
+
+2. You will be connected to the MongoDB shell, where you can start interacting with the MongoDB server.
+
+### Step 5: Configure MongoDB (Optional)
+
+1. MongoDB configuration file is located at `/etc/mongod.conf`.
+   - You can modify settings such as the data directory, log settings, and network settings in this file.
+
+2. Make any necessary changes to the configuration file and restart the MongoDB service for the changes to take effect:
+   ```bash
+   sudo systemctl restart mongod
+   ```
+
+### Step 6: Secure MongoDB (Optional)
+
+1. Configure authentication:
+   - Follow the MongoDB documentation to create users and enable authentication for your MongoDB deployment.
+
+2. Configure network access control:
+   - Restrict access to MongoDB by configuring network settings in the MongoDB configuration file.
+
+### Step 7: Begin Using MongoDB
+
+1. You can now begin using MongoDB by creating databases, collections, and documents through the MongoDB shell or using MongoDB drivers in your applications.
+
+### Conclusion
+
+By following these steps, you will have successfully set up MongoDB on your Linux-based system. You can now start using MongoDB to store and manage your data. Make sure to refer to the MongoDB documentation for more advanced configurations and best practices.

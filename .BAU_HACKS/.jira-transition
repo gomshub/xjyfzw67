@@ -1,0 +1,97 @@
+To transition a JIRA issue status to "Resolved" using the JIRA REST API and `curl`, you need to perform the following steps:
+
+1. **Find the Transition ID for "Resolved" Status:**
+   - Use the JIRA API to get a list of available transitions for a specific issue.
+
+2. **Perform the Transition:**
+   - Use the JIRA API to transition the issue to the "Resolved" status using the transition ID obtained in step 1.
+
+Here is a step-by-step guide along with the necessary `curl` commands:
+
+### Step 1: Get the Transition ID for "Resolved" Status
+
+First, find the transition ID for the "Resolved" status. Replace `YOUR_ISSUE_KEY` with the key of the JIRA issue you want to transition.
+
+```sh
+#!/bin/bash
+
+# Configuration
+JIRA_URL="https://your-jira-instance"
+USERNAME="your-jira-username"
+PASSWORD="your-jira-password"
+ISSUE_KEY="YOUR_ISSUE_KEY"
+
+# Get transitions
+TRANSITIONS_JSON=$(curl -s -u $USERNAME:$PASSWORD -X GET -H "Content-Type: application/json" "$JIRA_URL/rest/api/2/issue/$ISSUE_KEY/transitions")
+
+# Extract the transition ID for "Resolved"
+TRANSITION_ID=$(echo $TRANSITIONS_JSON | jq -r '.transitions[] | select(.name == "Resolved") | .id')
+
+if [ -z "$TRANSITION_ID" ]; then
+  echo "Error: Unable to find transition ID for 'Resolved'."
+  exit 1
+fi
+
+echo "Transition ID for 'Resolved': $TRANSITION_ID"
+```
+
+### Step 2: Transition the Issue to "Resolved"
+
+Once you have the transition ID, use it to transition the issue to the "Resolved" status.
+
+```sh
+#!/bin/bash
+
+# Configuration
+JIRA_URL="https://your-jira-instance"
+USERNAME="your-jira-username"
+PASSWORD="your-jira-password"
+ISSUE_KEY="YOUR_ISSUE_KEY"
+
+# Get transitions
+TRANSITIONS_JSON=$(curl -s -u $USERNAME:$PASSWORD -X GET -H "Content-Type: application/json" "$JIRA_URL/rest/api/2/issue/$ISSUE_KEY/transitions")
+
+# Extract the transition ID for "Resolved"
+TRANSITION_ID=$(echo $TRANSITIONS_JSON | jq -r '.transitions[] | select(.name == "Resolved") | .id')
+
+if [ -z "$TRANSITION_ID" ]; then
+  echo "Error: Unable to find transition ID for 'Resolved'."
+  exit 1
+fi
+
+# Transition the issue to "Resolved"
+TRANSITION_PAYLOAD=$(cat <<EOF
+{
+  "transition": {
+    "id": "$TRANSITION_ID"
+  }
+}
+EOF
+)
+
+TRANSITION_RESPONSE=$(curl -s -u $USERNAME:$PASSWORD -X POST -H "Content-Type: application/json" -d "$TRANSITION_PAYLOAD" "$JIRA_URL/rest/api/2/issue/$ISSUE_KEY/transitions")
+
+# Check for errors
+if [ -z "$TRANSITION_RESPONSE" ]; then
+  echo "Successfully transitioned issue $ISSUE_KEY to 'Resolved'."
+else
+  echo "Error transitioning issue: $TRANSITION_RESPONSE"
+fi
+```
+
+### Explanation:
+
+1. **Get Transition ID:**
+   - Fetch available transitions for the issue using `curl`.
+   - Use `jq` to parse the JSON response and extract the ID for the "Resolved" transition.
+
+2. **Transition the Issue:**
+   - Construct the payload with the extracted transition ID.
+   - Use `curl` to POST the transition request to the JIRA API.
+
+### Notes:
+- Replace `your-jira-instance` with your actual JIRA instance URL.
+- Replace `YOUR_ISSUE_KEY` with the actual JIRA issue key you want to transition.
+- Ensure `jq` is installed on your system (`sudo apt-get install jq`).
+
+This script will transition a JIRA issue to the "Resolved" status by finding the appropriate transition ID and then performing the transition using the JIRA REST API.
