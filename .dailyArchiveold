@@ -1,0 +1,149 @@
+To ensure that the archival process has completed successfully before purging data from the main database, you can implement a verification step in your script. This step will compare the number of rows and possibly hash values of the data in both the main and archive databases to ensure consistency.
+
+### Verification Steps
+
+1. **Count Rows**: Compare the row counts of the data to be archived in the main database with the row counts in the archive database.
+2. **Hash Values**: Optionally, compute hash values for the data to ensure data integrity.
+
+### Updated Shell Script for Daily Archival with Verification
+
+Here’s an updated version of the `daily_archive.sh` script with verification steps:
+
+```sh
+#!/bin/bash
+
+# Database connection details
+USER="username"
+PASS="password"
+HOST="localhost"
+MAIN_DB="main_db"
+
+ARCHIVE_USER="archive_username"
+ARCHIVE_PASS="archive_password"
+ARCHIVE_HOST="archive_host"
+ARCHIVE_DB="archive_db"
+
+# File to keep track of the current archival period
+ARCHIVE_STATE_FILE="/path/to/archive_state.txt"
+
+# Check if archive state file exists, if not create it starting from 2017-01
+if [ ! -f $ARCHIVE_STATE_FILE ]; then
+    echo "2017-01" > $ARCHIVE_STATE_FILE
+fi
+
+# Read the current archival period from the file
+CURRENT_PERIOD=$(cat $ARCHIVE_STATE_FILE)
+CURRENT_YEAR=$(echo $CURRENT_PERIOD | cut -d'-' -f1)
+CURRENT_MONTH=$(echo $CURRENT_PERIOD | cut -d'-' -f2)
+
+# Determine the next period
+NEXT_YEAR=$CURRENT_YEAR
+NEXT_MONTH=$(($CURRENT_MONTH + 1))
+
+if [ $NEXT_MONTH -gt 12 ]; then
+    NEXT_MONTH=1
+    NEXT_YEAR=$(($NEXT_YEAR + 1))
+fi
+
+NEXT_PERIOD=$(printf "%04d-%02d" $NEXT_YEAR $NEXT_MONTH)
+
+# Archival range
+START_DATE="${CURRENT_YEAR}-${CURRENT_MONTH}-01"
+END_DATE="${NEXT_YEAR}-${NEXT_MONTH}-01"
+
+# Perform the archival for the current period
+mysql -u $USER -p$PASS -h $HOST -D $MAIN_DB -e "
+INSERT INTO federated_archive_orders
+SELECT * FROM orders
+WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE';
+"
+
+mysql -u $USER -p$PASS -h $HOST -D $MAIN_DB -e "
+INSERT INTO federated_archive_order_items
+SELECT oi.*
+FROM order_items oi
+JOIN orders o ON oi.order_id = o.order_id
+WHERE o.order_date >= '$START_DATE' AND o.order_date < '$END_DATE';
+"
+
+# Verify row counts
+MAIN_COUNT_ORDERS=$(mysql -u $USER -p$PASS -h $HOST -D $MAIN_DB -sse "
+SELECT COUNT(*) FROM orders
+WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE';
+")
+
+ARCHIVE_COUNT_ORDERS=$(mysql -u $ARCHIVE_USER -p$ARCHIVE_PASS -h $ARCHIVE_HOST -D $ARCHIVE_DB -sse "
+SELECT COUNT(*) FROM archive_orders
+WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE';
+")
+
+MAIN_COUNT_ORDER_ITEMS=$(mysql -u $USER -p$PASS -h $HOST -D $MAIN_DB -sse "
+SELECT COUNT(*) FROM order_items oi
+JOIN orders o ON oi.order_id = o.order_id
+WHERE o.order_date >= '$START_DATE' AND o.order_date < '$END_DATE';
+")
+
+ARCHIVE_COUNT_ORDER_ITEMS=$(mysql -u $ARCHIVE_USER -p$ARCHIVE_PASS -h $ARCHIVE_HOST -D $ARCHIVE_DB -sse "
+SELECT COUNT(*) FROM archive_order_items
+WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE';
+")
+
+if [ "$MAIN_COUNT_ORDERS" -eq "$ARCHIVE_COUNT_ORDERS" ] && [ "$MAIN_COUNT_ORDER_ITEMS" -eq "$ARCHIVE_COUNT_ORDER_ITEMS" ]; then
+    # Optionally delete the archived data from main_db to free up space
+    mysql -u $USER -p$PASS -h $HOST -D $MAIN_DB -e "
+    DELETE FROM order_items
+    WHERE order_id IN (SELECT order_id FROM orders WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE');
+    "
+
+    mysql -u $USER -p$PASS -h $HOST -D $MAIN_DB -e "
+    DELETE FROM orders
+    WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE';
+    "
+else
+    echo "Archival verification failed for period $CURRENT_PERIOD." | mail -s "Archival Process Failed" your-email@example.com
+    exit 1
+fi
+
+# Update the archive state file with the next period
+echo $NEXT_PERIOD > $ARCHIVE_STATE_FILE
+
+# Check if the archival process is complete (reached 2020-01)
+if [ "$NEXT_PERIOD" == "2020-01" ]; then
+    # Send email notification
+    echo "Archival process completed." | mail -s "Archival Process Completed" your-email@example.com
+
+    # Remove the cron job (assumes the script is scheduled as a daily cron job)
+    crontab -l | grep -v '/path/to/daily_archive.sh' | crontab -
+fi
+```
+
+### Explanation
+
+1. **Verification of Row Counts**:
+   - The script compares the number of rows in the main database and the archive database for the specified period.
+   - If the counts match, the data is considered successfully archived.
+   - If the counts do not match, an email notification is sent, and the script exits without purging the data.
+
+2. **Purging Data**:
+   - Only after successful verification are the data rows purged from the main database.
+
+3. **Email Notifications**:
+   - On failure, an email is sent notifying the failure of the archival process.
+   - On completion of the entire archival process, a notification email is sent, and the cron job is removed.
+
+4. **Scheduling**:
+   - The script is scheduled to run nightly using cron.
+
+### Scheduling with Cron
+
+Schedule the script to run nightly using cron:
+
+```sh
+# Open crontab
+crontab -e
+
+# Add the following line to schedule the script to run every night at midnight
+0 0 * * * /path/to/daily_archive.sh
+```
+
+This approach ensures that data is verified as successfully archived before being purged from the main database, providing an additional layer of safety and integrity to your archival process.
