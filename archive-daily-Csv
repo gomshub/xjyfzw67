@@ -1,0 +1,167 @@
+Since the main database and the archive database are on different SQL servers, you won't be able to directly perform the `INSERT INTO ... SELECT * FROM ...` operation. Instead, you can follow a multi-step approach involving data extraction, transfer, and insertion. Here's a detailed approach to automate this process:
+
+### Steps to Automate the Archival Process
+
+1. **Extract Data from Main Database**: Extract data to a local file (e.g., CSV).
+2. **Transfer Data to Archive Database**: Load the extracted data into the archive database.
+3. **Verify Data Transfer**: Ensure data is successfully transferred.
+4. **Delete Archived Data from Main Database**: Purge the successfully archived data.
+5. **Automate the Process**: Use a cron job to schedule the script to run nightly.
+6. **Send Notification**: Email notification upon completion.
+
+### Implementation
+
+#### 1. Shell Script to Automate the Archival Process
+
+Here's a comprehensive shell script to handle the steps outlined above:
+
+```sh
+#!/bin/bash
+
+# Database connection details
+MAIN_USER="main_username"
+MAIN_PASS="main_password"
+MAIN_HOST="main_db_host"
+MAIN_DB="main_db"
+
+ARCHIVE_USER="archive_username"
+ARCHIVE_PASS="archive_password"
+ARCHIVE_HOST="archive_db_host"
+ARCHIVE_DB="archive_db"
+
+# Email notification details
+EMAIL="your-email@example.com"
+
+# File to keep track of the current archival period
+ARCHIVE_STATE_FILE="/path/to/archive_state.txt"
+
+# Check if archive state file exists, if not create it starting from 2017-01
+if [ ! -f $ARCHIVE_STATE_FILE ]; then
+    echo "2017-01" > $ARCHIVE_STATE_FILE
+fi
+
+# Read the current archival period from the file
+CURRENT_PERIOD=$(cat $ARCHIVE_STATE_FILE)
+CURRENT_YEAR=$(echo $CURRENT_PERIOD | cut -d'-' -f1)
+CURRENT_MONTH=$(echo $CURRENT_PERIOD | cut -d'-' -f2)
+
+# Determine the next period
+NEXT_YEAR=$CURRENT_YEAR
+NEXT_MONTH=$(($CURRENT_MONTH + 1))
+
+if [ $NEXT_MONTH -gt 12 ]; then
+    NEXT_MONTH=1
+    NEXT_YEAR=$(($NEXT_YEAR + 1))
+fi
+
+NEXT_PERIOD=$(printf "%04d-%02d" $NEXT_YEAR $NEXT_MONTH)
+
+# Archival range
+START_DATE="${CURRENT_YEAR}-${CURRENT_MONTH}-01"
+END_DATE="${NEXT_YEAR}-${NEXT_MONTH}-01"
+
+# File paths for data extraction
+ORDERS_FILE="/path/to/orders_${CURRENT_PERIOD}.csv"
+ORDER_ITEMS_FILE="/path/to/order_items_${CURRENT_PERIOD}.csv"
+
+# Extract data from main database to CSV files
+mysql -u $MAIN_USER -p$MAIN_PASS -h $MAIN_HOST -D $MAIN_DB -e "
+SELECT * INTO OUTFILE '$ORDERS_FILE'
+FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '\"'
+LINES TERMINATED BY '\n'
+FROM orders
+WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE';
+"
+
+mysql -u $MAIN_USER -p$MAIN_PASS -h $MAIN_HOST -D $MAIN_DB -e "
+SELECT oi.* INTO OUTFILE '$ORDER_ITEMS_FILE'
+FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '\"'
+LINES TERMINATED BY '\n'
+FROM order_items oi
+JOIN orders o ON oi.order_id = o.order_id
+WHERE o.order_date >= '$START_DATE' AND o.order_date < '$END_DATE';
+"
+
+# Transfer data to archive database
+mysql -u $ARCHIVE_USER -p$ARCHIVE_PASS -h $ARCHIVE_HOST -D $ARCHIVE_DB -e "
+LOAD DATA INFILE '$ORDERS_FILE'
+INTO TABLE orders
+FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '\"'
+LINES TERMINATED BY '\n';
+"
+
+mysql -u $ARCHIVE_USER -p$ARCHIVE_PASS -h $ARCHIVE_HOST -D $ARCHIVE_DB -e "
+LOAD DATA INFILE '$ORDER_ITEMS_FILE'
+INTO TABLE order_items
+FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '\"'
+LINES TERMINATED BY '\n';
+"
+
+# Verify row counts
+MAIN_COUNT_ORDERS=$(mysql -u $MAIN_USER -p$MAIN_PASS -h $MAIN_HOST -D $MAIN_DB -sse "
+SELECT COUNT(*) FROM orders
+WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE';
+")
+
+ARCHIVE_COUNT_ORDERS=$(mysql -u $ARCHIVE_USER -p$ARCHIVE_PASS -h $ARCHIVE_HOST -D $ARCHIVE_DB -sse "
+SELECT COUNT(*) FROM orders
+WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE';
+")
+
+MAIN_COUNT_ORDER_ITEMS=$(mysql -u $MAIN_USER -p$MAIN_PASS -h $MAIN_HOST -D $MAIN_DB -sse "
+SELECT COUNT(*) FROM order_items oi
+JOIN orders o ON oi.order_id = o.order_id
+WHERE o.order_date >= '$START_DATE' AND order_date < '$END_DATE';
+")
+
+ARCHIVE_COUNT_ORDER_ITEMS=$(mysql -u $ARCHIVE_USER -p$ARCHIVE_PASS -h $ARCHIVE_HOST -D $ARCHIVE_DB -sse "
+SELECT COUNT(*) FROM order_items
+WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE';
+")
+
+if [ "$MAIN_COUNT_ORDERS" -eq "$ARCHIVE_COUNT_ORDERS" ] && [ "$MAIN_COUNT_ORDER_ITEMS" -eq "$ARCHIVE_COUNT_ORDER_ITEMS" ]; then
+    # Purge data from main database
+    mysql -u $MAIN_USER -p$MAIN_PASS -h $MAIN_HOST -D $MAIN_DB -e "
+    DELETE FROM order_items
+    WHERE order_id IN (SELECT order_id FROM orders WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE');
+    "
+
+    mysql -u $MAIN_USER -p$MAIN_PASS -h $MAIN_HOST -D $MAIN_DB -e "
+    DELETE FROM orders
+    WHERE order_date >= '$START_DATE' AND order_date < '$END_DATE';
+    "
+else
+    echo "Archival verification failed for period $CURRENT_PERIOD." | mail -s "Archival Process Failed" $EMAIL
+    exit 1
+fi
+
+# Update the archive state file with the next period
+echo $NEXT_PERIOD > $ARCHIVE_STATE_FILE
+
+# Check if the archival process is complete (reached 2020-01)
+if [ "$NEXT_PERIOD" == "2020-01" ]; then
+    # Send email notification
+    echo "Archival process completed." | mail -s "Archival Process Completed" $EMAIL
+
+    # Remove the cron job (assumes the script is scheduled as a daily cron job)
+    crontab -l | grep -v '/path/to/daily_archive.sh' | crontab -
+fi
+```
+
+### 2. Set Up a Cron Job
+
+To run this script nightly, set up a cron job. Edit the crontab using `crontab -e` and add the following line:
+
+```sh
+0 2 * * * /path/to/daily_archive.sh
+```
+
+This line schedules the script to run every day at 2 AM.
+
+### Summary
+
+1. **Shell Script**: Automate the extraction, transfer, verification, and deletion of data.
+2. **Cron Job**: Schedule the script to run nightly.
+3. **Email Notification**: Send notifications upon completion or failure.
+
+This approach ensures that data is archived in a controlled, automated manner, and only purged from the main database once the archival is verified to be successful.
