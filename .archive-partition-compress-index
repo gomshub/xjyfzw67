@@ -1,3 +1,190 @@
+If `SHOW CREATE TABLE` is not working for some reason, and you need an alternative method to retrieve the table schema, you can use the `INFORMATION_SCHEMA` tables. Here’s a step-by-step guide on how to achieve this:
+
+### Step 1: Retrieve Column Definitions
+
+You can query the `INFORMATION_SCHEMA.COLUMNS` to get the column definitions of your table.
+
+```sql
+SELECT 
+    COLUMN_NAME, 
+    COLUMN_TYPE, 
+    IS_NULLABLE, 
+    COLUMN_KEY, 
+    COLUMN_DEFAULT, 
+    EXTRA 
+FROM 
+    INFORMATION_SCHEMA.COLUMNS 
+WHERE 
+    TABLE_SCHEMA = 'your_database_name' 
+    AND TABLE_NAME = 'your_table_name';
+```
+
+### Step 2: Retrieve Index Definitions
+
+You can query the `INFORMATION_SCHEMA.STATISTICS` to get the index definitions.
+
+```sql
+SELECT 
+    INDEX_NAME, 
+    COLUMN_NAME, 
+    NON_UNIQUE, 
+    SEQ_IN_INDEX 
+FROM 
+    INFORMATION_SCHEMA.STATISTICS 
+WHERE 
+    TABLE_SCHEMA = 'your_database_name' 
+    AND TABLE_NAME = 'your_table_name';
+```
+
+### Step 3: Construct the `CREATE TABLE` Statement
+
+You can combine the information from the above queries to construct a `CREATE TABLE` statement manually. Here’s a Python script that performs these steps:
+
+### Python Script to Retrieve and Construct Table Schema
+
+```python
+import mysql.connector
+from config import Config
+
+def connect_db(config):
+    return mysql.connector.connect(
+        user=config['user'],
+        password=config['password'],
+        host=config['host'],
+        database=config['database']
+    )
+
+def get_table_schema(database, table):
+    conn = connect_db(Config.MAIN_DB_CONFIG)
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        # Get column definitions
+        cursor.execute("""
+        SELECT 
+            COLUMN_NAME, 
+            COLUMN_TYPE, 
+            IS_NULLABLE, 
+            COLUMN_KEY, 
+            COLUMN_DEFAULT, 
+            EXTRA 
+        FROM 
+            INFORMATION_SCHEMA.COLUMNS 
+        WHERE 
+            TABLE_SCHEMA = %s 
+            AND TABLE_NAME = %s;
+        """, (database, table))
+        columns = cursor.fetchall()
+
+        # Get index definitions
+        cursor.execute("""
+        SELECT 
+            INDEX_NAME, 
+            COLUMN_NAME, 
+            NON_UNIQUE, 
+            SEQ_IN_INDEX 
+        FROM 
+            INFORMATION_SCHEMA.STATISTICS 
+        WHERE 
+            TABLE_SCHEMA = %s 
+            AND TABLE_NAME = %s;
+        """, (database, table))
+        indexes = cursor.fetchall()
+
+        # Construct the CREATE TABLE statement
+        create_table_stmt = f"CREATE TABLE {table} (\n"
+        for column in columns:
+            col_def = f"    {column['COLUMN_NAME']} {column['COLUMN_TYPE']}"
+            if column['IS_NULLABLE'] == 'NO':
+                col_def += " NOT NULL"
+            if column['COLUMN_DEFAULT'] is not None:
+                col_def += f" DEFAULT {column['COLUMN_DEFAULT']}"
+            if column['EXTRA']:
+                col_def += f" {column['EXTRA']}"
+            create_table_stmt += col_def + ",\n"
+
+        # Add primary key constraint
+        primary_keys = [col['COLUMN_NAME'] for col in columns if col['COLUMN_KEY'] == 'PRI']
+        if primary_keys:
+            create_table_stmt += f"    PRIMARY KEY ({', '.join(primary_keys)})"
+
+        # Add other indexes
+        unique_indexes = {}
+        non_unique_indexes = {}
+        for idx in indexes:
+            if idx['NON_UNIQUE'] == 0:
+                if idx['INDEX_NAME'] not in unique_indexes:
+                    unique_indexes[idx['INDEX_NAME']] = []
+                unique_indexes[idx['INDEX_NAME']].append(idx['COLUMN_NAME'])
+            else:
+                if idx['INDEX_NAME'] not in non_unique_indexes:
+                    non_unique_indexes[idx['INDEX_NAME']] = []
+                non_unique_indexes[idx['INDEX_NAME']].append(idx['COLUMN_NAME'])
+
+        for idx_name, idx_cols in unique_indexes.items():
+            create_table_stmt += f",\n    UNIQUE INDEX {idx_name} ({', '.join(idx_cols)})"
+
+        for idx_name, idx_cols in non_unique_indexes.items():
+            create_table_stmt += f",\n    INDEX {idx_name} ({', '.join(idx_cols)})"
+
+        # Remove the last comma and newline, add closing parenthesis
+        create_table_stmt = create_table_stmt.rstrip(",\n") + "\n);"
+
+        print(create_table_stmt)
+
+    except mysql.connector.Error as err:
+        print(f"Error: {err}")
+    finally:
+        cursor.close()
+        conn.close()
+
+if __name__ == "__main__":
+    get_table_schema('your_database_name', 'your_table_name')
+```
+
+### Output
+
+This script will print the `CREATE TABLE` statement for your table. For example:
+
+```sql
+CREATE TABLE orders (
+    order_id INT NOT NULL auto_increment,
+    customer_id INT,
+    order_date DATE NOT NULL,
+    total_amount DECIMAL(10,2),
+    PRIMARY KEY (order_id),
+    INDEX idx_customer_id (customer_id),
+    UNIQUE INDEX idx_order_date (order_date)
+);
+```
+
+### Adding Partitioning
+
+Once you have the `CREATE TABLE` statement, you can modify it to add partitioning:
+
+```sql
+CREATE TABLE orders (
+    order_id INT NOT NULL auto_increment,
+    customer_id INT,
+    order_date DATE NOT NULL,
+    total_amount DECIMAL(10,2),
+    PRIMARY KEY (order_id, order_date),
+    INDEX idx_customer_id (customer_id)
+) ENGINE=InnoDB
+PARTITION BY RANGE (YEAR(order_date)) (
+    PARTITION p2017 VALUES LESS THAN (2018),
+    PARTITION p2018 VALUES LESS THAN (2019),
+    PARTITION p2019 VALUES LESS THAN (2020),
+    PARTITION p2020 VALUES LESS THAN (2021),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+```
+
+This way, you can create a new partitioned table using the schema information obtained from the `INFORMATION_SCHEMA`.
+
+
+=#=
+
 To automate the archival process weekly for data older than 3 years, we can use MySQL federated tables to facilitate data transfer between the main and archive databases. This process involves the following steps:
 
 1. **Create Federated Tables**: Create federated tables in the main database to access the archive database tables.
