@@ -1,3 +1,150 @@
+AUTOMATE EXISTING TABLE PARTITION
+
+Converting an existing very large table to a partitioned table without creating a temporary table requires careful planning and execution. Oracle allows you to convert a non-partitioned table to a partitioned table using the `ALTER TABLE` statement. You can then set up a mechanism to add partitions dynamically every year. Here is a step-by-step guide to achieve this:
+
+### Step 1: Enable Row Movement
+
+First, you need to enable row movement for the table. This allows rows to be moved between partitions.
+
+```sql
+ALTER TABLE your_table ENABLE ROW MOVEMENT;
+```
+
+### Step 2: Convert the Table to a Partitioned Table
+
+Use the `ALTER TABLE` statement to partition the table. This example assumes you want to partition by the `created_at` column and use yearly partitions.
+
+```sql
+ALTER TABLE your_table
+MODIFY PARTITION BY RANGE (created_at) (
+    PARTITION p_before_2020 VALUES LESS THAN (TO_DATE('01-JAN-2020', 'DD-MON-YYYY')),
+    PARTITION p2020 VALUES LESS THAN (TO_DATE('01-JAN-2021', 'DD-MON-YYYY')),
+    PARTITION p2021 VALUES LESS THAN (TO_DATE('01-JAN-2022', 'DD-MON-YYYY')),
+    PARTITION p2022 VALUES LESS THAN (TO_DATE('01-JAN-2023', 'DD-MON-YYYY')),
+    PARTITION p2023 VALUES LESS THAN (TO_DATE('01-JAN-2024', 'DD-MON-YYYY'))
+    -- Add more partitions as needed
+);
+```
+
+### Step 3: Create a Procedure to Add Partitions Dynamically
+
+Next, create a PL/SQL procedure that will add a new partition for the next year if it doesn't already exist.
+
+```sql
+CREATE OR REPLACE PROCEDURE add_partition_for_next_year IS
+    v_next_year NUMBER;
+    v_partition_name VARCHAR2(50);
+BEGIN
+    -- Calculate the next year
+    SELECT EXTRACT(YEAR FROM SYSDATE) + 1 INTO v_next_year FROM DUAL;
+
+    -- Define the partition name
+    v_partition_name := 'p' || TO_CHAR(v_next_year);
+
+    -- Add the new partition
+    BEGIN
+        EXECUTE IMMEDIATE 'ALTER TABLE your_table ADD PARTITION ' || v_partition_name ||
+                          ' VALUES LESS THAN (TO_DATE(''01-JAN-' || (v_next_year + 1) || ''', ''DD-MON-YYYY''))';
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE = -14074 THEN
+                DBMS_OUTPUT.PUT_LINE('Partition ' || v_partition_name || ' already exists.');
+            ELSE
+                RAISE;
+            END IF;
+    END;
+END;
+/
+```
+
+### Step 4: Schedule the Procedure to Run Yearly
+
+Use Oracle's `DBMS_SCHEDULER` to schedule the procedure to run yearly, ensuring new partitions are created automatically.
+
+```sql
+BEGIN
+    DBMS_SCHEDULER.create_job (
+        job_name        => 'ADD_YEARLY_PARTITION',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN add_partition_for_next_year; END;',
+        start_date      => TRUNC(SYSDATE) + INTERVAL '1' YEAR,
+        repeat_interval => 'FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=31;BYHOUR=23;BYMINUTE=59;BYSECOND=59',
+        enabled         => TRUE
+    );
+END;
+/
+```
+
+### Putting It All Together
+
+Here is the full script, assuming your existing table is called `your_table` and has a `created_at` column suitable for partitioning:
+
+```sql
+-- Step 1: Enable row movement
+ALTER TABLE your_table ENABLE ROW MOVEMENT;
+
+-- Step 2: Convert the table to a partitioned table
+ALTER TABLE your_table
+MODIFY PARTITION BY RANGE (created_at) (
+    PARTITION p_before_2020 VALUES LESS THAN (TO_DATE('01-JAN-2020', 'DD-MON-YYYY')),
+    PARTITION p2020 VALUES LESS THAN (TO_DATE('01-JAN-2021', 'DD-MON-YYYY')),
+    PARTITION p2021 VALUES LESS THAN (TO_DATE('01-JAN-2022', 'DD-MON-YYYY')),
+    PARTITION p2022 VALUES LESS THAN (TO_DATE('01-JAN-2023', 'DD-MON-YYYY')),
+    PARTITION p2023 VALUES LESS THAN (TO_DATE('01-JAN-2024', 'DD-MON-YYYY'))
+    -- Add more partitions as needed
+);
+
+-- Step 3: Create a procedure to add a new partition
+CREATE OR REPLACE PROCEDURE add_partition_for_next_year IS
+    v_next_year NUMBER;
+    v_partition_name VARCHAR2(50);
+BEGIN
+    -- Calculate the next year
+    SELECT EXTRACT(YEAR FROM SYSDATE) + 1 INTO v_next_year FROM DUAL;
+    
+    -- Define the partition name
+    v_partition_name := 'p' || TO_CHAR(v_next_year);
+
+    -- Add the new partition
+    BEGIN
+        EXECUTE IMMEDIATE 'ALTER TABLE your_table ADD PARTITION ' || v_partition_name ||
+                          ' VALUES LESS THAN (TO_DATE(''01-JAN-' || (v_next_year + 1) || ''', ''DD-MON-YYYY''))';
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE = -14074 THEN
+                DBMS_OUTPUT.PUT_LINE('Partition ' || v_partition_name || ' already exists.');
+            ELSE
+                RAISE;
+            END IF;
+    END;
+END;
+/
+
+-- Step 4: Schedule the procedure to run yearly
+BEGIN
+    DBMS_SCHEDULER.create_job (
+        job_name        => 'ADD_YEARLY_PARTITION',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN add_partition_for_next_year; END;',
+        start_date      => TRUNC(SYSDATE) + INTERVAL '1' YEAR,
+        repeat_interval => 'FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=31;BYHOUR=23;BYMINUTE=59;BYSECOND=59',
+        enabled         => TRUE
+    );
+END;
+/
+```
+
+### Notes:
+
+- **Enabling Row Movement**: Ensure that enabling row movement is acceptable for your application, as it allows rows to move between partitions.
+- **Testing**: Test the conversion and partitioning on a staging or test environment before applying it to production to ensure it works as expected.
+- **Backup**: Always take a backup of your data before performing such operations on production systems.
+
+By following these steps, you can convert your existing table to a partitioned table and dynamically add partitions yearly, ensuring efficient management of your data over time.
+
+
+=##=
+
 AUTOMATE PARTITIONING
 
 
