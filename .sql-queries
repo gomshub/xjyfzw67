@@ -1,4 +1,106 @@
 
+COUNT ROWS FOR EACH YEAR BY TEMP TABLE
+
+
+To efficiently determine the number of rows created in a specific year and the size of those rows in a very large table without causing significant performance issues, you need to leverage indexing and Oracle Database's built-in tools for segment size estimation.
+
+### Step 1: Ensure Efficient Indexing
+To speed up the counting process, ensure that the `created_at` column (or the timestamp column) is indexed. This helps in quickly filtering the rows based on the year.
+
+```sql
+CREATE INDEX idx_created_at ON your_table (created_at);
+```
+
+### Step 2: Efficient Row Count Query
+Use the indexed `created_at` column to count the rows created in the specific year:
+
+```sql
+SELECT COUNT(*) AS row_count
+FROM your_table
+WHERE created_at >= TO_DATE('01-JAN-2023', 'DD-MON-YYYY')
+  AND created_at < TO_DATE('01-JAN-2024', 'DD-MON-YYYY');
+```
+
+This query benefits from the index on `created_at` and avoids a full table scan by directly filtering the relevant rows.
+
+### Step 3: Estimating Size Using Partitioning or Subquery
+To estimate the size of the rows created in the specific year, you can either partition the table (if it isn't already partitioned by year) or use a subquery with `DBMS_SPACE`.
+
+#### Option 1: Using Partitioning
+If your table is partitioned by year, the `DBA_SEGMENTS` view can give you the size of the partition directly. This avoids scanning the entire table.
+
+```sql
+SELECT SUM(BYTES) / (1024 * 1024 * 1024) AS size_gb
+FROM DBA_SEGMENTS
+WHERE SEGMENT_NAME = 'YOUR_TABLE'
+  AND PARTITION_NAME = 'PARTITION_2023';  -- Replace with your actual partition name for 2023
+```
+
+#### Option 2: Using Subquery with `DBMS_SPACE`
+If partitioning is not an option, you can estimate the size using a subquery to select rows created in the specific year and then utilize the `DBMS_SPACE` package. Note that `DBMS_SPACE` can only give segment-level details, so this method involves some estimation.
+
+First, create a temporary table to hold the relevant rows (to avoid performance issues in a very large table, ensure you have enough space and the operation can be done during off-peak hours):
+
+```sql
+CREATE TABLE temp_table AS
+SELECT *
+FROM your_table
+WHERE created_at >= TO_DATE('01-JAN-2023', 'DD-MON-YYYY')
+  AND created_at < TO_DATE('01-JAN-2024', 'DD-MON-YYYY');
+```
+
+Then, get the size of this temporary table using `DBA_SEGMENTS`:
+
+```sql
+SELECT SUM(BYTES) / (1024 * 1024 * 1024) AS size_gb
+FROM DBA_SEGMENTS
+WHERE SEGMENT_NAME = 'TEMP_TABLE';
+```
+
+### Putting It All Together
+Here is a combined approach that ensures efficient row counting and size estimation:
+
+1. **Index the `created_at` column**:
+
+    ```sql
+    CREATE INDEX idx_created_at ON your_table (created_at);
+    ```
+
+2. **Count rows created in 2023**:
+
+    ```sql
+    SELECT COUNT(*) AS row_count
+    FROM your_table
+    WHERE created_at >= TO_DATE('01-JAN-2023', 'DD-MON-YYYY')
+      AND created_at < TO_DATE('01-JAN-2024', 'DD-MON-YYYY');
+    ```
+
+3. **Estimate the size of rows created in 2023**:
+
+    ```sql
+    CREATE TABLE temp_table AS
+    SELECT *
+    FROM your_table
+    WHERE created_at >= TO_DATE('01-JAN-2023', 'DD-MON-YYYY')
+      AND created_at < TO_DATE('01-JAN-2024', 'DD-MON-YYYY');
+
+    SELECT SUM(BYTES) / (1024 * 1024 * 1024) AS size_gb
+    FROM DBA_SEGMENTS
+    WHERE SEGMENT_NAME = 'TEMP_TABLE';
+    ```
+
+4. **Drop the temporary table when done**:
+
+    ```sql
+    DROP TABLE temp_table;
+    ```
+
+### Conclusion
+By leveraging indexing and efficient querying, you can count the rows and estimate their size without causing significant performance issues. If your table is partitioned by year, directly querying the partition size is the most efficient method. Otherwise, creating a temporary table and analyzing its size provides a practical alternative.
+
+
+
+=#=#=#
 To determine the number of rows created in a specific year and the size of those rows in GB in Oracle Database, you can follow these steps:
 
 ### Step 1: Count Rows Created in a Specific Year
