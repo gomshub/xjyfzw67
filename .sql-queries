@@ -1,0 +1,41 @@
+
+To get the last 10 rows of a table in Oracle Database, you typically use the `ROWNUM` pseudo-column in combination with a subquery that orders the rows. Here’s a common approach:
+
+1. **Order the rows** to determine which ones are the "last" according to your criteria.
+2. **Limit the result** to the last 10 rows.
+
+Here is a step-by-step example:
+
+Suppose you have a table named `your_table` with a column `id` that you want to use to determine the order. If `id` is the column that determines the row's position (e.g., higher `id` means later rows), you can do the following:
+
+```sql
+SELECT * FROM (
+    SELECT * FROM your_table
+    ORDER BY id DESC
+) 
+WHERE ROWNUM <= 10;
+```
+
+In this query:
+- The inner query `SELECT * FROM your_table ORDER BY id DESC` sorts the table in descending order, so the "last" rows according to `id` are at the top.
+- The outer query `SELECT * FROM (...) WHERE ROWNUM <= 10` limits the result to the first 10 rows of this sorted list, which corresponds to the last 10 rows in the original order.
+
+If you want the results to be in the original order, you can add another layer of sorting:
+
+```sql
+SELECT * FROM (
+    SELECT * FROM (
+        SELECT * FROM your_table
+        ORDER BY id DESC
+    ) 
+    WHERE ROWNUM <= 10
+)
+ORDER BY id;
+```
+
+In this extended query:
+- The innermost query sorts the rows in descending order.
+- The middle query limits to the top 10 rows.
+- The outer query re-sorts these 10 rows in ascending order to match the original order.
+
+Adjust the `ORDER BY` clause based on the specific criteria you have for determining the last rows (it could be based on a timestamp, another column, etc.).
