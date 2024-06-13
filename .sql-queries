@@ -1,4 +1,79 @@
 
+To determine the number of rows created in a specific year and the size of those rows in GB in Oracle Database, you can follow these steps:
+
+### Step 1: Count Rows Created in a Specific Year
+
+Assuming you have a `created_at` column that records the timestamp when rows are created, you can count the rows created in a specific year using the `EXTRACT` function:
+
+```sql
+SELECT COUNT(*) AS row_count
+FROM your_table
+WHERE EXTRACT(YEAR FROM created_at) = 2023;
+```
+
+### Step 2: Calculate the Size of Rows Created in a Specific Year
+
+To calculate the size of these rows, you can use the `DBMS_LOB` package for LOB data types, or `VSIZE` for other data types. However, for a more comprehensive size calculation, you may need to consider all columns and their data types. 
+
+Here’s an example that gives a rough estimate of the size by summing the lengths of each column in bytes:
+
+```sql
+SELECT SUM(VSIZE(column1) + VSIZE(column2) + VSIZE(column3) + ...) / (1024 * 1024 * 1024) AS size_gb
+FROM your_table
+WHERE EXTRACT(YEAR FROM created_at) = 2023;
+```
+
+Replace `column1`, `column2`, `column3`, etc., with your actual column names.
+
+### Step 3: Use DBA_SEGMENTS for Accurate Size
+
+For a more accurate and comprehensive size calculation, you can use the `DBA_SEGMENTS` view to get the size of the segments allocated for the table. However, this view provides the total size of the table, not just the rows created in a specific year. If you want to estimate the size more precisely, you may need to perform some additional calculations or use the `DBMS_SPACE` package.
+
+Here’s a query to get the total size of the table:
+
+```sql
+SELECT SEGMENT_NAME, BYTES / (1024 * 1024 * 1024) AS size_gb
+FROM DBA_SEGMENTS
+WHERE SEGMENT_NAME = 'YOUR_TABLE'
+AND SEGMENT_TYPE = 'TABLE';
+```
+
+### Combining Both Steps
+
+Combining both steps into a single script that provides both the row count and the estimated size in GB for rows created in a specific year:
+
+```sql
+-- Counting rows created in a specific year
+SELECT COUNT(*) AS row_count
+FROM your_table
+WHERE EXTRACT(YEAR FROM created_at) = 2023;
+
+-- Estimating the size of these rows in GB
+SELECT SUM(VSIZE(column1) + VSIZE(column2) + VSIZE(column3) + ...) / (1024 * 1024 * 1024) AS size_gb
+FROM your_table
+WHERE EXTRACT(YEAR FROM created_at) = 2023;
+```
+
+### Example
+
+Assuming your table `orders` has columns `order_id`, `order_date`, `customer_id`, and `order_amount`:
+
+```sql
+-- Counting rows created in 2023
+SELECT COUNT(*) AS row_count
+FROM orders
+WHERE EXTRACT(YEAR FROM order_date) = 2023;
+
+-- Estimating the size of these rows in GB
+SELECT SUM(VSIZE(order_id) + VSIZE(order_date) + VSIZE(customer_id) + VSIZE(order_amount)) / (1024 * 1024 * 1024) AS size_gb
+FROM orders
+WHERE EXTRACT(YEAR FROM order_date) = 2023;
+```
+
+By running these queries, you can get both the number of rows created in a specific year and an estimate of their size in GB. For a more accurate size calculation, especially for large tables or tables with complex data types, consider using the `DBMS_SPACE` package or analyzing the storage statistics more deeply.
+
+
+
 =#==##
 
 To filter rows in a table by the year they were created, you typically need a column that stores the creation timestamp, such as `created_at` or `creation_date`. Assuming you have such a column, you can use the `EXTRACT` function to get the year from a date or timestamp column in Oracle SQL.
