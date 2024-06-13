@@ -1,4 +1,67 @@
 
+=#==##
+
+To filter rows in a table by the year they were created, you typically need a column that stores the creation timestamp, such as `created_at` or `creation_date`. Assuming you have such a column, you can use the `EXTRACT` function to get the year from a date or timestamp column in Oracle SQL.
+
+Here's a general approach to filter rows by a specific year:
+
+```sql
+SELECT *
+FROM your_table
+WHERE EXTRACT(YEAR FROM created_at) = 2023;
+```
+
+This query extracts the year from the `created_at` column and compares it to the desired year (2023 in this example).
+
+If you want to dynamically specify the year, you can use a bind variable or a parameter. Here’s an example using a bind variable:
+
+```sql
+SELECT *
+FROM your_table
+WHERE EXTRACT(YEAR FROM created_at) = :year;
+```
+
+When running this query, you would then supply the value for `:year`.
+
+### Example with specific year filtering
+Suppose your table is named `orders` and has a column `order_date` that stores the timestamp of when the order was created. If you want to get all rows where the `order_date` is in the year 2021, the query would look like this:
+
+```sql
+SELECT *
+FROM orders
+WHERE EXTRACT(YEAR FROM order_date) = 2021;
+```
+
+### Example with a range of years
+If you need to filter rows created within a range of years, you can modify the query to use a range condition:
+
+```sql
+SELECT *
+FROM orders
+WHERE EXTRACT(YEAR FROM order_date) BETWEEN 2020 AND 2023;
+```
+
+### Example with specific date format
+If your date column is stored as a string, you would first need to convert it to a date type using the `TO_DATE` function. Here is an example assuming `order_date` is stored as a string in the format 'YYYY-MM-DD':
+
+```sql
+SELECT *
+FROM orders
+WHERE EXTRACT(YEAR FROM TO_DATE(order_date, 'YYYY-MM-DD')) = 2023;
+```
+
+### Handling performance considerations
+For large tables, using `EXTRACT` in the `WHERE` clause can be inefficient because it requires scanning the entire table. If you frequently query by year, consider creating a function-based index on `EXTRACT(YEAR FROM created_at)`:
+
+```sql
+CREATE INDEX idx_year_created_at ON your_table (EXTRACT(YEAR FROM created_at));
+```
+
+This can significantly improve query performance for such filters.
+
+=#=#=
+
+
 To get the last 10 rows of a table in Oracle Database, you typically use the `ROWNUM` pseudo-column in combination with a subquery that orders the rows. Here’s a common approach:
 
 1. **Order the rows** to determine which ones are the "last" according to your criteria.
