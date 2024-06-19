@@ -1,0 +1,107 @@
+To integrate Excel data into Cucumber scenarios using Java, you'll need to follow a process similar to the one outlined earlier, but with a focus on how to read Excel files and use the data within Cucumber step definitions.
+
+Here's a step-by-step guide:
+
+1. **Add Dependencies**: Ensure you have the necessary dependencies for Apache POI and Cucumber in your `pom.xml` (if you are using Maven).
+
+    ```xml
+    <dependency>
+        <groupId>org.apache.poi</groupId>
+        <artifactId>poi-ooxml</artifactId>
+        <version>5.2.3</version>
+    </dependency>
+    <dependency>
+        <groupId>io.cucumber</groupId>
+        <artifactId>cucumber-java</artifactId>
+        <version>7.0.0</version>
+    </dependency>
+    ```
+
+2. **Create an Excel Reader Utility**: This utility class will read the data from the Excel file.
+
+    ```java
+    import org.apache.poi.ss.usermodel.*;
+    import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+
+    import java.io.FileInputStream;
+    import java.io.IOException;
+    import java.util.HashMap;
+    import java.util.Map;
+
+    public class ExcelReader {
+
+        public static Map<String, String> readExcelData(String filePath, String sheetName) throws IOException {
+            FileInputStream file = new FileInputStream(filePath);
+            Workbook workbook = new XSSFWorkbook(file);
+            Sheet sheet = workbook.getSheet(sheetName);
+            Map<String, String> data = new HashMap<>();
+
+            for (Row row : sheet) {
+                Cell keyCell = row.getCell(0);
+                Cell valueCell = row.getCell(1);
+                if (keyCell != null && valueCell != null) {
+                    String key = keyCell.getStringCellValue();
+                    String value = valueCell.getStringCellValue();
+                    data.put(key, value);
+                }
+            }
+            workbook.close();
+            return data;
+        }
+    }
+    ```
+
+3. **Define Step Definitions**: Use the data read from the Excel file in your Cucumber step definitions.
+
+    ```java
+    import io.cucumber.java.en.Given;
+    import java.io.IOException;
+    import java.util.Map;
+
+    public class StepDefinitions {
+
+        @Given("the user data from {string} sheet {string}")
+        public void theUserDataFromExcelSheet(String filePath, String sheetName) throws IOException {
+            Map<String, String> userData = ExcelReader.readExcelData(filePath, sheetName);
+
+            // Use the data in your test
+            String username = userData.get("username");
+            String password = userData.get("password");
+
+            // Assuming you have a method to handle login
+            login(username, password);
+        }
+
+        private void login(String username, String password) {
+            // Implementation of the login method
+            System.out.println("Logging in with username: " + username + " and password: " + password);
+        }
+    }
+    ```
+
+4. **Create a Feature File**: Define a Cucumber feature that uses the step to read data from an Excel file.
+
+    ```gherkin
+    Feature: Login
+
+      Scenario: Successful login with data from Excel
+        Given the user data from "src/test/resources/data.xlsx" sheet "LoginData"
+    ```
+
+5. **Run the Cucumber Test**: Ensure that your Excel file (`data.xlsx`) exists in the specified location with the appropriate data.
+
+### Example Excel File (`data.xlsx`)
+
+| A          | B           |
+|------------|-------------|
+| username   | testuser    |
+| password   | testpass    |
+
+### Explanation
+
+1. **Dependencies**: Apache POI for reading Excel files and Cucumber for BDD.
+2. **ExcelReader Utility**: Reads the Excel file and extracts data into a `Map<String, String>`.
+3. **Step Definitions**: Reads the data from the Excel file using the utility and uses it in the test.
+4. **Feature File**: Specifies the scenario where data is read from an Excel file.
+
+By following these steps, you can successfully integrate Excel data into your Cucumber tests using Java. This approach allows you to create data-driven tests that can dynamically read input values from Excel files.
