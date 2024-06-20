@@ -1,0 +1,96 @@
+To retrieve file content from an Artifactory repository using a shell script, you can use `curl` to make an HTTP request to the Artifactory REST API. Below is a basic example of how to achieve this. 
+
+### Steps:
+
+1. **Set up Artifactory Credentials and Repository Information**:
+   - Define your Artifactory URL, repository, and file path.
+   - Provide your Artifactory credentials.
+
+2. **Use `curl` to Fetch the File**:
+   - Make an HTTP GET request to download the file.
+
+### Example Shell Script:
+
+```sh
+#!/bin/bash
+
+# Configuration
+ARTIFACTORY_URL="https://your-artifactory-instance/artifactory"
+REPO="your-repo-name"
+FILE_PATH="path/to/your/file.txt"
+USERNAME="your-username"
+PASSWORD="your-password"
+OUTPUT_FILE="/tmp/downloaded_file.txt"
+
+# Fetch file from Artifactory
+response=$(curl -s -u $USERNAME:$PASSWORD -w "%{http_code}" -o $OUTPUT_FILE "$ARTIFACTORY_URL/$REPO/$FILE_PATH")
+http_code=$(tail -n1 <<< "$response")
+
+if [ "$http_code" -ne 200 ]; then
+  echo "Error: Failed to fetch file. HTTP Status: $http_code"
+  exit 1
+fi
+
+echo "File downloaded successfully to $OUTPUT_FILE"
+```
+
+### Explanation:
+
+1. **Configuration**:
+   - `ARTIFACTORY_URL`: The base URL of your Artifactory instance.
+   - `REPO`: The name of the repository where the file is located.
+   - `FILE_PATH`: The relative path to the file within the repository.
+   - `USERNAME` and `PASSWORD`: Your Artifactory credentials. It's better to use environment variables or a more secure method to handle credentials.
+
+2. **Fetch File from Artifactory**:
+   - `curl -s -u $USERNAME:$PASSWORD -w "%{http_code}" -o $OUTPUT_FILE "$ARTIFACTORY_URL/$REPO/$FILE_PATH"`:
+     - `-s`: Silent mode to suppress progress meter.
+     - `-u $USERNAME:$PASSWORD`: Provide Artifactory credentials.
+     - `-w "%{http_code}"`: Output the HTTP status code.
+     - `-o $OUTPUT_FILE`: Write the output to a file.
+
+3. **Check HTTP Status**:
+   - The HTTP status code is checked to determine if the file download was successful (200 OK).
+
+### Handling Credentials Securely
+
+For better security, consider using environment variables or a `.netrc` file to manage your credentials instead of hardcoding them in the script.
+
+### Using Environment Variables for Credentials:
+
+```sh
+#!/bin/bash
+
+# Ensure environment variables are set
+if [ -z "$ARTIFACTORY_USERNAME" ] || [ -z "$ARTIFACTORY_PASSWORD" ]; then
+  echo "Error: ARTIFACTORY_USERNAME and ARTIFACTORY_PASSWORD must be set"
+  exit 1
+fi
+
+# Configuration
+ARTIFACTORY_URL="https://your-artifactory-instance/artifactory"
+REPO="your-repo-name"
+FILE_PATH="path/to/your/file.txt"
+OUTPUT_FILE="/tmp/downloaded_file.txt"
+
+# Fetch file from Artifactory
+response=$(curl -s -u $ARTIFACTORY_USERNAME:$ARTIFACTORY_PASSWORD -w "%{http_code}" -o $OUTPUT_FILE "$ARTIFACTORY_URL/$REPO/$FILE_PATH")
+http_code=$(tail -n1 <<< "$response")
+
+if [ "$http_code" -ne 200 ]; then
+  echo "Error: Failed to fetch file. HTTP Status: $http_code"
+  exit 1
+fi
+
+echo "File downloaded successfully to $OUTPUT_FILE"
+```
+
+### Explanation:
+
+1. **Check Environment Variables**:
+   - Ensure `ARTIFACTORY_USERNAME` and `ARTIFACTORY_PASSWORD` are set before running the script.
+
+2. **Use Environment Variables for Credentials**:
+   - Replace hardcoded credentials with environment variables `$ARTIFACTORY_USERNAME` and `$ARTIFACTORY_PASSWORD`.
+
+This approach improves security by avoiding hardcoding sensitive information in your script.
