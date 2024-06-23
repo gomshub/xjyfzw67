@@ -1,0 +1,161 @@
+To get the schema (structure) of a table in Oracle, such as an `Audittrail` table, you can query the `ALL_TAB_COLUMNS` and `ALL_CONS_COLUMNS` views from the `INFORMATION_SCHEMA` or use a direct `DESCRIBE` command if you have access to an SQL client. Here are a few methods to achieve this:
+
+### Method 1: Using `DESCRIBE` Command
+
+The `DESCRIBE` command is the simplest way to get the schema of a table in Oracle.
+
+```sql
+DESCRIBE Audittrail;
+```
+
+This command will display the column names, data types, and whether the columns are nullable.
+
+### Method 2: Using SQL Queries
+
+If you need more detailed information or want to script the retrieval, you can query the `ALL_TAB_COLUMNS` and `ALL_CONS_COLUMNS` views.
+
+#### Query for Column Details
+
+This query retrieves the column names, data types, and whether they are nullable:
+
+```sql
+SELECT 
+    COLUMN_NAME, 
+    DATA_TYPE, 
+    DATA_LENGTH, 
+    DATA_PRECISION, 
+    DATA_SCALE, 
+    NULLABLE 
+FROM 
+    ALL_TAB_COLUMNS 
+WHERE 
+    TABLE_NAME = 'AUDITTRAIL'
+    AND OWNER = 'YOUR_SCHEMA_NAME'
+ORDER BY 
+    COLUMN_ID;
+```
+
+Replace `YOUR_SCHEMA_NAME` with the actual schema name.
+
+#### Query for Constraints
+
+This query retrieves information about primary keys and foreign keys:
+
+```sql
+SELECT 
+    a.constraint_name, 
+    a.constraint_type, 
+    b.column_name, 
+    c.owner AS r_owner, 
+    c.table_name AS r_table_name, 
+    c.column_name AS r_column_name 
+FROM 
+    all_constraints a
+    JOIN all_cons_columns b ON a.constraint_name = b.constraint_name
+    LEFT JOIN all_cons_columns c ON a.r_constraint_name = c.constraint_name
+WHERE 
+    a.table_name = 'AUDITTRAIL'
+    AND a.owner = 'YOUR_SCHEMA_NAME'
+ORDER BY 
+    a.constraint_name, b.position;
+```
+
+### Method 3: Using DBMS_METADATA Package
+
+The `DBMS_METADATA` package can be used to get the complete DDL statement for the table.
+
+```sql
+SET LONG 10000;
+SELECT DBMS_METADATA.GET_DDL('TABLE', 'AUDITTRAIL', 'YOUR_SCHEMA_NAME') FROM DUAL;
+```
+
+This command will output the `CREATE TABLE` statement for the `Audittrail` table, including column definitions, constraints, and storage parameters.
+
+### Example Python Script to Retrieve Schema
+
+If you want to automate this process using a Python script, you can use the `cx_Oracle` library to connect to your Oracle database and retrieve the schema information.
+
+#### Python Script
+
+```python
+import cx_Oracle
+import config  # Assume this contains your database connection configuration
+
+def get_table_schema(table_name, schema_name):
+    conn = cx_Oracle.connect(config.DSN)
+    cursor = conn.cursor()
+
+    try:
+        # Retrieve column details
+        cursor.execute("""
+            SELECT 
+                COLUMN_NAME, 
+                DATA_TYPE, 
+                DATA_LENGTH, 
+                DATA_PRECISION, 
+                DATA_SCALE, 
+                NULLABLE 
+            FROM 
+                ALL_TAB_COLUMNS 
+            WHERE 
+                TABLE_NAME = :table_name
+                AND OWNER = :schema_name
+            ORDER BY 
+                COLUMN_ID
+        """, table_name=table_name.upper(), schema_name=schema_name.upper())
+        columns = cursor.fetchall()
+
+        # Retrieve constraint details
+        cursor.execute("""
+            SELECT 
+                a.constraint_name, 
+                a.constraint_type, 
+                b.column_name, 
+                c.owner AS r_owner, 
+                c.table_name AS r_table_name, 
+                c.column_name AS r_column_name 
+            FROM 
+                all_constraints a
+                JOIN all_cons_columns b ON a.constraint_name = b.constraint_name
+                LEFT JOIN all_cons_columns c ON a.r_constraint_name = c.constraint_name
+            WHERE 
+                a.table_name = :table_name
+                AND a.owner = :schema_name
+            ORDER BY 
+                a.constraint_name, b.position
+        """, table_name=table_name.upper(), schema_name=schema_name.upper())
+        constraints = cursor.fetchall()
+
+        # Display column details
+        print("Columns:")
+        for column in columns:
+            print(column)
+
+        # Display constraint details
+        print("\nConstraints:")
+        for constraint in constraints:
+            print(constraint)
+
+    except cx_Oracle.DatabaseError as e:
+        print(f"Error: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+if __name__ == "__main__":
+    get_table_schema('Audittrail', 'YOUR_SCHEMA_NAME')
+```
+
+#### Configuration (`config.py`)
+
+```python
+DSN = cx_Oracle.makedsn("your_host", "your_port", service_name="your_service_name")
+USER = "your_username"
+PASSWORD = "your_password"
+```
+
+Replace `YOUR_SCHEMA_NAME`, `your_host`, `your_port`, `your_service_name`, `your_username`, and `your_password` with your actual Oracle database connection details.
+
+### Conclusion
+
+Using these methods, you can retrieve the schema of the `Audittrail` table in Oracle. You can choose between direct SQL queries, using the `DBMS_METADATA` package, or writing a Python script for automation, depending on your requirements and environment.
