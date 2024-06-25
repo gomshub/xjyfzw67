@@ -1,0 +1,122 @@
+How to delete rows for 1 year and schedule it nightly or alternate nights or weekly ?
+
+To delete rows that are older than one year and schedule this task to run on a specific schedule (nightly, alternate nights, or weekly), you can follow these steps:
+
+1. **Create a PL/SQL procedure to delete the rows**.
+2. **Create a scheduled job using Oracle's DBMS_SCHEDULER** to execute this procedure according to your desired schedule.
+
+### Step 1: Create the PL/SQL Procedure
+
+First, create a procedure to delete rows that are older than one year from the main table and its related tables.
+
+Here is an example procedure:
+
+```sql
+CREATE OR REPLACE PROCEDURE purge_old_data IS
+BEGIN
+    -- Delete from related tables first
+    DELETE FROM related_table1
+    WHERE main_id IN (
+        SELECT id FROM main_table WHERE update_date < ADD_MONTHS(SYSDATE, -12)
+    );
+
+    DELETE FROM related_table2
+    WHERE main_id IN (
+        SELECT id FROM main_table WHERE update_date < ADD_MONTHS(SYSDATE, -12)
+    );
+
+    -- Delete from the main table
+    DELETE FROM main_table
+    WHERE update_date < ADD_MONTHS(SYSDATE, -12);
+    
+    -- Commit the transaction
+    COMMIT;
+END purge_old_data;
+/
+```
+
+This procedure deletes records older than one year (12 months) from both the main and related tables.
+
+### Step 2: Schedule the Job Using DBMS_SCHEDULER
+
+You can use the `DBMS_SCHEDULER` package to schedule this procedure to run at specific intervals. Here are examples for different schedules:
+
+#### Nightly Schedule
+
+```sql
+BEGIN
+    DBMS_SCHEDULER.create_job (
+        job_name        => 'PURGE_OLD_DATA_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN purge_old_data; END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=DAILY; BYHOUR=2; BYMINUTE=0; BYSECOND=0',
+        enabled         => TRUE
+    );
+END;
+/
+```
+
+#### Alternate Nights
+
+```sql
+BEGIN
+    DBMS_SCHEDULER.create_job (
+        job_name        => 'PURGE_OLD_DATA_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN purge_old_data; END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=DAILY; INTERVAL=2; BYHOUR=2; BYMINUTE=0; BYSECOND=0',
+        enabled         => TRUE
+    );
+END;
+/
+```
+
+#### Weekly Schedule
+
+```sql
+BEGIN
+    DBMS_SCHEDULER.create_job (
+        job_name        => 'PURGE_OLD_DATA_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN purge_old_data; END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=WEEKLY; BYDAY=SUN; BYHOUR=2; BYMINUTE=0; BYSECOND=0',
+        enabled         => TRUE
+    );
+END;
+/
+```
+
+### Explanation:
+
+- **`job_name`**: The name of the job.
+- **`job_type`**: Specifies the type of job, here it is a PL/SQL block.
+- **`job_action`**: The PL/SQL block to execute the procedure.
+- **`start_date`**: The start date and time for the job. `SYSTIMESTAMP` means it starts immediately.
+- **`repeat_interval`**: Specifies the schedule for the job.
+  - `FREQ=DAILY`: Runs daily.
+  - `FREQ=DAILY; INTERVAL=2`: Runs every 2 days.
+  - `FREQ=WEEKLY; BYDAY=SUN`: Runs weekly on Sunday.
+  - `BYHOUR=2; BYMINUTE=0; BYSECOND=0`: Specifies the time of day (2 AM in this example).
+
+### Managing the Job
+
+- To **disable** the job:
+  ```sql
+  BEGIN
+      DBMS_SCHEDULER.disable('PURGE_OLD_DATA_JOB');
+  END;
+  /
+  ```
+
+- To **drop** the job:
+  ```sql
+  BEGIN
+      DBMS_SCHEDULER.drop_job('PURGE_OLD_DATA_JOB');
+  END;
+  /
+  ```
+
+Using this approach, you can automate the deletion of old data from your tables according to your preferred schedule.
