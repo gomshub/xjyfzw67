@@ -1,4 +1,34 @@
 
+To find and delete files that match a specific filename pattern and are older than one week, you can modify the `find` command by adding the `-name` option. Here's how you can do it:
+
+1. Open a terminal.
+
+2. Use the following command, replacing `/path/to/directory` with the path to your directory and `pattern` with your specific filename pattern (e.g., `*.log` for log files, `*.tmp` for temporary files, etc.):
+
+```sh
+find /path/to/directory -type f -name "pattern" -mtime +7 -exec rm -f {} \;
+```
+
+For example, to delete all `.log` files older than one week in a directory:
+
+```sh
+find /path/to/directory -type f -name "*.log" -mtime +7 -exec rm -f {} \;
+```
+
+Explanation:
+- `-name "pattern"`: Specifies the filename pattern to match (e.g., `"*.log"` for all log files).
+- The rest of the command remains the same as previously explained.
+
+Again, to test the command without deleting files, you can list the matching files first:
+
+```sh
+find /path/to/directory -type f -name "*.log" -mtime +7
+```
+
+This will list all `.log` files older than one week in the specified directory. Once you are confident the list is correct, you can run the full command to delete the files.
+
+
+
 To list the file with the pattern `file-<yyyymmdd>.text` which has the most recent date in a directory and rename it to `file.txt`, you can use the following bash command in Linux:
 
 ```bash
