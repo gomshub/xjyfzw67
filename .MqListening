@@ -1,0 +1,94 @@
+To check if a subelement exists in the framed XML and append if it does not exist or update if it does, you can use the `find` method provided by `xml.etree.ElementTree`. Here's an enhanced version of the previous example with added logic to handle subelement existence:
+
+### Updated Full Example
+
+```python
+import pymqi
+import xml.etree.ElementTree as ET
+
+# MQ connection details
+queue_manager = 'QM1'
+channel = 'DEV.APP.SVRCONN'
+host = 'localhost'
+port = '1414'
+queue_name = 'QUEUE1'
+conn_info = f'{host}({port})'
+
+# Credentials
+user = 'app'
+password = 'password'
+
+def connect_to_mq():
+    qmgr = pymqi.QueueManager(None)
+    cd = pymqi.CD()
+    cd.ChannelName = channel
+    cd.ConnectionName = conn_info
+    cd.ChannelType = pymqi.CMQC.MQCHT_CLNTCONN
+    qmgr.connect_with_options(queue_manager, user=user, password=password, cd=cd)
+    return qmgr
+
+def retrieve_message(qmgr):
+    queue = pymqi.Queue(qmgr, queue_name)
+    message = queue.get()
+    queue.close()
+    qmgr.disconnect()
+    return message
+
+def construct_or_update_xml(message, existing_xml=None):
+    if existing_xml:
+        # Parse the existing XML
+        root = ET.fromstring(existing_xml)
+    else:
+        # Create a new root element
+        root = ET.Element("Message")
+
+    # Check if the subelement exists
+    data = root.find("Data")
+    if data is None:
+        # Add child element if it does not exist
+        data = ET.SubElement(root, "Data")
+    
+    # Update the text of the subelement
+    data.text = message
+    
+    # Convert the tree to a string
+    xml_str = ET.tostring(root, encoding='utf-8', method='xml').decode()
+    
+    return xml_str
+
+def save_xml(xml_string, file_name):
+    with open(file_name, "w") as f:
+        f.write(xml_string)
+
+# Main process
+qmgr = connect_to_mq()
+message = retrieve_message(qmgr)
+
+# Load existing XML if available
+try:
+    with open("output.xml", "r") as f:
+        existing_xml = f.read()
+except FileNotFoundError:
+    existing_xml = None
+
+# Construct or update XML
+xml_string = construct_or_update_xml(message, existing_xml)
+save_xml(xml_string, "output.xml")
+```
+
+### Explanation
+
+1. **Checking if Sub-element Exists**:
+   - Use `root.find("Data")` to check if the "Data" subelement exists within the root element. This method returns `None` if the subelement does not exist.
+   
+2. **Appending or Updating the Sub-element**:
+   - If `data` is `None`, the subelement does not exist, so we create it using `ET.SubElement(root, "Data")`.
+   - If the subelement exists, we simply update its text content.
+
+3. **Handling Existing XML**:
+   - The script attempts to read an existing XML file (`output.xml`). If the file exists, it parses the existing XML; otherwise, it creates a new XML structure.
+   
+4. **Saving the XML**:
+   - The constructed or updated XML string is saved back to `output.xml`.
+
+This approach ensures that the XML is properly updated with new messages while preserving any existing structure and data.
