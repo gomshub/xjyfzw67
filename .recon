@@ -1,3 +1,99 @@
+Certainly! To accomplish this task, we'll perform the following steps using Python:
+
+1. Read the CSV file.
+2. Filter rows where the first column contains the word "version".
+3. Check if the third column value is greater than a specified threshold.
+4. Create a new CSV file with these filtered rows.
+5. Prepare an HTML body for the email with highlighted rows.
+6. Send the email with the HTML body and attach the new CSV file.
+
+Here's a comprehensive Python script to achieve this:
+
+```python
+import pandas as pd
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+
+def filter_csv_and_send_email(csv_file, threshold, sender_email, receiver_email, smtp_server, smtp_port, smtp_username, smtp_password):
+    # Read the CSV file
+    df = pd.read_csv(csv_file)
+
+    # Filter rows where the first column contains the word "version" and the third column value is greater than the threshold
+    filtered_df = df[df.iloc[:, 0].str.contains("version", case=False) & (df.iloc[:, 2] > threshold)]
+
+    # Save the filtered rows to a new CSV file
+    filtered_csv_file = "filtered_rows.csv"
+    filtered_df.to_csv(filtered_csv_file, index=False)
+
+    # Prepare the HTML body with highlighted rows
+    html_body = """
+    <html>
+        <body>
+            <p>Here are the rows where the first column contains the word "version" and the third column value is greater than the threshold:</p>
+            <table border="1">
+                <tr>{}</tr>
+                {}
+            </table>
+        </body>
+    </html>
+    """.format(
+        "".join([f"<th>{col}</th>" for col in filtered_df.columns]),
+        "".join([f"<tr>{''.join([f'<td>{value}</td>' for value in row])}</tr>" for row in filtered_df.values])
+    )
+
+    # Set up the email
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+    msg['Subject'] = "Filtered CSV Rows"
+
+    # Attach the HTML body
+    msg.attach(MIMEText(html_body, 'html'))
+
+    # Attach the CSV file
+    attachment = MIMEBase('application', 'octet-stream')
+    with open(filtered_csv_file, 'rb') as file:
+        attachment.set_payload(file.read())
+    encoders.encode_base64(attachment)
+    attachment.add_header('Content-Disposition', f'attachment; filename={filtered_csv_file}')
+    msg.attach(attachment)
+
+    # Send the email
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_username, smtp_password)
+        server.sendmail(sender_email, receiver_email, msg.as_string())
+
+# Example usage
+csv_file = 'path_to_your_csv_file.csv'
+threshold = 100  # Set your threshold value
+sender_email = 'your_email@example.com'
+receiver_email = 'receiver_email@example.com'
+smtp_server = 'smtp.example.com'
+smtp_port = 587
+smtp_username = 'your_smtp_username'
+smtp_password = 'your_smtp_password'
+
+filter_csv_and_send_email(csv_file, threshold, sender_email, receiver_email, smtp_server, smtp_port, smtp_username, smtp_password)
+```
+
+### Notes:
+
+1. **Read CSV and Filter Data**: The script reads the CSV file and filters the rows based on the condition that the first column contains the word "version" and the third column value is greater than the specified threshold.
+
+2. **Prepare HTML Body**: The HTML body is created to include the filtered rows, with each row wrapped in HTML table tags.
+
+3. **Send Email with Attachment**: The script uses `smtplib` to send an email with the HTML body and the attached CSV file containing the filtered rows.
+
+Ensure you replace placeholders such as `path_to_your_csv_file.csv`, `your_email@example.com`, `receiver_email@example.com`, `smtp.example.com`, and your SMTP credentials with actual values relevant to your situation.
+ 
+
+
+=##=
+
 To validate XML files before extracting the data, and to ensure that each key element and its child elements are included in the CSV for comparison, we will follow these steps:
 
 1. **Validate XML files against an XSD schema.**
