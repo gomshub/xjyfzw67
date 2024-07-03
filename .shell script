@@ -17,6 +17,48 @@ OUTPUT_FILE="output.txt"
 cd "$TARGET_DIR" || exit
 
 # Find files owned by the user, get their modification times, sort them, and extract the most recent file for each directory
+find . -type f -user "$USER" -exec stat --format '%Y %y %U %n' {} \; | sort -n | awk -F/ '
+{
+    file = $0;
+    sub(/[^ ]+ [^ ]+ [^ ]+ /, "", file);  # Remove timestamp, formatted date, and owner
+    dir = file;
+    sub(/\/[^\/]+$/, "", dir);
+    if (dir != last_dir) {
+        print $0;  # Print the entire line: timestamp, formatted date, owner, filename
+        last_dir = dir;
+    }
+}' | while read -r line; do
+    timestamp=$(echo "$line" | awk '{print $1}')
+    formatted_date=$(echo "$line" | awk '{print $2 " " $3}')
+    owner=$(echo "$line" | awk '{print $4}')
+    filename=$(echo "$line" | cut -d ' ' -f 5-)
+    echo "$formatted_date $owner $filename"
+done > "$OUTPUT_FILE"
+
+# Notify the user
+echo "Results saved to $OUTPUT_FILE"
+
+
+
+#=#=#
+#!/bin/bash
+
+# Directory to search
+TARGET_DIR="/path/to/target/directory"
+
+# User to search for
+USER="testuser"
+
+# Output file
+OUTPUT_FILE="output.txt"
+
+# Clear the output file if it already exists
+> "$OUTPUT_FILE"
+
+# Change to the target directory
+cd "$TARGET_DIR" || exit
+
+# Find files owned by the user, get their modification times, sort them, and extract the most recent file for each directory
 find . -type f -user "$USER" -exec stat --format '%Y %U %n' {} \; | sort -n | awk -F/ '
 {
     file = $0;
