@@ -1,3 +1,39 @@
+
+#!/bin/bash
+
+# Directory to search
+TARGET_DIR="/path/to/target/directory"
+
+# User to search for
+USER="testuser"
+
+# Output file
+OUTPUT_FILE="output.txt"
+
+# Clear the output file if it already exists
+> "$OUTPUT_FILE"
+
+# Change to the target directory
+cd "$TARGET_DIR" || exit
+
+# Find files owned by the user, get their modification times, sort them, and extract the most recent file for each directory
+find . -type f -user "$USER" -exec stat --format '%Y %n' {} \; | sort -n | awk -F/ '
+{
+    file = $0;
+    sub(/[^ ]+ /, "", file);
+    dir = file;
+    sub(/\/[^\/]+$/, "", dir);
+    if (dir != last_dir) {
+        print file;
+        last_dir = dir;
+    }
+}' > "$OUTPUT_FILE"
+
+# Notify the user
+echo "Results saved to $OUTPUT_FILE"
+
+=#=#=#=#
+
 To identify the owner and group name of files within subfolders under a directory, specifically for files owned by "testuser", you can use a combination of `find`, `ls`, or `stat` commands. Below are steps and command examples for identifying such files and their owner/group names in a Linux environment.
 
 ### Step-by-Step Process
