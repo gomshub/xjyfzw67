@@ -1,3 +1,89 @@
+To identify the owner and group name of files within subfolders under a directory, specifically for files owned by "testuser", you can use a combination of `find`, `ls`, or `stat` commands. Below are steps and command examples for identifying such files and their owner/group names in a Linux environment.
+
+### Step-by-Step Process
+
+1. **Navigate to the target directory**: Change to the directory containing the subfolders.
+2. **Use `find` to locate files owned by `testuser`**: The `find` command can search recursively and filter files based on the owner.
+3. **Display owner and group information**: Use `ls -l` or `stat` to display detailed information about the files.
+
+### Example Commands
+
+1. **Change to the target directory**:
+   ```sh
+   cd /path/to/target/directory
+   ```
+
+2. **Find files owned by `testuser` and display owner/group using `ls -l`**:
+   ```sh
+   find . -type f -user testuser -exec ls -l {} \;
+   ```
+
+   This command does the following:
+   - `find . -type f -user testuser`: Finds all files (`-type f`) owned by `testuser` within the current directory and its subdirectories.
+   - `-exec ls -l {} \;`: Executes the `ls -l` command on each found file to display detailed information, including owner and group.
+
+3. **Find files owned by `testuser` and display owner/group using `stat`**:
+   ```sh
+   find . -type f -user testuser -exec stat -c '%n %U %G' {} \;
+   ```
+
+   This command does the following:
+   - `find . -type f -user testuser`: Finds all files owned by `testuser`.
+   - `-exec stat -c '%n %U %G' {} \;`: Executes the `stat` command with a custom format:
+     - `%n`: File name
+     - `%U`: Owner name
+     - `%G`: Group name
+
+### Explanation of Commands
+
+- **`find`**: Searches for files in a directory hierarchy.
+  - `.`: Specifies the current directory as the starting point.
+  - `-type f`: Searches for files (not directories).
+  - `-user testuser`: Filters files owned by `testuser`.
+
+- **`ls -l`**: Lists files in long format, showing detailed information including owner and group.
+
+- **`stat -c '%n %U %G'`**: Displays specified attributes of the file:
+  - `%n`: File name
+  - `%U`: Owner name
+  - `%G`: Group name
+
+### Putting It All Together in a Script
+
+If you want to automate this process, you can create a simple shell script.
+
+```sh
+#!/bin/bash
+
+# Directory to search
+TARGET_DIR="/path/to/target/directory"
+
+# User to search for
+USER="testuser"
+
+# Change to the target directory
+cd "$TARGET_DIR" || exit
+
+# Find files owned by the user and display owner/group information
+find . -type f -user "$USER" -exec stat -c '%n %U %G' {} \;
+```
+
+### Usage
+
+1. Save the script as `find_testuser_files.sh`.
+2. Make the script executable:
+   ```sh
+   chmod +x find_testuser_files.sh
+   ```
+3. Run the script:
+   ```sh
+   ./find_testuser_files.sh
+   ```
+
+This script will output the names of the files owned by `testuser` along with their owner and group names, making it easy to identify the relevant files and their ownership details.
+
+=##
+
 
 To find and delete files that match a specific filename pattern and are older than one week, you can modify the `find` command by adding the `-name` option. Here's how you can do it:
 
