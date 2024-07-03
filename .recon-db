@@ -1,0 +1,143 @@
+To clean up messages older than 8 days (excluding the current date) from the database, you need to implement a cleanup function in the `MQListener` class. This function will delete entries from the database that are older than 8 days.
+
+Here is how you can implement it:
+
+### Modifying `MQListener` for Cleanup
+
+```python
+# mq_listener.py
+import json
+from typing import Callable
+import pika  # Example library for RabbitMQ, adjust according to your MQ provider
+import sqlite3
+from datetime import datetime, timedelta
+
+class MQListener:
+    def __init__(self, mq_host: str, topic: str, db_path: str):
+        self.mq_host = mq_host
+        self.topic = topic
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.mq_host))
+        self.channel = self.connection.channel()
+        self.channel.queue_declare(queue=self.topic)
+        self.db_path = db_path
+
+        # Ensure database and table are set up
+        self._setup_database()
+
+    def _setup_database(self):
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                content TEXT,
+                processed_date TEXT
+            )
+        ''')
+        conn.commit()
+        conn.close()
+
+    def listen(self, callback: Callable[[str], None]):
+        def on_message(channel, method, properties, body):
+            message = body.decode()
+            message_id = properties.message_id  # Adjust according to your MQ message structure
+            if not self._is_processed(message_id):
+                self._save_message(message_id, message)
+                callback(message)
+
+        self.channel.basic_consume(queue=self.topic, on_message_callback=on_message, auto_ack=True)
+        print('Listening for messages...')
+        self.channel.start_consuming()
+
+    def _is_processed(self, message_id: str) -> bool:
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute('SELECT COUNT(1) FROM messages WHERE id = ?', (message_id,))
+        result = c.fetchone()[0]
+        conn.close()
+        return result > 0
+
+    def _save_message(self, message_id: str, message: str):
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute('INSERT INTO messages (id, content, processed_date) VALUES (?, ?, ?)',
+                  (message_id, message, datetime.now().strftime('%Y-%m-%d')))
+        conn.commit()
+        conn.close()
+
+    def cleanup_old_messages(self, days: int = 8):
+        cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute('DELETE FROM messages WHERE processed_date < ?', (cutoff_date,))
+        conn.commit()
+        conn.close()
+        print(f"Cleaned up messages older than {cutoff_date}")
+
+    def close(self):
+        self.connection.close()
+```
+
+### Updating `main.py` to Include Cleanup
+
+```python
+# main.py
+import sys
+from datetime import datetime
+from mq_listener import MQListener
+from xml_constructor import XMLConstructor
+
+def main(mq_host: str, topic: str, date: str, db_path: str):
+    try:
+        # Validate the date
+        date_obj = datetime.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        print("Invalid date format. Please use YYYY-MM-DD.")
+        return
+
+    xml_constructor = XMLConstructor(root_name='Messages')
+    mq_listener = MQListener(mq_host, topic, db_path)
+
+    def on_message_received(message: str):
+        xml_constructor.add_message(message)
+        print(f"Received message: {message}")
+
+    try:
+        # Cleanup old messages before starting to listen
+        mq_listener.cleanup_old_messages(days=8)
+
+        mq_listener.listen(callback=on_message_received)
+    except KeyboardInterrupt:
+        print('Stopped listening.')
+    finally:
+        mq_listener.close()
+        xml_string = xml_constructor.get_xml_string()
+        output_file = f"messages_{topic}_{date}.xml"
+        xml_constructor.save_to_file(output_file)
+        print(f"Saved XML to {output_file}")
+
+if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        print("Usage: python main.py <MQ_HOST> <TOPIC> <DATE> <DB_PATH>")
+    else:
+        mq_host = sys.argv[1]
+        topic = sys.argv[2]
+        date = sys.argv[3]
+        db_path = sys.argv[4]
+        main(mq_host, topic, date, db_path)
+```
+
+### Explanation
+
+1. **`cleanup_old_messages` Method**: This method calculates the cutoff date (8 days before the current date) and deletes messages from the database that were processed before this date.
+2. **Calling Cleanup in Main Script**: Before starting to listen for new messages, the `cleanup_old_messages` method is called to ensure that old messages are cleaned up from the database.
+3. **Database Path**: The database path is passed as an argument to the script, allowing it to manage persistence effectively.
+
+### Usage
+
+To run the script with the cleanup mechanism, you would execute:
+```sh
+python main.py localhost my_topic 2024-07-03 messages.db
+```
+
+This approach ensures that messages older than 8 days are removed from the database, maintaining the relevance and manageability of the stored messages.
