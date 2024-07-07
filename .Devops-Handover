@@ -1,0 +1,128 @@
+Certainly! Below is the revised template incorporating sections for open JIRAs, BPA requests, T&O requests, DBA incidents, and daily checks for nightly database clone issues.
+
+---
+
+# DevOps On-Premise Vacation Handover Document
+
+## 1. Introduction
+- **Name:** [Your Name]
+- **Vacation Dates:** [Start Date] to [End Date]
+- **Emergency Contact Information:** [Your Contact Information]
+
+## 2. Infrastructure Overview
+### 2.1 Servers
+- **Server Name:** [Server Name]
+  - **IP Address:** [IP Address]
+  - **Purpose:** [Purpose of Server]
+  - **Access Credentials:** [Location of Credentials]
+  - **Notes:** [Any important notes]
+
+### 2.2 Network
+- **Network Diagram:** [Link or Location of Network Diagram]
+- **Key Network Devices:**
+  - **Device Name:** [Device Name]
+    - **IP Address:** [IP Address]
+    - **Purpose:** [Purpose of Device]
+    - **Access Credentials:** [Location of Credentials]
+    - **Notes:** [Any important notes]
+
+### 2.3 Storage
+- **Storage System Name:** [Storage System Name]
+  - **Capacity:** [Capacity]
+  - **Current Usage:** [Current Usage]
+  - **Access Credentials:** [Location of Credentials]
+  - **Notes:** [Any important notes]
+
+## 3. Ongoing Projects
+### 3.1 Project A
+- **Description:** [Brief description of Project A]
+- **Current Status:** [Current Status]
+- **Next Steps:** [Next Steps]
+- **Key Contacts:** [Key Contacts for Project A]
+
+### 3.2 Project B
+- **Description:** [Brief description of Project B]
+- **Current Status:** [Current Status]
+- **Next Steps:** [Next Steps]
+- **Key Contacts:** [Key Contacts for Project B]
+
+## 4. Critical Tasks
+### 4.1 Daily Tasks
+- **Task Name:** [Task Name]
+  - **Description:** [Description of Task]
+  - **Instructions:** [Detailed instructions on how to perform the task]
+  
+- **Check Nightly Database Clones:**
+  - **Description:** Check for any issues with nightly database clones.
+  - **Instructions:** [Detailed instructions on how to check and resolve issues if any]
+
+### 4.2 Weekly Tasks
+- **Task Name:** [Task Name]
+  - **Description:** [Description of Task]
+  - **Instructions:** [Detailed instructions on how to perform the task]
+
+### 4.3 Monthly Tasks
+- **Task Name:** [Task Name]
+  - **Description:** [Description of Task]
+  - **Instructions:** [Detailed instructions on how to perform the task]
+
+## 5. Open Requests and Incidents
+### 5.1 Open JIRAs
+- **JIRA ID:** [JIRA ID]
+  - **Description:** [Brief description of JIRA]
+  - **Current Status:** [Current Status]
+  - **Next Steps:** [Next Steps]
+
+### 5.2 Open BPA Requests
+- **BPA Request ID:** [Request ID]
+  - **Description:** [Brief description of BPA Request]
+  - **Current Status:** [Current Status]
+  - **Next Steps:** [Next Steps]
+
+### 5.3 Open T&O Requests
+- **T&O Request ID:** [Request ID]
+  - **Description:** [Brief description of T&O Request]
+  - **Current Status:** [Current Status]
+  - **Next Steps:** [Next Steps]
+
+### 5.4 Open DBA Incidents
+- **Incident ID:** [Incident ID]
+  - **Description:** [Brief description of DBA Incident]
+  - **Current Status:** [Current Status]
+  - **Next Steps:** [Next Steps]
+
+## 6. Monitoring and Alerts
+### 6.1 Monitoring Tools
+- **Tool Name:** [Monitoring Tool Name]
+  - **Purpose:** [Purpose of the Tool]
+  - **Access Credentials:** [Location of Credentials]
+
+### 6.2 Current Alerts
+- **Alert Name:** [Alert Name]
+  - **Description:** [Description of the Alert]
+  - **Current Status:** [Current Status]
+  - **Actions Required:** [Actions Required]
+
+## 7. Contact Information
+### 7.1 Internal Contacts
+- **Name:** [Name]
+  - **Role:** [Role]
+  - **Contact Information:** [Contact Information]
+
+### 7.2 External Contacts
+- **Name:** [Name]
+  - **Company:** [Company]
+  - **Role:** [Role]
+  - **Contact Information:** [Contact Information]
+
+## 8. Contingency Plans
+- **Plan Name:** [Contingency Plan Name]
+  - **Description:** [Description of the Plan]
+  - **Steps to Activate:** [Steps to Activate the Plan]
+
+## 9. Additional Notes
+- [Any additional notes or instructions that may be important]
+
+---
+
+Make sure to fill in each section with the specific details pertinent to your environment and responsibilities. Providing thorough and clear information will help ensure smooth operations in your absence.
