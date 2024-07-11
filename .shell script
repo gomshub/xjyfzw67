@@ -1,6 +1,31 @@
 
 #!/bin/bash
 
+# Get the current date
+current_date=$(date +%Y-%m-%d)
+
+# Calculate the date three years ago
+three_years_ago=$(date -d "$current_date - 3 years" +%Y-%m-%d)
+
+# Convert the date three years ago to the start (Monday) and end (Sunday) of that week
+current_week_start=$(date -d "$three_years_ago - $(date -d $three_years_ago +%u) + 1 days" +%Y-%m-%d)
+current_week_end=$(date -d "$current_week_start + 6 days" +%Y-%m-%d)
+
+echo "Start Date (YYYY-MM-DD) | End Date (YYYY-MM-DD)"
+echo "---------------------------------------------"
+
+# Loop through each week until we reach the current date
+while [ "$current_week_start" \< "$current_date" ]; do
+    echo "$current_week_start | $current_week_end"
+    # Move to the next week
+    current_week_start=$(date -d "$current_week_start + 7 days" +%Y-%m-%d)
+    current_week_end=$(date -d "$current_week_end + 7 days" +%Y-%m-%d)
+done
+
+
+=#=#
+#!/bin/bash
+
 # Directory to search
 TARGET_DIR="/path/to/target/directory"
 
