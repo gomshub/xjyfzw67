@@ -1,6 +1,39 @@
 
 #!/bin/bash
 
+# Define an array (list) of allowed values
+allowed_list=("value1" "value2" "test" "example")
+
+# Assign a value to the variable to check
+variable_to_check="test"
+
+# Function to check if a variable is in the list
+is_in_list() {
+  local var="$1"
+  shift
+  local list=("$@")
+  
+  for item in "${list[@]}"; then
+    if [[ "$item" == "$var" ]]; then
+      return 0 # Success
+    fi
+  done
+  return 1 # Failure
+}
+
+# Check if the variable is in the list
+if is_in_list "$variable_to_check" "${allowed_list[@]}"; then
+  echo "The variable '$variable_to_check' is in the list. Allow."
+else
+  echo "The variable '$variable_to_check' is not in the list. Deny."
+fi
+
+
+
+
+
+#!/bin/bash
+
 # Get the current date
 current_date=$(date +%Y-%m-%d)
 
