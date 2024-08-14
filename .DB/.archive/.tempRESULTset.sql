@@ -1,4 +1,24 @@
 
+WITH ids_to_delete AS (
+    SELECT a.id
+    FROM Audit a
+    JOIN audit_link al ON a.id = al.id
+    WHERE a.date_column < ADD_MONTHS(SYSDATE, -12)
+    AND al.object_type IN (3, 4, 5)
+)
+-- First delete from audit_link
+DELETE FROM audit_link al
+WHERE al.id IN (SELECT id FROM ids_to_delete);
+
+-- Then delete from Audit
+DELETE FROM Audit a
+WHERE a.id IN (SELECT id FROM ids_to_delete);
+
+COMMIT;
+
+
+
+
 You're correct that after deleting the rows from the `audit_link` table, the `EXISTS` clause won't be able to find any matching rows in `audit_link` to delete from the `Audit` table. This would result in the records in the `Audit` table not being deleted as intended.
 
 To correctly delete the records from both tables, you need to capture the `id`s of the records that match the criteria before deletion, and then use those `id`s to delete from both tables. Here's how you can do it:
