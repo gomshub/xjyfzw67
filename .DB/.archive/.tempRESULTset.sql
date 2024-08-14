@@ -1,4 +1,12 @@
 
+Delete on a table Audit for date column less than 1 year from current date and object_type column in the relational audit_link table for 3,4,5
+Those 2 tables are joined by their primary_key id
+
+Give an oracle sql query or procedure to achieve the data deletion 
+
+
+
+
 WITH ids_to_delete AS (
     SELECT a.id
     FROM Audit a
