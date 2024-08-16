@@ -1,4 +1,141 @@
 
+To achieve the goal of inserting data into both the `Audit` and `audit_link` tables in the archive database, verifying the successful insertion, and then deleting the rows from both tables in the main database, you can follow this approach:
+
+1. **Insert Data into Archive Tables**: Insert the data from both `Audit` and `audit_link` tables in the main database into their corresponding tables in the archive database.
+2. **Verify the Insertion**: Check whether the number of rows inserted into the archive tables matches the number of rows that need to be deleted.
+3. **Delete from Main Tables**: If the verification is successful, delete the corresponding rows from both the `Audit` and `audit_link` tables in the main database.
+
+Here is a PL/SQL procedure that implements this logic:
+
+```sql
+CREATE OR REPLACE PROCEDURE archive_and_delete_audit_data IS
+    -- Variables to store the count of rows to be moved and actually inserted
+    v_audit_count     NUMBER;
+    v_audit_link_count NUMBER;
+    v_audit_inserted  NUMBER;
+    v_audit_link_inserted NUMBER;
+
+BEGIN
+    -- 1. Calculate the number of rows to be moved from the Audit table
+    SELECT COUNT(*)
+    INTO v_audit_count
+    FROM Audit a
+    JOIN audit_link al ON a.id = al.id
+    WHERE a."DATE" < ADD_MONTHS(SYSDATE, -12)
+      AND al.object_type IN (3, 4, 5);
+
+    -- 2. Calculate the number of rows to be moved from the audit_link table
+    SELECT COUNT(*)
+    INTO v_audit_link_count
+    FROM audit_link al
+    WHERE EXISTS (
+        SELECT 1
+        FROM Audit a
+        WHERE a.id = al.id
+          AND a."DATE" < ADD_MONTHS(SYSDATE, -12)
+          AND al.object_type IN (3, 4, 5)
+    );
+
+    -- 3. Insert rows from Audit table into the archive
+    INSERT INTO audit@archive_db_link (id, "DATE", other_columns...)
+    SELECT a.id, a."DATE", a.other_columns...
+    FROM Audit a
+    JOIN audit_link al ON a.id = al.id
+    WHERE a."DATE" < ADD_MONTHS(SYSDATE, -12)
+      AND al.object_type IN (3, 4, 5);
+
+    -- 4. Insert rows from audit_link table into the archive
+    INSERT INTO audit_link@archive_db_link (id, object_type, other_columns...)
+    SELECT al.id, al.object_type, al.other_columns...
+    FROM audit_link al
+    WHERE EXISTS (
+        SELECT 1
+        FROM Audit a
+        WHERE a.id = al.id
+          AND a."DATE" < ADD_MONTHS(SYSDATE, -12)
+          AND al.object_type IN (3, 4, 5)
+    );
+
+    -- 5. Verify that all rows were inserted into the archive Audit table
+    SELECT COUNT(*)
+    INTO v_audit_inserted
+    FROM audit@archive_db_link a
+    JOIN audit_link@archive_db_link al ON a.id = al.id
+    WHERE a.id IN (
+        SELECT a.id
+        FROM Audit a
+        JOIN audit_link al ON a.id = al.id
+        WHERE a."DATE" < ADD_MONTHS(SYSDATE, -12)
+          AND al.object_type IN (3, 4, 5)
+    );
+
+    -- 6. Verify that all rows were inserted into the archive audit_link table
+    SELECT COUNT(*)
+    INTO v_audit_link_inserted
+    FROM audit_link@archive_db_link al
+    WHERE al.id IN (
+        SELECT al.id
+        FROM audit_link al
+        WHERE EXISTS (
+            SELECT 1
+            FROM Audit a
+            WHERE a.id = al.id
+              AND a."DATE" < ADD_MONTHS(SYSDATE, -12)
+              AND al.object_type IN (3, 4, 5)
+        )
+    );
+
+    -- 7. Proceed with deletion if the row counts match
+    IF v_audit_inserted = v_audit_count AND v_audit_link_inserted = v_audit_link_count THEN
+        -- Delete from the audit_link table in the main database
+        DELETE FROM audit_link al
+        WHERE EXISTS (
+            SELECT 1
+            FROM Audit a
+            WHERE a.id = al.id
+              AND a."DATE" < ADD_MONTHS(SYSDATE, -12)
+              AND al.object_type IN (3, 4, 5)
+        );
+
+        -- Delete from the Audit table in the main database
+        DELETE FROM Audit a
+        WHERE a.id IN (
+            SELECT a.id
+            FROM Audit a
+            JOIN audit_link al ON a.id = al.id
+            WHERE a."DATE" < ADD_MONTHS(SYSDATE, -12)
+              AND al.object_type IN (3, 4, 5)
+        );
+
+        COMMIT;
+    ELSE
+        RAISE_APPLICATION_ERROR(-20001, 'Row count mismatch: Archiving failed');
+    END IF;
+
+END archive_and_delete_audit_data;
+/
+```
+
+### Explanation:
+- **Row Count Calculation**:
+  - `v_audit_count` and `v_audit_link_count` are used to store the count of rows that need to be moved from the `Audit` and `audit_link` tables.
+  
+- **Insertion**:
+  - Data from the `Audit` and `audit_link` tables in the main database are inserted into their corresponding tables in the archive database using `INSERT INTO ... SELECT`.
+
+- **Verification**:
+  - `v_audit_inserted` and `v_audit_link_inserted` store the count of rows that were successfully inserted into the archive tables. If these counts match the original counts, the procedure proceeds to delete the rows from the main tables.
+
+- **Deletion**:
+  - If the row counts match, the procedure deletes the corresponding rows from the `Audit` and `audit_link` tables in the main database.
+
+- **Error Handling**:
+  - If there is a mismatch in the row counts (indicating a possible failure in the archiving process), the procedure raises an error and does not delete the data from the main tables.
+
+This procedure ensures that data is only deleted from the main tables after a successful transfer to the archive tables. Be sure to test the procedure thoroughly before deploying it in a production environment.
+
+
+======
 BEGIN
     -- Step 1: Insert into Archive Table via DB Link
     INSERT INTO archive_table@your_db_link (column1, column2, ..., your_date_column)
