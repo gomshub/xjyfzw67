@@ -1,4 +1,10 @@
 
+SELECT * FROM your_table
+WHERE your_date_column < ADD_MONTHS(SYSDATE, -36)
+AND your_date_column >= SYSDATE - INTERVAL '7' DAY;
+
+
+
 Delete on a table Audit for date column less than 1 year from current date and object_type column in the relational audit_link table for 3,4,5
 Those 2 tables are joined by their primary_key id
 
