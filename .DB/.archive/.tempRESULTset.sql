@@ -1,4 +1,27 @@
 
+BEGIN
+    -- Step 1: Insert into Archive Table via DB Link
+    INSERT INTO archive_table@your_db_link (column1, column2, ..., your_date_column)
+    SELECT column1, column2, ..., your_date_column
+    FROM your_table
+    WHERE your_date_column < ADD_MONTHS(SYSDATE, -36)
+    AND your_date_column >= SYSDATE - INTERVAL '7' DAY;
+
+    -- Step 2: Delete from Main Table
+    DELETE FROM your_table
+    WHERE your_date_column < ADD_MONTHS(SYSDATE, -36)
+    AND your_date_column >= SYSDATE - INTERVAL '7' DAY;
+
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        RAISE;
+END;
+/
+
+
+
 SELECT * FROM your_table
 WHERE your_date_column < ADD_MONTHS(SYSDATE, -36)
 AND your_date_column >= SYSDATE - INTERVAL '7' DAY;
