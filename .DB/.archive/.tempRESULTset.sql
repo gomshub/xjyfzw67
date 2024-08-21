@@ -1,4 +1,44 @@
 
+CREATE OR REPLACE PROCEDURE Delete_Old_Audit_And_Link IS
+BEGIN
+    -- Step 1: Create a temporary table to store the IDs to delete
+    EXECUTE IMMEDIATE 'CREATE GLOBAL TEMPORARY TABLE temp_ids_to_delete (
+        id NUMBER
+    ) ON COMMIT DELETE ROWS';
+
+    -- Step 2: Insert the IDs that need to be deleted into the temporary table
+    INSERT INTO temp_ids_to_delete (id)
+    SELECT a.id
+    FROM Audit a
+    JOIN audit_link al ON a.id = al.id
+    WHERE a.date_column < ADD_MONTHS(SYSDATE, -12)
+    AND al.object_type IN (3, 4, 5);
+
+    -- Step 3: Delete from the audit_link table using the temporary table
+    DELETE FROM audit_link al
+    WHERE al.id IN (SELECT id FROM temp_ids_to_delete);
+
+    -- Step 4: Delete from the Audit table using the temporary table
+    DELETE FROM Audit a
+    WHERE a.id IN (SELECT id FROM temp_ids_to_delete);
+
+    -- Commit the transaction
+    COMMIT;
+
+    -- Step 5: Drop the temporary table
+    EXECUTE IMMEDIATE 'DROP TABLE temp_ids_to_delete';
+
+EXCEPTION
+    WHEN OTHERS THEN
+        -- Handle exceptions and ensure the temporary table is dropped
+        EXECUTE IMMEDIATE 'DROP TABLE temp_ids_to_delete';
+        RAISE;
+END;
+/
+
+
+=#=#=#=
+
 To achieve the goal of inserting data into both the `Audit` and `audit_link` tables in the archive database, verifying the successful insertion, and then deleting the rows from both tables in the main database, you can follow this approach:
 
 1. **Insert Data into Archive Tables**: Insert the data from both `Audit` and `audit_link` tables in the main database into their corresponding tables in the archive database.
