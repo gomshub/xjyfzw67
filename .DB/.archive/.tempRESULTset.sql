@@ -1,4 +1,126 @@
 
+Yes, you can create and use multiple Global Temporary Tables (GTTs) for each parallel session execution. However, this approach is generally unnecessary and can complicate your design. Typically, a single GTT with session-specific data handling is sufficient for parallel execution, as Oracle automatically isolates the data for each session.
+
+### Scenario: Using Multiple GTTs for Parallel Sessions
+
+If you have a specific reason to use multiple GTTs (perhaps to segregate data processing for different sessions manually), here's how you can do it:
+
+1. **Create Multiple Global Temporary Tables**:
+   - You would create several GTTs before executing your procedure in parallel sessions. Each GTT would be assigned to a specific session.
+
+   ```sql
+   CREATE GLOBAL TEMPORARY TABLE temp_ids_to_delete_1 (
+       id NUMBER
+   ) ON COMMIT DELETE ROWS;
+
+   CREATE GLOBAL TEMPORARY TABLE temp_ids_to_delete_2 (
+       id NUMBER
+   ) ON COMMIT DELETE ROWS;
+
+   CREATE GLOBAL TEMPORARY TABLE temp_ids_to_delete_3 (
+       id NUMBER
+   ) ON COMMIT DELETE ROWS;
+
+   CREATE GLOBAL TEMPORARY TABLE temp_ids_to_delete_4 (
+       id NUMBER
+   ) ON COMMIT DELETE ROWS;
+
+   CREATE GLOBAL TEMPORARY TABLE temp_ids_to_delete_5 (
+       id NUMBER
+   ) ON COMMIT DELETE ROWS;
+   ```
+
+2. **Modify the Procedure to Accept the GTT Name**:
+   - Modify your procedure to accept the name of the GTT as a parameter, and use dynamic SQL to perform operations on the specified GTT.
+
+   ```sql
+   CREATE OR REPLACE PROCEDURE Delete_Old_Audit_And_Link(p_temp_table_name IN VARCHAR2) IS
+   BEGIN
+       -- Step 1: Insert the IDs that need to be deleted into the specified temporary table
+       EXECUTE IMMEDIATE 'INSERT INTO ' || p_temp_table_name || ' (id)
+                         SELECT a.id
+                         FROM Audit a
+                         JOIN audit_link al ON a.id = al.id
+                         WHERE a.date_column < ADD_MONTHS(SYSDATE, -12)
+                         AND al.object_type IN (3, 4, 5)';
+
+       -- Step 2: Delete from the audit_link table using the specified temporary table
+       EXECUTE IMMEDIATE 'DELETE FROM audit_link al
+                          WHERE al.id IN (SELECT id FROM ' || p_temp_table_name || ')';
+
+       -- Step 3: Delete from the Audit table using the specified temporary table
+       EXECUTE IMMEDIATE 'DELETE FROM Audit a
+                          WHERE a.id IN (SELECT id FROM ' || p_temp_table_name || ')';
+
+       -- Commit the transaction
+       COMMIT;
+
+   EXCEPTION
+       WHEN OTHERS THEN
+           -- Handle exceptions and ensure the transaction is not partially committed
+           ROLLBACK;
+           RAISE;
+   END;
+   /
+   ```
+
+3. **Execute the Procedure in Parallel Sessions**:
+   - In each session, call the procedure with a different GTT name:
+
+   ```sql
+   -- Session 1
+   BEGIN
+       Delete_Old_Audit_And_Link('temp_ids_to_delete_1');
+   END;
+   /
+
+   -- Session 2
+   BEGIN
+       Delete_Old_Audit_And_Link('temp_ids_to_delete_2');
+   END;
+   /
+
+   -- Session 3
+   BEGIN
+       Delete_Old_Audit_And_Link('temp_ids_to_delete_3');
+   END;
+   /
+
+   -- Session 4
+   BEGIN
+       Delete_Old_Audit_And_Link('temp_ids_to_delete_4');
+   END;
+   /
+
+   -- Session 5
+   BEGIN
+       Delete_Old_Audit_And_Link('temp_ids_to_delete_5');
+   END;
+   /
+   ```
+
+### Considerations
+
+1. **Complexity**:
+   - This approach adds complexity because you now have to manage multiple GTTs and ensure that the correct table is used in each session. It’s generally better to rely on Oracle’s built-in session isolation for GTTs unless you have a specific need.
+
+2. **Maintenance**:
+   - Maintaining multiple GTTs can lead to more administrative overhead. If the number of sessions increases, you may need to create more GTTs.
+
+3. **Use Case**:
+   - This approach might be useful if you have different sets of data that you want to process in complete isolation, even to the extent of not sharing the same GTT structure, or if you have different schema users that need separate temporary tables for compliance reasons.
+
+### Typical Approach
+
+Usually, you would:
+
+- Use **one GTT** that’s reused across sessions, leveraging the session-specific isolation provided by Oracle.
+- Each session works with its own data in the GTT, ensuring there’s no conflict or data leakage between sessions.
+  
+Using multiple GTTs is generally unnecessary unless there’s a specific requirement that mandates this approach. For most parallel processing scenarios, Oracle’s GTTs with session-specific data handling will be more than sufficient.
+
+
+=##
 CREATE OR REPLACE PROCEDURE Delete_Old_Audit_And_Link IS
 BEGIN
     -- Step 1: Create a temporary table to store the IDs to delete
