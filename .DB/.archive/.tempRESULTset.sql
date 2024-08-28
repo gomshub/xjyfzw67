@@ -1,3 +1,108 @@
+
+In Oracle, `DBMS_OUTPUT` is a built-in package that enables you to display output from PL/SQL blocks, procedures, functions, and packages. This is particularly useful for debugging and logging purposes, as it allows you to print messages to the console.
+
+### Key Components of `DBMS_OUTPUT`
+
+- **`DBMS_OUTPUT.PUT_LINE`**: This procedure writes a line of text to the buffer, which can then be displayed on the console.
+- **`DBMS_OUTPUT.GET_LINE` and `GET_LINES`**: These functions retrieve the text that has been buffered. `GET_LINE` retrieves one line at a time, while `GET_LINES` retrieves multiple lines.
+- **`DBMS_OUTPUT.ENABLE`**: Enables the buffering of output. It's typically not necessary to call this explicitly, as Oracle usually enables it by default.
+- **`DBMS_OUTPUT.DISABLE`**: Disables the buffering of output.
+
+### How to Use `DBMS_OUTPUT`
+
+#### 1. **Writing Output in PL/SQL**
+
+Here’s an example of how to use `DBMS_OUTPUT.PUT_LINE` to print a simple message:
+
+```sql
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Hello, World!');
+END;
+/
+```
+
+#### 2. **Enabling DBMS_OUTPUT in SQL*Plus or SQL Developer**
+
+To see the output from `DBMS_OUTPUT.PUT_LINE`, you must enable output in your environment.
+
+- **SQL*Plus**:
+  ```sql
+  SET SERVEROUTPUT ON;
+  ```
+  This command enables the output, and you’ll see the results of `DBMS_OUTPUT.PUT_LINE` after running your PL/SQL code.
+
+- **Oracle SQL Developer**:
+  - Go to `View > DBMS Output`.
+  - Click on the green plus sign (`+`) to add a new DBMS Output tab for your current connection.
+  - Ensure the output is enabled by clicking the connection in the DBMS Output tab.
+
+#### 3. **Example: Using DBMS_OUTPUT in a Procedure**
+
+Here’s a procedure that uses `DBMS_OUTPUT.PUT_LINE` to log messages:
+
+```sql
+CREATE OR REPLACE PROCEDURE Log_Example IS
+BEGIN
+    -- Log the start of the procedure
+    DBMS_OUTPUT.PUT_LINE('Procedure started.');
+
+    -- Simulate some work with a simple loop
+    FOR i IN 1..5 LOOP
+        DBMS_OUTPUT.PUT_LINE('Iteration: ' || i);
+    END LOOP;
+
+    -- Log the end of the procedure
+    DBMS_OUTPUT.PUT_LINE('Procedure completed.');
+END;
+/
+```
+
+When you execute this procedure:
+
+```sql
+BEGIN
+    Log_Example;
+END;
+/
+```
+
+You’ll see the output:
+
+```plaintext
+Procedure started.
+Iteration: 1
+Iteration: 2
+Iteration: 3
+Iteration: 4
+Iteration: 5
+Procedure completed.
+```
+
+#### 4. **Limitations of DBMS_OUTPUT**
+
+- **Buffer Size**: The output buffer has a limit (typically 20,000 lines or 1 MB, depending on the Oracle version). You can increase the buffer size using `DBMS_OUTPUT.ENABLE(buffer_size)` where `buffer_size` is the number of bytes.
+  
+  Example:
+  ```sql
+  EXEC DBMS_OUTPUT.ENABLE(1000000);  -- 1 MB buffer
+  ```
+
+- **Not Automatically Displayed**: In tools like SQL*Plus, `SQL Developer`, or `Toad`, you must enable `SERVEROUTPUT` or the equivalent feature to see the output. The output is not automatically displayed after execution.
+
+#### 5. **Best Practices**
+
+- **Use for Debugging and Logging**: `DBMS_OUTPUT` is great for debugging and logging purposes during development. For production logging, consider using more sophisticated logging mechanisms or writing logs to a table.
+  
+- **Minimize Usage in Performance-Critical Code**: Overusing `DBMS_OUTPUT` in performance-critical code can slow down execution, especially if you have a lot of output to print.
+
+- **Structured Output**: When logging, format your output in a clear and structured way. This helps in analyzing logs more effectively.
+
+### Summary
+
+`DBMS_OUTPUT` is a valuable tool for developers working with Oracle PL/SQL. It allows you to print messages to the console, making it easier to understand the flow of your code, debug issues, and log important information. Just remember to enable it in your SQL environment to see the results.
+=#=#=#
+
+
 To log messages with timestamps indicating when rows are inserted into a temporary table and when they are purged and committed, you can use Oracle’s `DBMS_OUTPUT` package to print messages, and `SYSDATE` or `SYSTIMESTAMP` to capture the current date and time. Additionally, you can efficiently fetch and print the row count of purged rows.
 
 Here’s how you can structure a PL/SQL procedure to accomplish this:
