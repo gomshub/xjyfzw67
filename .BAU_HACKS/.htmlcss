@@ -1,0 +1,160 @@
+To fit a table with 6 columns within a `div` inside a tab in HTML, you can use a combination of CSS properties to ensure the table is responsive and fits nicely within the container. Here’s how you can achieve this:
+
+### HTML Structure for Tabs
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Responsive Table in Tabs</title>
+<style>
+  body, html {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+  }
+  
+  .tab-container {
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  .tab {
+    display: none;
+  }
+
+  .tab-label {
+    padding: 10px;
+    cursor: pointer;
+    display: inline-block;
+    background: #ccc;
+    margin-right: 2px;
+  }
+
+  .tab-label:hover {
+    background: #bbb;
+  }
+
+  .tab-content {
+    display: none;
+    padding: 20px;
+    border: 1px solid #ccc;
+    border-top: none;
+  }
+
+  input[type="radio"] {
+    display: none;
+  }
+
+  input[type="radio"]:checked + .tab-label {
+    background: #eee;
+    font-weight: bold;
+  }
+
+  input[type="radio"]:checked + .tab-label + .tab-content {
+    display: block;
+  }
+
+  .table-container {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .responsive-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .responsive-table th, .responsive-table td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+    word-wrap: break-word;
+  }
+
+  .responsive-table th {
+    background-color: #f2f2f2;
+  }
+
+  .responsive-table th, .responsive-table td {
+    min-width: 120px;
+  }
+</style>
+</head>
+<body>
+
+<div class="tab-container">
+  <!-- Tab navigation -->
+  <input type="radio" id="tab1" name="tab-group" checked>
+  <label for="tab1" class="tab-label">Tab 1</label>
+  
+  <input type="radio" id="tab2" name="tab-group">
+  <label for="tab2" class="tab-label">Tab 2</label>
+  
+  <input type="radio" id="tab3" name="tab-group">
+  <label for="tab3" class="tab-label">Tab 3</label>
+  
+  <!-- Tab content -->
+  <div class="tab-content">
+    <div class="table-container">
+      <table class="responsive-table">
+        <thead>
+          <tr>
+            <th>Column 1</th>
+            <th>Column 2</th>
+            <th>Column 3</th>
+            <th>Column 4</th>
+            <th>Column 5</th>
+            <th>Column 6</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Data 1</td>
+            <td>Data 2</td>
+            <td>Data 3</td>
+            <td>Data 4</td>
+            <td>Data 5</td>
+            <td>Data 6</td>
+          </tr>
+          <!-- Additional rows as needed -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tab-content">
+    <p>Content for Tab 2</p>
+  </div>
+
+  <div class="tab-content">
+    <p>Content for Tab 3</p>
+  </div>
+</div>
+
+</body>
+</html>
+```
+
+### Explanation
+
+1. **Tab Navigation**: 
+   - Radio buttons are used to control which tab content is displayed. The corresponding label serves as the tab header.
+   - Only one tab can be active at a time (`checked` radio button).
+
+2. **Tab Content**:
+   - Each `div` with the class `.tab-content` corresponds to one tab's content.
+   - By default, these content sections are hidden and only displayed when their corresponding radio button is checked.
+
+3. **Table Styling**:
+   - `.table-container` ensures that if the table is wider than its container, horizontal scrolling is enabled.
+   - `.responsive-table` is a full-width table that adjusts to the width of its parent container.
+   - `min-width` on the table cells ensures that columns have a minimum width but will also shrink or expand as necessary to fit within the container.
+
+4. **Responsive Design**:
+   - The design is responsive, allowing the table to fit into the `div` inside each tab. If the screen is too narrow, the table will become scrollable horizontally.
+
+This setup ensures the table with 6 columns fits neatly within the tab’s `div` and is viewable on different devices and screen sizes.
