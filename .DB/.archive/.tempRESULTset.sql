@@ -1,3 +1,121 @@
+To log messages with timestamps indicating when rows are inserted into a temporary table and when they are purged and committed, you can use Oracle’s `DBMS_OUTPUT` package to print messages, and `SYSDATE` or `SYSTIMESTAMP` to capture the current date and time. Additionally, you can efficiently fetch and print the row count of purged rows.
+
+Here’s how you can structure a PL/SQL procedure to accomplish this:
+
+### 1. **Procedure Structure with Logging**
+
+The following example shows a procedure that:
+- Logs the timestamp when rows are inserted into the temporary table.
+- Logs the timestamp when rows are purged (deleted) from the temporary table.
+- Fetches and logs the count of rows purged from the temporary table.
+
+### Example Procedure
+
+```sql
+CREATE OR REPLACE PROCEDURE Process_Temp_Table (
+    p_start_date IN DATE,
+    p_end_date   IN DATE,
+    p_gtt_name   IN VARCHAR2
+) IS
+    v_rows_inserted   NUMBER;
+    v_rows_purged     NUMBER;
+BEGIN
+    -- Log start of insert operation
+    DBMS_OUTPUT.PUT_LINE('[' || TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD HH24:MI:SS.FF') || '] Starting row insertion into ' || p_gtt_name);
+
+    -- Insert data into the specified GTT using the provided date range
+    EXECUTE IMMEDIATE 'INSERT INTO ' || p_gtt_name || ' (id)
+                       SELECT a.id
+                       FROM Audit a
+                       WHERE a.date_column >= :start_date
+                       AND a.date_column < :end_date'
+    USING p_start_date, p_end_date;
+
+    -- Get the number of rows inserted
+    EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM ' || p_gtt_name INTO v_rows_inserted;
+    
+    -- Log the number of rows inserted
+    DBMS_OUTPUT.PUT_LINE('[' || TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD HH24:MI:SS.FF') || '] Rows inserted: ' || v_rows_inserted);
+
+    -- Log start of purge operation
+    DBMS_OUTPUT.PUT_LINE('[' || TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD HH24:MI:SS.FF') || '] Starting row purge from ' || p_gtt_name);
+
+    -- Delete from the main tables based on the IDs in the GTT
+    EXECUTE IMMEDIATE 'DELETE FROM audit_link WHERE id IN (SELECT id FROM ' || p_gtt_name || ')';
+
+    EXECUTE IMMEDIATE 'DELETE FROM Audit WHERE id IN (SELECT id FROM ' || p_gtt_name || ')';
+
+    -- Get the number of rows purged
+    EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM ' || p_gtt_name INTO v_rows_purged;
+
+    -- Log the number of rows purged
+    DBMS_OUTPUT.PUT_LINE('[' || TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD HH24:MI:SS.FF') || '] Rows purged: ' || v_rows_purged);
+
+    -- Commit the transaction
+    COMMIT;
+
+    -- Log the commit
+    DBMS_OUTPUT.PUT_LINE('[' || TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD HH24:MI:SS.FF') || '] Transaction committed.');
+END;
+/
+```
+
+### 2. **Explanation of Key Components**
+
+- **Timestamp Logging**: 
+  - `SYSTIMESTAMP` is used for a high-precision timestamp, which includes fractional seconds.
+  - `TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD HH24:MI:SS.FF')` formats the timestamp for logging.
+
+- **Row Insertion**:
+  - After inserting rows into the temporary table, the row count is retrieved using a `SELECT COUNT(*)` statement.
+
+- **Row Purge**:
+  - Similar to the insertion, after purging (deleting) the rows, the row count is fetched using another `SELECT COUNT(*)` statement.
+  - The row counts are logged after each operation.
+
+- **Logging**:
+  - `DBMS_OUTPUT.PUT_LINE` is used to log messages, including timestamps and row counts.
+  - Ensure that `DBMS_OUTPUT` is enabled in your SQL environment if you want to see the output in tools like SQL*Plus or SQL Developer.
+
+### 3. **Running the Procedure**
+
+When you run this procedure, it will print logs to the output with timestamps and row counts for the insertions, purges, and the final commit. Here’s an example call:
+
+```sql
+BEGIN
+    Process_Temp_Table(
+        p_start_date => TO_DATE('01-JAN-2020', 'DD-MON-YYYY'),
+        p_end_date   => TO_DATE('01-FEB-2020', 'DD-MON-YYYY'),
+        p_gtt_name   => 'temp_ids_to_delete_1'
+    );
+END;
+/
+```
+
+### 4. **Enabling DBMS_OUTPUT**
+
+To ensure that `DBMS_OUTPUT` works and you can see the output:
+
+- In SQL*Plus:
+  ```sql
+  SET SERVEROUTPUT ON;
+  ```
+
+- In Oracle SQL Developer:
+  - Go to `View > DBMS Output`.
+  - Click on the green plus sign and select the connection.
+
+### 5. **Performance Considerations**
+
+- **Efficient Counting**: Counting rows after an insert or delete can be costly if the table is large. This is generally manageable with GTTs since they are typically smaller in size.
+- **Logging Impact**: Frequent logging (especially with high precision timestamps) can impact performance. Consider the trade-off between the granularity of logging and the performance of the procedure.
+
+### Summary
+
+By combining dynamic SQL, `DBMS_OUTPUT`, and the use of `SYSTIMESTAMP`, this procedure effectively logs the progress and outcomes of inserting and purging rows in a global temporary table. It provides clear and timestamped logs that are useful for auditing and troubleshooting purposes.
+
+
+=#=#=
 
 Yes, you can create and use multiple Global Temporary Tables (GTTs) for each parallel session execution. However, this approach is generally unnecessary and can complicate your design. Typically, a single GTT with session-specific data handling is sufficient for parallel execution, as Oracle automatically isolates the data for each session.
 
