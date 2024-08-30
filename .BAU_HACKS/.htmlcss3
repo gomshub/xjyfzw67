@@ -1,0 +1,166 @@
+To expand the column width of only two specific columns in the table and fit the entire table within its `div` without causing overflow, you can use CSS to adjust the `width` property for those two columns. Here’s how you can do it:
+
+### HTML and CSS
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Responsive Table in Tabs</title>
+<style>
+  body, html {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+  }
+  
+  .tab-container {
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  .tab {
+    display: none;
+  }
+
+  .tab-label {
+    padding: 10px;
+    cursor: pointer;
+    display: inline-block;
+    background: #ccc;
+    margin-right: 2px;
+  }
+
+  .tab-label:hover {
+    background: #bbb;
+  }
+
+  .tab-content {
+    display: none;
+    padding: 20px;
+    border: 1px solid #ccc;
+    border-top: none;
+  }
+
+  input[type="radio"] {
+    display: none;
+  }
+
+  input[type="radio"]:checked + .tab-label {
+    background: #eee;
+    font-weight: bold;
+  }
+
+  input[type="radio"]:checked + .tab-label + .tab-content {
+    display: block;
+  }
+
+  .table-container {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .responsive-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed; /* Ensures the table fits within its container */
+  }
+
+  .responsive-table th, .responsive-table td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+    word-wrap: break-word; /* Ensures content wraps and doesn't overflow */
+  }
+
+  /* Expand only two columns */
+  .responsive-table th:nth-child(2), .responsive-table td:nth-child(2),
+  .responsive-table th:nth-child(4), .responsive-table td:nth-child(4) {
+    width: 25%; /* Increase width of 2nd and 4th columns */
+  }
+
+  /* Set other columns to auto adjust */
+  .responsive-table th, .responsive-table td {
+    width: auto;
+  }
+
+  .responsive-table th {
+    background-color: #f2f2f2;
+  }
+</style>
+</head>
+<body>
+
+<div class="tab-container">
+  <!-- Tab navigation -->
+  <input type="radio" id="tab1" name="tab-group" checked>
+  <label for="tab1" class="tab-label">Tab 1</label>
+  
+  <input type="radio" id="tab2" name="tab-group">
+  <label for="tab2" class="tab-label">Tab 2</label>
+  
+  <input type="radio" id="tab3" name="tab-group">
+  <label for="tab3" class="tab-label">Tab 3</label>
+  
+  <!-- Tab content -->
+  <div class="tab-content">
+    <div class="table-container">
+      <table class="responsive-table">
+        <thead>
+          <tr>
+            <th>Column 1</th>
+            <th>Column 2</th> <!-- Expanded Column -->
+            <th>Column 3</th>
+            <th>Column 4</th> <!-- Expanded Column -->
+            <th>Column 5</th>
+            <th>Column 6</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Data 1</td>
+            <td>Data 2 (Expanded)</td>
+            <td>Data 3</td>
+            <td>Data 4 (Expanded)</td>
+            <td>Data 5</td>
+            <td>Data 6</td>
+          </tr>
+          <!-- Additional rows as needed -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tab-content">
+    <p>Content for Tab 2</p>
+  </div>
+
+  <div class="tab-content">
+    <p>Content for Tab 3</p>
+  </div>
+</div>
+
+</body>
+</html>
+```
+
+### Explanation:
+
+1. **Tab Container and Content**:
+   - The `.tab-container` holds the tabs and their content, with radio buttons controlling which tab content is shown.
+
+2. **Responsive Table**:
+   - The `.responsive-table` class uses `table-layout: fixed;` to ensure the table fits within its container without overflowing. This allows the columns to have a consistent width.
+   - `word-wrap: break-word;` is applied to ensure that text within the cells wraps to the next line instead of overflowing the cell.
+
+3. **Column Width Adjustment**:
+   - The CSS rule `nth-child(2)` and `nth-child(4)` target the 2nd and 4th columns respectively, expanding their width to 25% of the table's total width. You can adjust the `width` percentage according to your needs.
+   - The `width: auto;` rule for the other columns ensures that they adjust to the available space.
+
+4. **Overflow Handling**:
+   - The `.table-container` uses `overflow-x: auto;` to allow horizontal scrolling if the table width exceeds the `div` width, ensuring no content is cut off.
+
+This setup will expand only the specified columns (2nd and 4th) while fitting the entire table within the `div` inside the tab, without causing overflow. Adjust the `width` values to control how much space each expanded column should take relative to the others.
