@@ -1,5 +1,24 @@
 
 #!/bin/bash
+# main-script.sh
+
+# Trap errors and ensure return code is captured
+trap 'return_code=$?; echo "Captured return code: $return_code"; exit $return_code' EXIT
+
+echo "Starting the main script"
+
+# Command to be evaluated
+command_to_run="bash another-script.sh arg1 arg2"
+
+# Use eval to execute the command
+eval "$command_to_run"
+
+echo "Main script done"
+
+
+
+
+#!/bin/bash
 
 # Define an array (list) of allowed values
 allowed_list=("value1" "value2" "test" "example")
