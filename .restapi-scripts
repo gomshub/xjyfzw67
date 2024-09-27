@@ -1,3 +1,67 @@
+#!/bin/bash
+
+# API endpoints
+AUTH_ENDPOINT="https://example.com/api/login"
+DATA_ENDPOINT="https://example.com/api/data"
+USERNAME="your_username"
+PASSWORD="your_password"
+
+# File to store the API key
+API_KEY_FILE="api_key.txt"
+
+# Function to login and get a new API key
+get_api_key() {
+  echo "Fetching new API key..."
+  
+  # Make the login request
+  RESPONSE=$(curl -s -X POST "$AUTH_ENDPOINT" \
+    -H "Content-Type: application/json" \
+    -d "{\"username\":\"$USERNAME\", \"password\":\"$PASSWORD\"}")
+
+  # Extract the API key from the response
+  API_KEY=$(echo $RESPONSE | jq -r '.apiKey')
+
+  # Check if API key is successfully retrieved
+  if [ "$API_KEY" != "null" ]; then
+    echo "$API_KEY" > "$API_KEY_FILE"
+    echo "New API key obtained and saved."
+  else
+    echo "Failed to obtain API key. Exiting."
+    exit 1
+  fi
+}
+
+# Function to make the request using the API key
+make_request() {
+  # Read the saved API key
+  API_KEY=$(cat "$API_KEY_FILE")
+
+  # Make the request to get the output file
+  RESPONSE=$(curl -s -w "%{http_code}" -o output.txt -X GET "$DATA_ENDPOINT" \
+    -H "Authorization: Bearer $API_KEY")
+
+  HTTP_STATUS=$(echo $RESPONSE | tail -n1)
+
+  # If unauthorized (401), get a new API key
+  if [ "$HTTP_STATUS" == "401" ]; then
+    echo "API key expired. Getting a new key..."
+    get_api_key
+    make_request
+  else
+    echo "Request successful. Output saved to output.txt"
+  fi
+}
+
+# Check if the API key exists; if not, get a new one
+if [ ! -f "$API_KEY_FILE" ]; then
+  get_api_key
+fi
+
+# Make the request using the API key
+make_request
+
+=#=#=#=#=#=#=#
+
 Here’s a PowerShell script that demonstrates how to obtain an API key by sending a username and password to an endpoint, use that API key to make a request, and handle the scenario where the API key expires (getting a new one as needed).
 
 This script assumes the following:
