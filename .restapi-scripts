@@ -1,0 +1,86 @@
+Here’s a PowerShell script that demonstrates how to obtain an API key by sending a username and password to an endpoint, use that API key to make a request, and handle the scenario where the API key expires (getting a new one as needed).
+
+This script assumes the following:
+- `AUTH_ENDPOINT`: The API endpoint for logging in.
+- `DATA_ENDPOINT`: The API endpoint where the data or file is retrieved from.
+- It saves the API key in memory and makes a new login request when a 401 (Unauthorized) response is received.
+
+```powershell
+# Variables for API endpoints and credentials
+$auth_endpoint = "https://example.com/api/login"
+$data_endpoint = "https://example.com/api/data"
+$username = "your_username"
+$password = "your_password"
+
+# Function to get a new API key
+function Get-ApiKey {
+    Write-Output "Fetching new API key..."
+
+    # Prepare the body for the login request
+    $body = @{
+        username = $username
+        password = $password
+    } | ConvertTo-Json
+
+    # Make the login request
+    $response = Invoke-RestMethod -Uri $auth_endpoint -Method Post -ContentType "application/json" -Body $body
+
+    # Extract the API key from the response
+    $apiKey = $response.apiKey
+
+    # Check if the API key was successfully retrieved
+    if ($apiKey) {
+        Write-Output "API key obtained."
+        return $apiKey
+    } else {
+        Write-Error "Failed to obtain API key."
+        exit 1
+    }
+}
+
+# Function to make a request with the API key
+function Make-Request {
+    param (
+        [string]$apiKey
+    )
+
+    # Prepare the headers with the API key
+    $headers = @{
+        Authorization = "Bearer $apiKey"
+    }
+
+    # Make the data request
+    $response = Invoke-RestMethod -Uri $data_endpoint -Method Get -Headers $headers -ErrorAction SilentlyContinue
+
+    # Check if the API key is expired (401 Unauthorized)
+    if ($response.StatusCode -eq 401) {
+        Write-Output "API key expired. Fetching a new API key..."
+        $apiKey = Get-ApiKey
+        Make-Request -apiKey $apiKey  # Retry with the new API key
+    } else {
+        # Save the response (assuming it's a file or some data you want to store in output.txt)
+        Write-Output "Request successful. Saving output to output.txt."
+        $response | Out-File "output.txt"
+    }
+}
+
+# Main script logic
+# First, get a new API key
+$apiKey = Get-ApiKey
+
+# Make the request with the API key
+Make-Request -apiKey $apiKey
+```
+
+### Explanation:
+1. **`Get-ApiKey`**: This function logs in to the API by sending the username and password to the login endpoint. It extracts the API key from the JSON response and returns it.
+2. **`Make-Request`**: This function makes the request to retrieve data using the API key. If it receives a 401 status code (indicating the key is expired), it logs in again to fetch a new key and retries the request.
+3. **Main Logic**: The script first fetches the API key, then makes a request to get the output file or data. If the API key is expired, it automatically fetches a new one.
+
+### Notes:
+- `Invoke-RestMethod` is used for making API calls.
+- `ErrorAction SilentlyContinue` ensures that the script doesn't stop execution due to an error, allowing us to check the status code and retry if necessary.
+
+Replace the `auth_endpoint`, `data_endpoint`, and credentials (`$username`, `$password`) with actual values as per your API.
+
+This script will work in Windows PowerShell or PowerShell Core.
