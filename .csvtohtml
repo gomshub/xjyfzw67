@@ -1,0 +1,55 @@
+To generate an HTML file from a CSV using a shell script, you can use basic commands like `awk` or `sed` to transform the CSV content into an HTML table format. Below is a sample shell script that reads a CSV file and writes its contents into an HTML file as a table.
+
+### Example Shell Script
+
+```bash
+#!/bin/bash
+
+# Input CSV file (replace 'input.csv' with your actual CSV file)
+csv_file="input.csv"
+
+# Output HTML file (you can change the filename)
+html_file="output.html"
+
+# HTML header
+echo "<html>" > $html_file
+echo "<head><title>CSV to HTML Table</title></head>" >> $html_file
+echo "<body>" >> $html_file
+echo "<table border='1'>" >> $html_file
+
+# Read the CSV and convert to HTML table rows
+while IFS=, read -r col1 col2 col3 col4 # Extend as per your columns
+do
+    echo "  <tr>" >> $html_file
+    echo "    <td>$col1</td><td>$col2</td><td>$col3</td><td>$col4</td>" >> $html_file
+    echo "  </tr>" >> $html_file
+done < $csv_file
+
+# Close HTML tags
+echo "</table>" >> $html_file
+echo "</body>" >> $html_file
+echo "</html>" >> $html_file
+
+# Confirmation message
+echo "HTML table has been created in $html_file."
+```
+
+### Explanation:
+1. **Input File**: You need to replace `input.csv` with your actual CSV file.
+2. **HTML File**: The script outputs the HTML table into `output.html`, but you can change the filename if needed.
+3. **Reading CSV**: `IFS=,` ensures that fields are split by commas, and the `while` loop reads the CSV line by line.
+4. **HTML Table Structure**: Each row of the CSV is wrapped inside `<tr>` tags, and each column inside `<td>` tags.
+5. **Custom Columns**: Adjust the number of columns (`col1, col2, col3, col4`) according to your CSV structure.
+
+### How to Run:
+1. Save the script as `csv_to_html.sh`.
+2. Make the script executable:
+   ```bash
+   chmod +x csv_to_html.sh
+   ```
+3. Run the script:
+   ```bash
+   ./csv_to_html.sh
+   ```
+
+This will generate an HTML table from your CSV file.
