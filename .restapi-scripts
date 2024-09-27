@@ -1,3 +1,64 @@
+
+#!/bin/bash
+
+# Variables
+AUTH_ENDPOINT="https://example.com/api/login"
+DATA_ENDPOINT="https://example.com/api/data"
+USERNAME="your_username"
+PASSWORD="your_password"
+API_KEY_FILE="apikey.txt"
+
+# Function to get API key
+get_api_key() {
+    echo "Fetching new API key..."
+    
+    # Make the login request to get the API key
+    RESPONSE=$(curl -s -X POST "$AUTH_ENDPOINT" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"$USERNAME\", \"password\":\"$PASSWORD\"}")
+    
+    # Extract the API key (assuming JSON format like: {"apiKey": "your_api_key"})
+    API_KEY=$(echo "$RESPONSE" | grep -o '"apiKey": *"[^"]*' | grep -o '[^"]*$')
+    
+    # Check if the API key is successfully retrieved
+    if [ -n "$API_KEY" ]; then
+        echo "$API_KEY" > "$API_KEY_FILE"
+        echo "New API key saved."
+    else
+        echo "Failed to obtain API key. Exiting."
+        exit 1
+    fi
+}
+
+# Function to make a request with the API key
+make_request() {
+    # Read the saved API key
+    API_KEY=$(cat "$API_KEY_FILE")
+    
+    # Make the request using the API key
+    HTTP_STATUS=$(curl -s -o output.txt -w "%{http_code}" -X GET "$DATA_ENDPOINT" \
+        -H "Authorization: Bearer $API_KEY")
+    
+    # Check if the API key is expired (401 Unauthorized)
+    if [ "$HTTP_STATUS" == "401" ]; then
+        echo "API key expired. Fetching a new one..."
+        get_api_key
+        make_request  # Retry with the new API key
+    else
+        echo "Request successful. Output saved to output.txt."
+    fi
+}
+
+# Check if API key file exists
+if [ ! -f "$API_KEY_FILE" ]; then
+    get_api_key  # Get a new API key if the file does not exist
+fi
+
+# Make the API request
+make_request
+
+=#=#=
+
 #!/bin/bash
 
 # API endpoints
