@@ -1,4 +1,83 @@
 
+
+If the `apikey` is returned directly (e.g., in plain text) and you want to save the response from the `GET` request as a file, you can modify the script as follows:
+
+```sh
+#!/bin/bash
+
+# Endpoint URLs
+API_TOKEN_URL="https://example.com/api/token"
+DATA_URL="https://example.com/api/data"
+SIGN_OUT_URL="https://example.com/api/signout"
+
+# Credentials
+USERNAME="your_username"
+PASSWORD="your_password"
+
+# File to save the response
+OUTPUT_FILE="response.txt"
+
+# Function to request an API key
+get_apikey() {
+    apikey=$(curl -s -X POST -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "username=${USERNAME}&password=${PASSWORD}" \
+        "${API_TOKEN_URL}")
+
+    if [[ -z "$apikey" ]]; then
+        echo "Failed to obtain API key."
+        exit 1
+    fi
+}
+
+# Function to sign out
+sign_out() {
+    curl -s -X POST -H "Authorization: Bearer ${apikey}" "${SIGN_OUT_URL}" > /dev/null
+    echo "Signed out."
+}
+
+# Get the API key initially
+get_apikey
+
+# Try to get data with the API key
+while true; do
+    response=$(curl -s -w "%{http_code}" -H "Authorization: Bearer ${apikey}" "${DATA_URL}" -o "${OUTPUT_FILE}")
+    http_code="${response: -3}"
+
+    if [[ "$http_code" -eq 200 ]]; then
+        echo "Data saved to ${OUTPUT_FILE}"
+        break
+    elif [[ "$http_code" -eq 401 ]]; then
+        echo "API key expired, requesting a new one..."
+        get_apikey
+    else
+        echo "Failed to get data. HTTP status code: $http_code"
+        exit 1
+    fi
+done
+
+# Sign out with the API key
+sign_out
+```
+
+### Explanation of Changes:
+1. **API Key Retrieval**:
+   - The `apikey` is obtained directly from the `curl` response without using JSON parsing.
+
+2. **Save Response to File**:
+   - The `-o "${OUTPUT_FILE}"` flag is used in the `curl` command to save the GET request response to a file named `response.txt`.
+  
+3. **Handle Response Codes**:
+   - `http_code` is extracted from the response to check if it's `200`, `401`, or an error code.
+
+4. **Output Handling**:
+   - When the response is successfully received (`200`), the message indicates that the data has been saved to the file.
+
+This script works for APIs that return the `apikey` in plain text and need to save the GET response to a file.
+
+
+
+
+=#=#=
 #!/bin/bash
 
 # Variables
