@@ -1,4 +1,107 @@
 
+You can make the same requests in Python using the `requests` library. Here's a script that:
+
+1. Requests an API key via a POST request.
+2. Uses the API key to make a GET request to get data.
+3. Handles the case where the API key has expired.
+4. Signs out with the API key.
+
+It also uses a proxy.
+
+```python
+import requests
+
+# Endpoint URLs
+API_TOKEN_URL = "https://example.com/api/token"
+DATA_URL = "https://example.com/api/data"
+SIGN_OUT_URL = "https://example.com/api/signout"
+
+# Credentials
+USERNAME = "your_username"
+PASSWORD = "your_password"
+
+# Proxy
+PROXY = {
+    "http": "http://proxyp01:8080",
+    "https": "http://proxyp01:8080",
+}
+
+# Function to request an API key
+def get_apikey():
+    response = requests.post(
+        API_TOKEN_URL,
+        data={"username": USERNAME, "password": PASSWORD},
+        proxies=PROXY
+    )
+    
+    if response.status_code != 200:
+        print("Failed to obtain API key.")
+        exit(1)
+    
+    return response.text.strip()
+
+# Function to sign out
+def sign_out(apikey):
+    response = requests.post(
+        SIGN_OUT_URL,
+        headers={"Authorization": f"Bearer {apikey}"},
+        proxies=PROXY
+    )
+    if response.status_code == 200:
+        print("Signed out.")
+    else:
+        print(f"Failed to sign out. HTTP status code: {response.status_code}")
+
+# Main flow
+apikey = get_apikey()
+
+while True:
+    response = requests.get(
+        DATA_URL,
+        headers={"Authorization": f"Bearer {apikey}"},
+        proxies=PROXY
+    )
+    
+    if response.status_code == 200:
+        with open("response.txt", "w") as file:
+            file.write(response.text)
+        print("Data saved to response.txt")
+        break
+    elif response.status_code == 401:
+        print("API key expired, requesting a new one...")
+        apikey = get_apikey()
+    else:
+        print(f"Failed to get data. HTTP status code: {response.status_code}")
+        exit(1)
+
+# Sign out with the API key
+sign_out(apikey)
+```
+
+### Explanation:
+1. **Request an API Key (`get_apikey` function)**:
+   - Sends a `POST` request with the `username` and `password`.
+   - Uses the `proxies` parameter to pass the proxy.
+   - Exits the program if the API key cannot be obtained.
+
+2. **Get Data**:
+   - Uses the API key to send a `GET` request to the data endpoint.
+   - Handles different response codes:
+     - If the response code is `200`, the data is saved to `response.txt`.
+     - If the response code is `401`, it requests a new API key (assuming it expired).
+     - For other response codes, it prints an error message and exits.
+
+3. **Sign Out (`sign_out` function)**:
+   - Sends a `POST` request to the sign-out endpoint to end the session.
+
+4. **Proxy**:
+   - The proxy is passed using the `proxies` dictionary, with both `http` and `https` keys.
+
+Make sure you have the `requests` library installed. You can install it with:
+```sh
+pip install requests
+```
+
 
 If the `apikey` is returned directly (e.g., in plain text) and you want to save the response from the `GET` request as a file, you can modify the script as follows:
 
