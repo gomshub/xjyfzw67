@@ -1,0 +1,15 @@
+You can use the -w (write-out) option in curl to get the HTTP response code and also use -i to include headers or -v for more detailed information:
+
+curl -X DELETE -w "%{http_code}\n" -o /dev/null -s "http://example.com/file/to/delete"
+
+Explanation:
+
+	•	-w "%{http_code}\n": Outputs the HTTP response code.
+	•	-o /dev/null: Discards the response body.
+	•	-s: Runs in silent mode to suppress progress information.
+
+This will print the HTTP response code, such as 200 for success, 404 if the file is not found, or 403 for unauthorized access. If you want to see more details about why it might have failed:
+
+curl -X DELETE -v "http://example.com/file/to/delete"
+
+The -v flag will print verbose information about the request and response, including headers, which might help you troubleshoot the issue.
