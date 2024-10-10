@@ -1,0 +1,208 @@
+Here’s a plan to break down the task into manageable steps:
+
+1. Setup JIRA API Integration with Python
+
+We will use the JIRA API to fetch the necessary details, including JIRA numbers, status, summary, created date, assignee, description, and last comment.
+
+Step 1: Install the necessary libraries
+
+You’ll need to install the required Python libraries for interacting with the JIRA API and Oracle database:
+
+pip install requests cx_Oracle
+
+Step 2: Create the Python Module for JIRA API Interaction
+
+import requests
+import cx_Oracle
+import re
+from datetime import datetime
+
+# Configuration for JIRA API and Oracle DB
+JIRA_API_URL = "https://your-jira-domain.atlassian.net/rest/api/2/search"
+JIRA_API_TOKEN = "your_jira_api_token"
+JIRA_USERNAME = "your_email@example.com"
+ORACLE_DSN = cx_Oracle.makedsn("db_host", "db_port", service_name="db_service")
+ORACLE_USER = "db_user"
+ORACLE_PASSWORD = "db_password"
+
+# Function to fetch JIRA tickets from JIRA API
+def fetch_jira_tickets(jql_query):
+    headers = {
+        "Authorization": f"Bearer {JIRA_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    params = {
+        "jql": jql_query,
+        "fields": "summary,status,created,assignee,description,comment"
+    }
+    
+    response = requests.get(JIRA_API_URL, headers=headers, params=params)
+    
+    if response.status_code != 200:
+        raise Exception(f"Failed to fetch JIRA tickets: {response.text}")
+    
+    return response.json()['issues']
+
+# Function to extract environment information from summary
+def determine_environment(summary):
+    if re.search(r"q\d+-Test-\w+", summary):
+        return "Quality"
+    elif re.search(r"p\d+-Test-\w+", summary):
+        return "Prod"
+    else:
+        return "Unknown"
+
+# Function to update Oracle Database
+def update_oracle_db(jira_data):
+    try:
+        connection = cx_Oracle.connect(user=ORACLE_USER, password=ORACLE_PASSWORD, dsn=ORACLE_DSN)
+        cursor = connection.cursor()
+
+        for issue in jira_data:
+            issue_key = issue['key']
+            status = issue['fields']['status']['name']
+            summary = issue['fields']['summary']
+            created = datetime.strptime(issue['fields']['created'], "%Y-%m-%dT%H:%M:%S.%f%z")
+            assignee = issue['fields']['assignee']['displayName'] if issue['fields']['assignee'] else "Unassigned"
+            description = issue['fields']['description'] or "No Description"
+            last_comment = issue['fields']['comment']['comments'][-1]['body'] if issue['fields']['comment']['comments'] else "No Comments"
+            environment = determine_environment(summary)
+            
+            sql = """
+                INSERT INTO jira_tickets (issue_key, status, summary, created, assignee, description, last_comment, environment)
+                VALUES (:1, :2, :3, :4, :5, :6, :7, :8)
+            """
+            cursor.execute(sql, (issue_key, status, summary, created, assignee, description, last_comment, environment))
+
+        connection.commit()
+    except cx_Oracle.DatabaseError as e:
+        print(f"Oracle DB Error: {e}")
+    finally:
+        cursor.close()
+        connection.close()
+
+# Main function to run the module
+def run_jira_to_db(jql_query):
+    jira_data = fetch_jira_tickets(jql_query)
+    update_oracle_db(jira_data)
+
+if __name__ == "__main__":
+    JIRA_QUERY = 'project = "YOUR_PROJECT" AND updated >= -1d'
+    run_jira_to_db(JIRA_QUERY)
+
+Explanation:
+
+	•	JIRA API Interaction: We use the JIRA REST API to fetch tickets that match a certain JQL query. The function fetch_jira_tickets retrieves details such as summary, status, assignee, and comments.
+	•	Environment Detection: Based on the ticket summary, we grep for patterns that match qXX-Test- or pXX-Test- to determine if it’s a Quality or Prod environment.
+	•	Oracle Database Update: The data fetched from the JIRA API is inserted into the Oracle database table using the cx_Oracle library.
+
+Database Table Structure:
+
+CREATE TABLE jira_tickets (
+    issue_key VARCHAR2(255),
+    status VARCHAR2(50),
+    summary VARCHAR2(1000),
+    created DATE,
+    assignee VARCHAR2(255),
+    description CLOB,
+    last_comment CLOB,
+    environment VARCHAR2(50)
+);
+
+2. Deploy as a Kubernetes Service
+
+Step 1: Create Dockerfile
+
+# Use Python base image
+FROM python:3.9-slim
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements and source code
+COPY requirements.txt requirements.txt
+COPY . .
+
+# Install dependencies
+RUN pip install -r requirements.txt
+
+# Run the script
+CMD ["python", "jira_to_oracle.py"]
+
+Step 2: Build and Push Docker Image
+
+# Build the Docker image
+docker build -t your-dockerhub-username/jira-to-db:latest .
+
+# Push the image to Docker Hub
+docker push your-dockerhub-username/jira-to-db:latest
+
+Step 3: Create Kubernetes Deployment
+
+Create a kubernetes-deployment.yaml file to define the Kubernetes deployment:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-to-db-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jira-to-db
+  template:
+    metadata:
+      labels:
+        app: jira-to-db
+    spec:
+      containers:
+      - name: jira-to-db-container
+        image: your-dockerhub-username/jira-to-db:latest
+        env:
+        - name: JIRA_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: jira-secrets
+              key: api_token
+        - name: ORACLE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oracle-secrets
+              key: password
+
+Step 4: Deploy to Kubernetes
+
+kubectl apply -f kubernetes-deployment.yaml
+
+Step 5: Expose Service if needed (Optional)
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: jira-to-db-service
+spec:
+  selector:
+    app: jira-to-db
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: LoadBalancer
+
+3. Shell Script for Running the Module
+
+You can create a shell script to interact with the Kubernetes service if needed:
+
+#!/bin/bash
+# Script to trigger the service and update DB
+
+kubectl rollout restart deployment jira-to-db-deployment
+
+Summary:
+
+	•	The Python script fetches JIRA data and updates the Oracle database.
+	•	The Docker container wraps the Python module, which is deployed as a Kubernetes service.
+	•	The shell script can trigger the Kubernetes service to run the module.
+
+This approach allows continuous integration of JIRA data into your Oracle database via an automated Kubernetes service deployment.
