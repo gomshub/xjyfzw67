@@ -1,3 +1,71 @@
+
+Since you are using Apache Axis2 and only have the axis2.xml configuration file, you can still control the binding URL that appears in your WSDL by modifying the axis2.xml file directly, along with adjusting Tomcat’s settings to ensure the correct DNS (https://api.domain.com) is reflected.
+
+Steps to Modify WSDL Binding URL via axis2.xml and Tomcat
+
+	1.	Edit axis2.xml to Set the Binding URL:
+In Axis2, you can manually configure the ServiceEndpointAddress or WSDL binding address in the axis2.xml file. You can set the external endpoint (DNS) for your web service, which will then be reflected in the WSDL.
+	•	Location: /WEB-INF/conf/axis2.xml or /WEB-INF/axis2.xml
+	•	Modify or add the following parameter in axis2.xml:
+
+<parameter name="ServiceEndpointAddress">https://api.domain.com/YourService</parameter>
+
+This will tell Axis2 to generate the WSDL with the https://api.domain.com address.
+
+	2.	Modify Tomcat’s server.xml for DNS and HTTPS:
+You need to modify Tomcat’s server.xml to ensure that it handles requests coming from the new external DNS (api.domain.com). Here’s how to set it up:
+	•	Location: /conf/server.xml on your Tomcat server.
+	•	Modify the <Connector> element to include the proxyName, proxyPort, scheme, and secure attributes:
+
+<Connector port="8080" protocol="HTTP/1.1"
+           proxyName="api.domain.com"
+           proxyPort="443"
+           scheme="https"
+           secure="true"
+           connectionTimeout="20000"
+           redirectPort="8443" />
+
+	•	proxyName=“api.domain.com”: This tells Tomcat that the external requests are coming from api.domain.com.
+	•	proxyPort=“443”: It ensures that requests are recognized as HTTPS.
+
+	3.	Configure HAProxy (Optional, if not already configured):
+If you are using HAProxy to proxy requests, ensure that it forwards requests for https://api.domain.com correctly to your Tomcat instance.
+	•	HAProxy Frontend Configuration:
+
+frontend https_frontend
+    bind *:443 ssl crt /etc/haproxy/certs/api-domain-cert.pem
+    acl is_api_domain hdr(host) -i api.domain.com
+    use_backend http_backend if is_api_domain
+
+	•	HAProxy Backend Configuration:
+
+backend http_backend
+    server tomcat1 192.168.1.10:8080 check
+
+
+	4.	Restart Tomcat:
+After modifying the axis2.xml and server.xml configurations, restart Tomcat to apply the new settings:
+
+sudo systemctl restart tomcat
+
+
+	5.	Test the WSDL:
+Once Tomcat is restarted, test the WSDL by visiting:
+
+https://api.domain.com/YourService?wsdl
+
+This should now reflect the correct binding URL (https://api.domain.com) in the soap:address of the WSDL.
+
+Summary:
+
+	•	Edit axis2.xml: Add or update the ServiceEndpointAddress parameter to use https://api.domain.com.
+	•	Edit server.xml: Configure Tomcat’s proxyName and other related settings to handle traffic correctly for the new DNS.
+	•	HAProxy Configuration (if needed): Ensure requests for api.domain.com are forwarded to Tomcat.
+	•	Restart Tomcat and verify that the WSDL binding URL reflects the new DNS.
+
+These changes will ensure that your WSDL points to the correct external HTTPS DNS (https://api.domain.com). Let me know if you need further details or if there’s anything else you’d like assistance with!
+=#=##
+
 <!-- Inside axis2.xml -->
 <axisconfig>
     <!-- Existing parameters like module configurations, etc. -->
