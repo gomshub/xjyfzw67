@@ -1,0 +1,61 @@
+<!-- Inside axis2.xml -->
+<axisconfig>
+    <!-- Existing parameters like module configurations, etc. -->
+
+    <!-- Transport Receivers for HTTP and HTTPS -->
+    <transportReceiver name="http" class="org.apache.axis2.transport.http.SimpleHTTPServer"/>
+    <transportReceiver name="https" class="org.apache.axis2.transport.http.SimpleHTTPSServer"/>
+
+    <!-- Add the ServiceEndpointAddress here -->
+    <parameter name="ServiceEndpointAddress">https://api.domain.com/YourService</parameter>
+
+    <!-- Other parameters like security, modules, etc. -->
+</axisconfig>
+
+
+In the axis2.xml file, the location to add the ServiceEndpointAddress depends on where other relevant service parameters are located, but generally, it should go in the <transportReceiver> section or near the global parameters for services.
+
+Where to Add the ServiceEndpointAddress in axis2.xml
+
+You should add the ServiceEndpointAddress parameter under the global parameters section or near the transport settings, depending on how the file is structured. Typically, this will be after the transports or service-related parameters.
+
+Example Structure:
+
+Here’s an example showing where you can add it:
+
+<!-- Inside axis2.xml -->
+<axisconfig>
+    <!-- Existing parameters like module configurations, etc. -->
+
+    <!-- Transport Receivers for HTTP and HTTPS -->
+    <transportReceiver name="http" class="org.apache.axis2.transport.http.SimpleHTTPServer"/>
+    <transportReceiver name="https" class="org.apache.axis2.transport.http.SimpleHTTPSServer"/>
+
+    <!-- Add the ServiceEndpointAddress here -->
+    <parameter name="ServiceEndpointAddress">https://api.domain.com/YourService</parameter>
+
+    <!-- Other parameters like security, modules, etc. -->
+</axisconfig>
+
+Placement:
+
+	1.	Above TransportSenders/Receivers:
+The ServiceEndpointAddress parameter should typically be added after the <transportReceiver> and <transportSender> definitions to ensure it’s applied to the service level.
+	2.	Global Scope: If the axis2.xml contains a section for global parameters, placing it there ensures that the URL is applied across all services.
+
+Example of Adding Under the Global Parameters Section:
+
+<!-- Inside axis2.xml -->
+<axisconfig>
+    <!-- Global or service-wide parameters -->
+    <parameter name="ServiceEndpointAddress">https://api.domain.com/YourService</parameter>
+
+    <!-- Other configurations like modules, transports, etc. -->
+</axisconfig>
+
+Final Notes:
+
+	•	Check Existing Parameters: If your axis2.xml already has other parameters controlling service endpoints, place the new parameter next to them.
+	•	Position in the File: The exact placement may vary depending on how your axis2.xml is organized, but typically, placing it under the transport definitions ensures it applies properly.
+
+Let me know if you need further guidance or if your axis2.xml has a different structure!
