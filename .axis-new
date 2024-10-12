@@ -1,0 +1,41 @@
+To modify the axis2.xml file to change the binding URL or adjust configurations related to WSDL generation in Apache Axis2, follow these steps:
+
+Steps to Modify axis2.xml:
+
+	1.	Locate the axis2.xml File:
+The axis2.xml configuration file is usually located in the AXIS2_HOME/conf/ directory, or in your web application’s WEB-INF/conf/ directory if you are using Axis2 within a servlet container like Apache Tomcat.
+	2.	Open the axis2.xml File:
+Use a text editor to open the axis2.xml file. This file contains a variety of configurations for the Axis2 engine, such as service transport protocols, module configuration, and message processing.
+	3.	Modify the WSDL Address:
+You can specify the servicePath and adjust the WSDL generation settings if necessary. Look for the transportReceiver section, which defines the available transport protocols, and modify the URLs used for WSDL generation.
+You can also manually specify the external service endpoint by setting the http or https transport address.
+For example, you may find sections like this:
+
+<transportReceiver name="http" class="org.apache.axis2.transport.http.SimpleHTTPServer">
+    <parameter name="port">8080</parameter>
+    <parameter name="hostname">localhost</parameter>  <!-- change to abc.com -->
+</transportReceiver>
+
+<transportReceiver name="https" class="org.apache.axis2.transport.http.SimpleHTTPServer">
+    <parameter name="port">8443</parameter>
+    <parameter name="hostname">abc.com</parameter>  <!-- change to abc.com -->
+</transportReceiver>
+
+
+	4.	Modify the WSDLServiceAddress Property (Optional):
+Some versions of Axis2 allow you to explicitly set the WSDL address. Look for a parameter like this in your axis2.xml file and adjust it:
+
+<parameter name="WSDLServiceAddress">https://abc.com/yourService</parameter>
+
+This forces Axis2 to generate the WSDL with the specified service address rather than the default internal one.
+
+	5.	Modify Dynamic WSDL Generation (Optional):
+If you’re using dynamic WSDL generation, you may need to programmatically adjust the endpoint URL by customizing the WSDLGenerationEngine or creating a custom MessageReceiver to override the WSDL URL. This is more advanced and typically involves modifying your Axis2 service code.
+	6.	Restart the Axis2 Server:
+After saving your changes to axis2.xml, restart your Axis2 engine or the web application container (e.g., Tomcat) for the changes to take effect.
+
+Example HAProxy Setup in Axis2:
+
+If you’re using HAProxy to forward requests from https://abc.com to http://def.com, ensure that your Axis2 is aware of the correct external URL by either modifying the axis2.xml file as shown or programmatically overriding the endpoint address in your service.
+
+Would you like assistance with any specific step in this process?
