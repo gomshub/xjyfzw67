@@ -1,3 +1,15 @@
+<axisconfig>
+    
+    <!-- Other configurations -->
+
+    <!-- Add the WSDLServiceAddress parameter here -->
+    <parameter name="WSDLServiceAddress">https://abc.com</parameter>
+
+    <!-- Continue with other configurations -->
+    
+</axisconfig>
+
+
 To modify the axis2.xml file to change the binding URL or adjust configurations related to WSDL generation in Apache Axis2, follow these steps:
 
 Steps to Modify axis2.xml:
