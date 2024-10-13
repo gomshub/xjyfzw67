@@ -1,3 +1,72 @@
+
+No, the Connector port and Servlet configuration are not done in the axis2.xml file. These configurations are typically part of your servlet container (e.g., Apache Tomcat) and web application’s web.xml file, not within Axis2’s axis2.xml.
+
+Here’s where each configuration is done:
+
+1. Connector Port Configuration:
+
+The Connector port is part of your servlet container’s configuration (e.g., Tomcat’s server.xml) rather than axis2.xml. This is where you define how the web server listens for HTTP and HTTPS requests.
+
+For example, in Tomcat, you would configure the connector in the server.xml file like this:
+
+Tomcat server.xml Example:
+
+<Connector port="8443"
+           protocol="org.apache.coyote.http11.Http11NioProtocol"
+           maxThreads="150"
+           SSLEnabled="true"
+           scheme="https"
+           secure="true"
+           clientAuth="false"
+           sslProtocol="TLS"
+           keystoreFile="conf/keystore.jks"
+           keystorePass="changeit"/>
+
+	•	This configuration defines an HTTPS connector on port 8443 with SSL enabled.
+	•	You must set up SSL certificates in Tomcat for this to work properly.
+
+2. Servlet Configuration:
+
+The Servlet configuration for Axis2 (using AxisServletListener) is done in the web.xml of your web application (which is typically located in WEB-INF/web.xml). This tells the servlet container (e.g., Tomcat) how to route requests to the Axis2 framework.
+
+Example web.xml Configuration for Axis2:
+
+<servlet>
+    <servlet-name>AxisServlet</servlet-name>
+    <servlet-class>org.apache.axis2.transport.http.AxisServlet</servlet-class>
+</servlet>
+
+<servlet-mapping>
+    <servlet-name>AxisServlet</servlet-name>
+    <url-pattern>/services/*</url-pattern>
+</servlet-mapping>
+
+	•	This configuration ensures that all requests matching the URL pattern /services/* are handled by the AxisServlet class, which is responsible for dispatching Axis2 services.
+	•	The servlet container (e.g., Tomcat) uses this to forward requests to Axis2.
+
+3. Axis2.xml Configuration:
+
+The axis2.xml file is used for Axis2-specific configurations, such as:
+
+	•	Defining parameters like WSDLServiceAddress, port, and hostname.
+	•	Configuring transport receivers for HTTP/HTTPS, such as AxisServletListener.
+	•	Specifying global service and module parameters.
+
+But axis2.xml doesn’t handle:
+
+	•	Web server-level configurations (like ports and SSL certificates).
+	•	Servlet mappings (those go in web.xml).
+
+Summary:
+
+	•	Connector port (for HTTP/HTTPS) is configured in Tomcat’s server.xml (or another servlet container’s configuration file).
+	•	Servlet mappings (for Axis2 services) are configured in the web.xml file of the web application.
+	•	Axis2-specific settings (like WSDL generation, hostname, and transport receivers) are configured in axis2.xml.
+
+Would you like more details on how to configure the Tomcat server.xml or web.xml for your Axis2 services?
+
+
+
 <axisconfig>
     
     <!-- Other configurations -->
