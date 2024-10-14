@@ -1,3 +1,88 @@
+
+To support two different HTTPS DNS names (e.g., service1.example.com and service2.example.com) through HAProxy, and ensure that the WSDLs served by the Tomcat backend reference the correct HTTPS DNS in which the service is called, you can configure HAProxy and Tomcat to properly handle these requests.
+
+Here’s how to set it up:
+
+1. HAProxy Configuration for Multiple HTTPS Domains:
+
+You can configure HAProxy to handle SSL termination for both DNS names and forward the request to Tomcat while ensuring the correct X-Forwarded-Host and X-Forwarded-Proto headers are set. This will allow Tomcat to generate the appropriate WSDL URLs.
+
+	•	File: /etc/haproxy/haproxy.cfg
+	•	Key Configuration:
+
+frontend https-in
+    bind *:443 ssl crt /etc/haproxy/certs/service1.pem crt /etc/haproxy/certs/service2.pem
+    mode http
+    acl is_service1 hdr(host) -i service1.example.com
+    acl is_service2 hdr(host) -i service2.example.com
+
+    use_backend tomcat-service1-backend if is_service1
+    use_backend tomcat-service2-backend if is_service2
+
+    http-request set-header X-Forwarded-Proto https
+    http-request set-header X-Forwarded-Host %[hdr(host)]
+    option http-server-close
+    option forwardfor
+    
+backend tomcat-service1-backend
+    server tomcat1 192.168.1.101:8080 check
+    http-request set-header Host service1.example.com
+
+backend tomcat-service2-backend
+    server tomcat2 192.168.1.102:8080 check
+    http-request set-header Host service2.example.com
+
+
+
+In this setup:
+
+	•	Multiple Certificates: HAProxy is configured to handle SSL for both service1.example.com and service2.example.com. You specify the respective certificates (service1.pem and service2.pem).
+	•	Host-based Routing: The acl rules check the Host header to determine which service was called and route the traffic to the appropriate backend (tomcat-service1-backend or tomcat-service2-backend).
+	•	X-Forwarded Headers: X-Forwarded-Proto is set to https, and X-Forwarded-Host is set to the original DNS hostname. These headers are crucial to ensure that Tomcat knows which hostname and protocol the client used.
+
+2. Tomcat Configuration for Dynamic WSDL URLs:
+
+Tomcat needs to recognize the forwarded headers so that it can generate the correct URLs in the WSDL.
+
+	•	File: conf/server.xml (Tomcat configuration)
+	•	Key Configuration:
+Add RemoteIpValve to each Tomcat server to handle the forwarded headers from HAProxy.
+
+<Valve className="org.apache.catalina.valves.RemoteIpValve"
+       protocolHeader="X-Forwarded-Proto"
+       protocolHeaderHttpsValue="https"
+       hostHeader="X-Forwarded-Host"
+       portHeader="X-Forwarded-Port" />
+
+
+
+This configuration tells Tomcat to use the X-Forwarded-Host header for the DNS name and the X-Forwarded-Proto for the protocol (HTTPS), ensuring that the generated WSDL reflects the correct HTTPS URL.
+
+3. Axis2 Configuration (if using Axis2 for SOAP):
+
+If you’re using Axis2 for your web services, you may need to modify Axis2’s WSDL URL generation to reflect the correct HTTPS DNS.
+
+	•	File: WEB-INF/conf/axis2.xml (within your Axis2 web application)
+	•	Key Configuration: Ensure that Axis2 generates the correct URLs by making use of the forwarded headers.
+
+<transportReceiver name="http"
+                   class="org.apache.axis2.transport.http.AxisServletListener">
+    <parameter name="http" locked="false">https</parameter>
+</transportReceiver>
+
+
+
+Additionally, you can create custom logic or interceptors that adjust the WSDL soap:address to reflect the value in the X-Forwarded-Host header.
+
+Summary:
+
+	•	HAProxy: Handles SSL for both service1.example.com and service2.example.com, routes the requests based on the DNS name, and forwards the X-Forwarded-Proto and X-Forwarded-Host headers.
+	•	Tomcat: Configured with RemoteIpValve to recognize the X-Forwarded headers, ensuring that it generates WSDL URLs with the correct HTTPS DNS.
+	•	Axis2 (Optional): Modify WSDL generation to ensure it reflects the HTTPS DNS based on the headers.
+
+This setup will allow your Tomcat services to handle requests for multiple HTTPS domains and serve WSDLs with the correct domain in the binding URL.
+
+=#=#
 To configure Tomcat to work with an HAProxy load balancer handling HTTPS, without installing certificates on the Tomcat server, you can configure Tomcat to trust the X-Forwarded-Proto header and let HAProxy manage the SSL termination. This will allow Tomcat to generate WSDLs with HTTPS URLs, even though it’s running HTTP internally.
 
 Here are the key files and configurations involved:
