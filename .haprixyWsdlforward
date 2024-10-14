@@ -1,0 +1,58 @@
+To configure Tomcat to work with an HAProxy load balancer handling HTTPS, without installing certificates on the Tomcat server, you can configure Tomcat to trust the X-Forwarded-Proto header and let HAProxy manage the SSL termination. This will allow Tomcat to generate WSDLs with HTTPS URLs, even though it’s running HTTP internally.
+
+Here are the key files and configurations involved:
+
+1. HAProxy Configuration (SSL Termination):
+
+In HAProxy, you need to ensure SSL termination is correctly set up. This means HAProxy will handle HTTPS connections from clients, forward the requests to Tomcat using HTTP, and add the X-Forwarded-Proto header.
+
+	•	File: /etc/haproxy/haproxy.cfg
+	•	Key Configuration:
+
+frontend https-in
+    bind *:443 ssl crt /etc/haproxy/certs/yourcert.pem
+    option http-server-close
+    option forwardfor
+    reqadd X-Forwarded-Proto:\ https
+    default_backend tomcat-backend
+
+backend tomcat-backend
+    server tomcat-server1 192.168.1.100:8080 check
+
+
+
+In this configuration:
+
+	•	bind *:443 ssl crt /etc/haproxy/certs/yourcert.pem: Configures SSL termination on HAProxy.
+	•	reqadd X-Forwarded-Proto:\ https: Adds the X-Forwarded-Proto header to indicate HTTPS.
+
+2. Tomcat Configuration (Recognizing HTTPS):
+
+Tomcat should be configured to trust the X-Forwarded-Proto header so that it generates URLs with HTTPS in the WSDL files.
+
+	•	File: conf/server.xml (Tomcat configuration)
+	•	Key Configuration: Add a RemoteIpValve to recognize the X-Forwarded-Proto header.
+
+<Valve className="org.apache.catalina.valves.RemoteIpValve"
+       protocolHeader="X-Forwarded-Proto"
+       protocolHeaderHttpsValue="https" />
+
+
+
+This tells Tomcat to treat the request as HTTPS when it sees X-Forwarded-Proto: https from the load balancer.
+
+3. Optional Axis2 Configuration:
+
+If you’re using Apache Axis2 for SOAP services, you may need to ensure Axis2 uses the correct scheme in the generated WSDL.
+
+	•	File: WEB-INF/conf/axis2.xml (within your Axis2 web application)
+	•	Key Configuration: Make sure you configure the transport receivers to handle HTTPS correctly, or you can manually adjust the service endpoint URLs.
+
+<transportReceiver name="http"
+                   class="org.apache.axis2.transport.http.AxisServletListener">
+    <parameter name="http" locked="false">https</parameter>
+</transportReceiver>
+
+
+
+This setup, combined with HAProxy handling SSL, should allow your Tomcat services to expose WSDL with HTTPS URLs, without the need for installing certificates directly on Tomcat.
