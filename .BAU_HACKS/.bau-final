@@ -1,3 +1,187 @@
+To generate a single HTML file that contains both updated and non-updated JIRAs after syncing with the Oracle DB, I will update the Python code to handle this scenario. The updated file will contain two sections:
+
+	1.	Updated successfully to respective environment – JIRAs that were inserted/updated in the database.
+	2.	Not Updated into DB – JIRAs that could not be updated in the database due to the missing Job_Number.
+
+Updated Python Code (jira_sync.py)
+
+Here’s how the Python code can be updated to handle both updated and non-updated JIRAs and return a combined HTML file as the result:
+
+from flask import Flask, jsonify, request, send_file
+import cx_Oracle
+import requests
+import os
+import re
+from io import StringIO
+
+app = Flask(__name__)
+
+# JIRA API and DB connection details
+JIRA_API_URL = os.getenv('JIRA_API_URL')
+JIRA_API_TOKEN = os.getenv('JIRA_API_TOKEN')
+ORACLE_DB_PROD_CONN_STR = os.getenv('ORACLE_DB_PROD_CONN_STR')
+ORACLE_DB_QUALITY_CONN_STR = os.getenv('ORACLE_DB_QUALITY_CONN_STR')
+
+headers = {
+    'Authorization': f'Bearer {JIRA_API_TOKEN}',
+    'Content-Type': 'application/json'
+}
+
+@app.route('/sync_jira', methods=['GET'])
+def sync_jira():
+    # Get JIRA issues via the API
+    response = requests.get(JIRA_API_URL, headers=headers)
+    issues = response.json().get('issues', [])
+    
+    updated_jiras = []
+    non_updated_jiras = []
+
+    for issue in issues:
+        jira_number = issue['key']
+        status = issue['fields']['status']['name']
+        summary = issue['fields']['summary']
+        criticality = issue['fields'].get('priority', {}).get('name', 'N/A')
+        description = issue['fields'].get('description', 'N/A')
+        creation_date = issue['fields']['created']
+        comments = issue['fields']['comment']['comments']
+        first_comment = comments[0]['body'] if comments else "No Comments"
+        last_comment = comments[-1]['body'] if comments else "No Comments"
+
+        # Extract Job_Number from summary using regex
+        job_number_match = re.search(r"Job_(\d+)", summary)
+        job_number = job_number_match.group(1) if job_number_match else None
+
+        # Determine which DB to connect based on Job_Number
+        if job_number:
+            conn_str = ORACLE_DB_PROD_CONN_STR if 'prod' in summary.lower() else ORACLE_DB_QUALITY_CONN_STR
+            conn = cx_Oracle.connect(conn_str)
+            cursor = conn.cursor()
+
+            # Insert or update the data in the appropriate DB
+            cursor.execute("""
+                MERGE INTO jira_issues ji
+                USING dual
+                ON (ji.jira_number = :jira_number)
+                WHEN MATCHED THEN
+                    UPDATE SET ji.status = :status, ji.summary = :summary, ji.job_number = :job_number,
+                               ji.criticality = :criticality, ji.description = :description, ji.creation_date = :creation_date,
+                               ji.first_comment = :first_comment, ji.last_comment = :last_comment
+                WHEN NOT MATCHED THEN
+                    INSERT (jira_number, status, summary, job_number, criticality, description, creation_date, first_comment, last_comment)
+                    VALUES (:jira_number, :status, :summary, :job_number, :criticality, :description, :creation_date, :first_comment, :last_comment)
+            """, [jira_number, status, summary, job_number, criticality, description, creation_date, first_comment, last_comment])
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            # Add to the updated list
+            updated_jiras.append({
+                'jira_number': jira_number,
+                'job_number': job_number,
+                'criticality': criticality,
+                'creation_date': creation_date
+            })
+        else:
+            # Add to the non-updated list if no Job_Number
+            non_updated_jiras.append({
+                'jira_number': jira_number,
+                'criticality': criticality,
+                'creation_date': creation_date
+            })
+    
+    # After processing all JIRAs, generate the HTML file
+    html_output = generate_html(updated_jiras, non_updated_jiras)
+    
+    # Return the HTML file as the response
+    return send_file(html_output, mimetype='text/html', as_attachment=True, attachment_filename="Result_list.html")
+
+def generate_html(updated_jiras, non_updated_jiras):
+    # Create an in-memory file for the HTML
+    html_file = StringIO()
+    
+    # Start HTML content
+    html_file.write("<html><head><title>JIRA Sync Report</title></head><body>")
+    html_file.write("<h1>JIRA Sync Report</h1>")
+    
+    # Section for Updated JIRAs
+    html_file.write("<h2>Updated successfully to respective environment</h2>")
+    html_file.write("<table border='1'><thead><tr><th>JIRA Number</th><th>Job Number</th><th>Criticality</th><th>Creation Date</th></tr></thead><tbody>")
+    for jira in updated_jiras:
+        html_file.write(f"<tr><td><a href='https://your-jira-instance/browse/{jira['jira_number']}'>{jira['jira_number']}</a></td>")
+        html_file.write(f"<td>{jira['job_number']}</td>")
+        html_file.write(f"<td>{jira['criticality']}</td>")
+        html_file.write(f"<td>{jira['creation_date']}</td></tr>")
+    html_file.write("</tbody></table>")
+
+    # Section for Non-Updated JIRAs
+    html_file.write("<h2>Not Updated into DB</h2>")
+    html_file.write("<table border='1'><thead><tr><th>JIRA Number</th><th>Criticality</th><th>Creation Date</th></tr></thead><tbody>")
+    for jira in non_updated_jiras:
+        html_file.write(f"<tr><td><a href='https://your-jira-instance/browse/{jira['jira_number']}'>{jira['jira_number']}</a></td>")
+        html_file.write(f"<td>{jira['criticality']}</td>")
+        html_file.write(f"<td>{jira['creation_date']}</td></tr>")
+    html_file.write("</tbody></table>")
+    
+    # End HTML content
+    html_file.write("</body></html>")
+    
+    # Move cursor to the beginning of the StringIO object
+    html_file.seek(0)
+    
+    return html_file
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=5000)
+
+Explanation of Updates:
+
+	1.	Processing JIRA Data:
+	•	Each JIRA issue is fetched from the JIRA API and processed. If a Job_Number is found, the JIRA is inserted or updated in the Oracle DB.
+	•	If no Job_Number is found, it is added to the “Not Updated” list.
+	2.	Generating the HTML Report:
+	•	The HTML report is generated using the generate_html function.
+	•	The report contains two sections:
+	•	JIRAs that were updated in the respective environment (with Job_Number).
+	•	JIRAs that were not updated (without Job_Number).
+	•	The HTML file is returned as a file download.
+
+3. Updated Dockerfile
+
+If you haven’t already, ensure your Dockerfile reflects these changes:
+
+FROM python:3.8-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN pip install -r requirements.txt
+
+COPY . .
+
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "wsgi:app"]
+
+4. API Endpoint URL
+
+Ensure your sync_jira.sh script uses the correct API endpoint to call this service:
+
+KUBE_SERVICE_URL="http://jira-oracle-sync-service"
+response=$(curl -s -o ${HTML_FILE} -w "%{http_code}" ${KUBE_SERVICE_URL}/sync_jira)
+
+This updated code structure ensures that:
+
+	•	JIRAs are inserted/updated in the respective environment’s DB (Prod or Quality).
+	•	The HTML report contains both the updated JIRAs and the non-updated JIRAs.
+	•	The HTML file is returned as part of the response and can be captured in your Bamboo script for email delivery.
+
+5. Shell Script
+
+No changes are required to the shell script (sync_jira.sh) except for using the correct Kubernetes service endpoint URL to retrieve the HTML file.
+
+This solution provides a full report with successful updates and items that could not be processed due to missing Job_Number.
+
+=#=#=#
+
 Here’s the complete structure, Python module, and Kubernetes YAML configuration for a Flask application that synchronizes JIRA issues with an Oracle database. This includes inserting, updating, and deleting JIRA records based on the JIRA API filter. The setup uses Kubernetes secrets to securely store the JIRA API token and Oracle DB connection strings, with the environment (Prod or Quality) being selected based on the job number.
 
 1. Project Structure
