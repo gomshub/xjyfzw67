@@ -1,3 +1,50 @@
+
+
+#!/bin/bash
+
+# Configuration variables
+KUBE_NAMESPACE="your-kube-namespace"
+KUBE_SERVICE_URL="http://jira-oracle-sync-service"
+HTML_FILE="Result_list.html"
+EMAIL_SUBJECT="JIRA Sync Report"
+EMAIL_TO="recipient@example.com"
+EMAIL_FROM="no-reply@example.com"
+SMTP_SERVER="your-smtp-server"
+
+# Call the Kubernetes service to trigger the sync
+echo "Calling Kubernetes service to sync JIRA issues with Oracle DB..."
+response=$(curl -s -o ${HTML_FILE} -w "%{http_code}" ${KUBE_SERVICE_URL}/sync_jira)
+
+# Check the HTTP response status code
+if [ "$response" -eq 200 ]; then
+    echo "Successfully synced JIRA issues. HTML file saved as ${HTML_FILE}."
+    
+    # Send the HTML file via email using `sendmail` or an SMTP command
+    echo "Sending the HTML report via email..."
+    
+    # Use sendmail or mailx depending on your system's email client
+    (
+    echo "From: ${EMAIL_FROM}"
+    echo "To: ${EMAIL_TO}"
+    echo "Subject: ${EMAIL_SUBJECT}"
+    echo "MIME-Version: 1.0"
+    echo "Content-Type: text/html"
+    echo "Content-Disposition: inline"
+    cat ${HTML_FILE}
+    ) | /usr/sbin/sendmail -t
+    
+    echo "Email sent to ${EMAIL_TO}."
+
+else
+    echo "Failed to sync JIRA issues. HTTP response code: ${response}"
+    exit 1
+fi
+
+
+
+=#=#=#
+
+
 To generate a single HTML file that contains both updated and non-updated JIRAs after syncing with the Oracle DB, I will update the Python code to handle this scenario. The updated file will contain two sections:
 
 	1.	Updated successfully to respective environment – JIRAs that were inserted/updated in the database.
