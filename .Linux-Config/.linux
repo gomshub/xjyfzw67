@@ -1,3 +1,10 @@
+lookup file by partial name
+
+find /path/to/folder -type f -name "*partial_name*" -printf "%f\n" -exec stat --format="%Y %n" {} \; | sort -k 1,1nr | cut -d' ' -f2-
+
+=#=##
+
+
 You can achieve this by using the following commands in a Unix-based terminal:
 
 1. List subfolders older than 2021, including 2021:
