@@ -1,5 +1,52 @@
 
 #!/bin/bash
+
+# Check if exactly two arguments are provided
+if [ "$#" -ne 2 ]; then
+    echo "Usage: $0 <source_file> <destination_file>"
+    exit 1
+fi
+
+# Assign arguments to variables and get absolute paths
+SOURCE=$(readlink -f "$1")
+DESTINATION=$(readlink -f "$2")
+
+# Get the current user
+CURRENT_USER=$(whoami)
+echo "Current user: $CURRENT_USER"
+
+# Check if the source file exists
+if [ ! -e "$SOURCE" ]; then
+    echo "Error: Source file '$SOURCE' does not exist."
+    exit 1
+fi
+
+# Check read permission on the source file
+if [ ! -r "$SOURCE" ]; then
+    echo "Error: Current user '$CURRENT_USER' does not have read permission on '$SOURCE'."
+    ls -l "$SOURCE"
+    exit 1
+fi
+
+# Check write permission in the destination directory
+DEST_DIR=$(dirname "$DESTINATION")
+if [ ! -w "$DEST_DIR" ]; then
+    echo "Error: Current user '$CURRENT_USER' does not have write permission in destination directory '$DEST_DIR'."
+    ls -ld "$DEST_DIR"
+    exit 1
+fi
+
+# Copy the file
+cp "$SOURCE" "$DESTINATION"
+if [ $? -eq 0 ]; then
+    echo "File copied successfully from '$SOURCE' to '$DESTINATION'."
+else
+    echo "Error: Failed to copy file."
+fi
+
+
+####==#==#
+#!/bin/bash
 # main-script.sh
 
 # Trap errors and ensure return code is captured
