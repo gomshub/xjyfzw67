@@ -1,4 +1,62 @@
 
+In JIRA, the Epic Link is often stored in a custom field, and the field ID for it can vary depending on the JIRA configuration. If you don’t see customfield_10008 or similar, you can follow these steps to identify the exact field ID:
+
+	1.	Retrieve All Fields to Identify the Epic Link Field:
+First, retrieve all available fields to locate the custom field ID used for the Epic Link. Run this code to get a list of all fields in JIRA:
+
+from jira import JIRA
+
+def get_all_fields(jira_url, username, api_token):
+    jira = JIRA(server=jira_url, basic_auth=(username, api_token))
+    fields = jira.fields()
+
+    # Search for 'Epic Link' in the list of fields
+    for field in fields:
+        if 'Epic Link' in field['name']:
+            print(f"Field ID: {field['id']} - Field Name: {field['name']}")
+
+# Example usage
+jira_url = "https://your-jira-instance.atlassian.net"
+username = "your-email@example.com"
+api_token = "your-api-token"
+
+get_all_fields(jira_url, username, api_token)
+
+This code will print the ID of any field named “Epic Link.” Look for an ID like customfield_10008 or something similar.
+
+	2.	Use the Epic Link Field ID in Your Code:
+Once you’ve identified the field ID, update your original code to use this ID when accessing the Epic Link:
+
+from jira import JIRA
+
+def get_epic_link(issue_key, jira_url, username, api_token):
+    jira = JIRA(server=jira_url, basic_auth=(username, api_token))
+    
+    try:
+        issue = jira.issue(issue_key)
+        
+        # Replace with the identified Epic Link field ID
+        epic_link = getattr(issue.fields, 'customfield_XXXX', None)  # Replace XXXX with actual ID
+
+        return epic_link if epic_link else "Not OK"
+    except Exception as e:
+        print(f"Error: {e}")
+        return "Not OK"
+
+# Example usage
+jira_url = "https://your-jira-instance.atlassian.net"
+username = "your-email@example.com"
+api_token = "your-api-token"
+issue_key = "PROJ-123"
+
+print(get_epic_link(issue_key, jira_url, username, api_token))
+
+
+
+Replace 'customfield_XXXX' with the actual field ID from the output of get_all_fields. If the Epic Link field is present, this code will return it; otherwise, it will return "Not OK".
+
+
+
 #!/bin/bash
 
 # Check if exactly two arguments are provided
