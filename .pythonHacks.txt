@@ -1,4 +1,27 @@
 
+from jira import JIRA
+
+def list_all_fields(jira_url, username, api_token):
+    jira = JIRA(server=jira_url, basic_auth=(username, api_token))
+    fields = jira.fields()
+
+    # Print all fields and look for "Epic Link"
+    for field in fields:
+        print(f"Field ID: {field['id']}, Field Name: {field['name']}")
+
+        # Check for the Epic Link field
+        if 'Epic Link' in field['name']:
+            print(f"Epic Link Field ID: {field['id']} - Field Name: {field['name']}")
+
+# Example usage
+jira_url = "https://your-jira-instance.atlassian.net"
+username = "your-email@example.com"
+api_token = "your-api-token"
+
+list_all_fields(jira_url, username, api_token)
+
+
+=#=#
 import json
 
 def find_field_in_json(json_string, field_name):
