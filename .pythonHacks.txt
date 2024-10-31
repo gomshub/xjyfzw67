@@ -1,3 +1,51 @@
+
+import json
+
+def find_field_in_json(json_string, field_name):
+    # Parse the JSON string into a Python dictionary
+    data = json.loads(json_string)
+
+    # Recursively search for the field
+    def search_field(data, field_name):
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if field_name.lower() in key.lower():
+                    return key, value
+                result = search_field(value, field_name)
+                if result:
+                    return result
+        elif isinstance(data, list):
+            for item in data:
+                result = search_field(item, field_name)
+                if result:
+                    return result
+        return None
+
+    # Find the field
+    field = search_field(data, field_name)
+    return field if field else "Field not found"
+
+# Example JSON response string
+json_response = '''
+{
+    "fields": {
+        "customfield_10008": "EPIC-123",
+        "summary": "Sample issue",
+        "description": "This is a sample description"
+    }
+}
+'''
+
+# Example usage
+field_name = "Epic Link"  # Search term
+result = find_field_in_json(json_response, field_name)
+
+if result != "Field not found":
+    print(f"Field ID: {result[0]} - Value: {result[1]}")
+else:
+    print(result)
+
+
 python hacks:
 
 Expanding XML content into CSV with headers can be achieved by dynamically extracting all unique tags and their values from the XML file. Here is a Python script that reads an XML file, expands its content, and writes it to a CSV file with headers:
