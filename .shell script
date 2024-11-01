@@ -1,4 +1,107 @@
+If each error from the Python script appends a specific error code (1, 10, 100, 1000, etc.), then the returned decimal value represents a unique number where each digit position corresponds to a specific error. In this format, each position in the final number indicates whether a specific error occurred (1 for “yes” or 0 for “no” at each position).
 
+Approach
+
+	1.	Python Script: Appends the error codes to a single decimal number. For example, if errors 1 and 3 occurred, the Python script would generate 101 (representing the errors 1 and 3) and return it as a decimal.
+	2.	Shell Script: Treats the returned number as a string and examines each position to identify which errors occurred.
+
+Each position from the right represents a unique error:
+
+	•	Rightmost position (1s place) = Error 1
+	•	Second position from the right (10s place) = Error 2
+	•	Third position from the right (100s place) = Error 3
+	•	And so on.
+
+Example Implementation
+
+Python Script
+
+def check_errors():
+    rc_str = ""  # Return code as a string
+    
+    # Error checks
+    error1 = True    # Error 1
+    error2 = False   # Error 2
+    error3 = True    # Error 3
+    error4 = False   # Error 4
+    error5 = True    # Error 5
+    
+    if error1:
+        rc_str += "1"
+    else:
+        rc_str += "0"
+        
+    if error2:
+        rc_str += "1"
+    else:
+        rc_str += "0"
+        
+    if error3:
+        rc_str += "1"
+    else:
+        rc_str += "0"
+        
+    if error4:
+        rc_str += "1"
+    else:
+        rc_str += "0"
+        
+    if error5:
+        rc_str += "1"
+    else:
+        rc_str += "0"
+    
+    # Convert the binary-like string to a decimal integer
+    rc = int(rc_str)
+    return rc
+
+# Return the final RC
+exit(check_errors())
+
+Shell Script
+
+The shell script receives the decimal value, treats it as a string, and checks each digit position.
+
+#!/bin/bash
+
+# Run Python script and get the decimal RC
+rc=$(python3 check_errors.py)
+
+# Pad the RC with leading zeros if needed for consistent parsing
+rc=$(printf "%05d" "$rc")
+
+# Determine errors based on each digit position (from right to left)
+
+if [ "${rc:4:1}" -eq 1 ]; then
+    echo "Error 1 occurred"
+fi
+
+if [ "${rc:3:1}" -eq 1 ]; then
+    echo "Error 2 occurred"
+fi
+
+if [ "${rc:2:1}" -eq 1 ]; then
+    echo "Error 3 occurred"
+fi
+
+if [ "${rc:1:1}" -eq 1 ]; then
+    echo "Error 4 occurred"
+fi
+
+if [ "${rc:0:1}" -eq 1 ]; then
+    echo "Error 5 occurred"
+fi
+
+Explanation
+
+	•	Python: Each error contributes a specific digit position in the final rc_str. If an error occurs, the respective position is 1; otherwise, it’s 0.
+	•	Shell: Examines each digit from right to left to determine which errors were recorded.
+
+This approach allows you to map each error code position directly to an error by its place value in the final number.
+
+
+
+=#=#
 If the JIRA API isn’t returning the custom field ID for the Epic Link, it’s possible that the Epic Link field may not be directly accessible in your issue response. Here are several approaches to determine if an issue is linked to an Epic using the JIRA API:
 
 Approach 1: Use JQL to Retrieve Epic Link Information
