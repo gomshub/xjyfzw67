@@ -1,4 +1,139 @@
 
+If the JIRA API isn’t returning the custom field ID for the Epic Link, it’s possible that the Epic Link field may not be directly accessible in your issue response. Here are several approaches to determine if an issue is linked to an Epic using the JIRA API:
+
+Approach 1: Use JQL to Retrieve Epic Link Information
+
+If you have permission to query JIRA using JQL (JIRA Query Language), you can use a query to get issues that are linked to a specific Epic or check if an issue has an Epic link.
+
+	1.	Check if an Issue is Linked to an Epic: Use a JQL query to find the Epic link directly in JIRA.
+Example:
+
+curl -u username:password -X GET -H "Content-Type: application/json" \
+"https://your-jira-instance.atlassian.net/rest/api/2/search?jql=key=ISSUE-123"
+
+This will give you details about ISSUE-123. Check if an Epic Link field appears under fields in the response. If the issue has an Epic link, it should appear here, though sometimes JIRA’s response structure varies depending on configurations.
+
+	2.	Identify Issues Linked to a Specific Epic: To find all issues linked to a specific Epic, use the Epic’s key in a JQL query:
+
+curl -u username:password -X GET -H "Content-Type: application/json" \
+"https://your-jira-instance.atlassian.net/rest/api/2/search?jql=\"Epic Link\"=EPIC-123"
+
+This will return all issues that have an Epic Link to EPIC-123.
+
+Approach 2: Use Issue Links to Identify Epic Connections
+
+If JIRA does not use the Epic Link custom field but instead uses issue links to indicate relationships between issues, you can look for these links in the API response.
+
+curl -u username:password -X GET -H "Content-Type: application/json" \
+"https://your-jira-instance.atlassian.net/rest/api/2/issue/ISSUE-123"
+
+In the JSON response, check the "fields" section for "issuelinks", which might look like this:
+
+{
+    "fields": {
+        "issuelinks": [
+            {
+                "type": {
+                    "name": "Epic-Story Link"
+                },
+                "inwardIssue": {
+                    "key": "EPIC-123",
+                    "fields": {
+                        "summary": "Epic for Project X"
+                    }
+                }
+            }
+        ]
+    }
+}
+
+In this case:
+
+	•	"issuelinks" contains information on linked issues.
+	•	"inwardIssue" or "outwardIssue" within each link object shows the key of the linked Epic.
+
+Approach 3: Using the parent Field for Subtasks
+
+If the issue is a subtask of an Epic, the parent field might be used instead of a direct Epic Link.
+
+Example response:
+
+{
+    "fields": {
+        "parent": {
+            "key": "EPIC-123",
+            "fields": {
+                "summary": "Epic for Project Y"
+            }
+        }
+    }
+}
+
+In this case, "parent" refers to the Epic if the issue is part of it directly.
+
+Example Python Code to Check for Epic Link
+
+Here’s an example in Python that checks for Epic linkage through various fields in the response:
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+def check_epic_link(jira_url, issue_key, username, password):
+    response = requests.get(
+        f"{jira_url}/rest/api/2/issue/{issue_key}",
+        auth=HTTPBasicAuth(username, password),
+        headers={"Content-Type": "application/json"}
+    )
+
+    if response.status_code == 200:
+        data = response.json()
+        fields = data.get("fields", {})
+        
+        # Check for the Epic Link custom field directly
+        epic_link = fields.get("customfield_10008")  # Replace with the actual Epic Link field ID
+        if epic_link:
+            print(f"Epic Link: {epic_link}")
+            return
+
+        # Check for issuelinks field
+        issuelinks = fields.get("issuelinks", [])
+        for link in issuelinks:
+            if link.get("type", {}).get("name") == "Epic-Story Link":
+                epic_key = link.get("inwardIssue", {}).get("key") or link.get("outwardIssue", {}).get("key")
+                if epic_key:
+                    print(f"Epic Link found in issuelinks: {epic_key}")
+                    return
+
+        # Check if the issue is a subtask with a parent Epic
+        parent = fields.get("parent")
+        if parent:
+            print(f"Epic Link found in parent field: {parent.get('key')}")
+            return
+
+        print("No Epic Link found for this issue.")
+    else:
+        print(f"Failed to retrieve issue: {response.status_code} - {response.text}")
+
+# Example usage
+jira_url = "https://your-jira-instance.atlassian.net"
+issue_key = "ISSUE-123"
+username = "your-username"
+password = "your-password"
+
+check_epic_link(jira_url, issue_key, username, password)
+
+Summary
+
+	1.	Use JQL to query Epic Links.
+	2.	Check "issuelinks" for any Epic-related links.
+	3.	Look at the "parent" field if the issue is a subtask.
+
+These approaches will help you determine if an issue is linked to an Epic, even if the direct Epic Link custom field is unavailable in the JSON response.
+
+
+
+
+=##
 In JIRA, the Epic Link is often stored in a custom field, and the field ID for it can vary depending on the JIRA configuration. If you don’t see customfield_10008 or similar, you can follow these steps to identify the exact field ID:
 
 	1.	Retrieve All Fields to Identify the Epic Link Field:
