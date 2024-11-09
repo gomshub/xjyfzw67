@@ -1,0 +1,56 @@
+Yes, in Python, you can use libraries like xml.etree.ElementTree to parse the XML files and identify missing elements based on a primary key. If a key is missing, you can capture the line number and the XML element details, log them in a single line, and continue with the comparison.
+
+Here’s a general approach:
+
+	1.	Parse both XML files, converting each relevant element into a dictionary for easier lookup by the primary key.
+	2.	Compare the primary keys. If a primary key in the reference XML is missing in the other XML, log the missing key’s line number and element details in a single line.
+	3.	Continue with reconciliation without halting the process on any missing key.
+
+Here’s some sample code to illustrate:
+
+import xml.etree.ElementTree as ET
+
+def find_element_line(element):
+    # ElementTree does not natively support line numbers,
+    # so using a trick by keeping the full file in memory
+    import re
+    element_str = ET.tostring(element, encoding='unicode')
+    for i, line in enumerate(file_data.splitlines(), 1):
+        if element_str in line:
+            return i
+    return None
+
+def load_xml_with_keys(file_path, key_tag):
+    tree = ET.parse(file_path)
+    root = tree.getroot()
+    elements_by_key = {}
+    for element in root.iter(key_tag):
+        key_value = element.text
+        line_number = find_element_line(element)
+        elements_by_key[key_value] = (line_number, element)
+    return elements_by_key
+
+def compare_xml(reference_path, compare_path, key_tag):
+    ref_elements = load_xml_with_keys(reference_path, key_tag)
+    comp_elements = load_xml_with_keys(compare_path, key_tag)
+    
+    for key, (line_num, ref_element) in ref_elements.items():
+        if key not in comp_elements:
+            print(f"Error: Missing key '{key}' at line {line_num} in reference XML: {ET.tostring(ref_element, encoding='unicode')}")
+        else:
+            # Compare elements here as needed
+            pass
+
+# Usage example
+reference_file = "reference.xml"
+comparison_file = "comparison.xml"
+primary_key = "YourPrimaryKeyTag"
+
+compare_xml(reference_file, comparison_file, primary_key)
+
+This code captures missing elements by:
+
+	•	Looking up elements in the reference.xml that aren’t in comparison.xml.
+	•	Printing each missing element’s line number and details as a single-line error message.
+
+Adjust the primary_key variable to match the tag name for your primary key. This solution should provide detailed logging for any missing keys while allowing reconciliation to continue uninterrupted.
