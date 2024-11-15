@@ -1,4 +1,46 @@
 
+import os
+
+class UniqueContentFileWriter:
+    def __init__(self, file_path, header):
+        self.file_path = file_path
+        self.header = header
+        self.file_exists = os.path.isfile(self.file_path)
+        
+    def write(self, content):
+        # Only proceed if content is provided
+        if content:
+            # Check if the content already exists in the file
+            if self.file_exists:
+                with open(self.file_path, 'r') as file:
+                    file_content = file.read()
+                    if content in file_content:  # Check if the content is already present
+                        print(f"Content already exists in file: {content}")
+                        return
+            
+            # Open the file in append mode, creating it if it doesn't exist
+            with open(self.file_path, 'a') as file:
+                # Write the header first if the file doesn't exist
+                if not self.file_exists:
+                    file.write(self.header + '\n')
+                    self.file_exists = True  # Update the existence flag after the first write
+                # Append the content
+                file.write(content + '\n')
+                print(f"Appended: {content}")
+
+# Usage example
+file_path = "/absolute/path/to/your/file.txt"
+header = "Header of the file"
+content = "This is a unique string to append"
+
+# Initialize the UniqueContentFileWriter object
+file_writer = UniqueContentFileWriter(file_path, header)
+
+# Call write to append content only if it's not already present in the file
+file_writer.write(content)
+
+
+=#=
 import xml.etree.ElementTree as ET
 
 def get_closest_comment_before_line(xml_file_path, target_line):
