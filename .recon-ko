@@ -1,4 +1,38 @@
 
+import xml.etree.ElementTree as ET
+
+def get_closest_comment_before_line(xml_file_path, target_line):
+    """
+    Retrieve the closest comment before the specified line number.
+    
+    :param xml_file_path: Path to the XML file
+    :param target_line: The line number of the target element
+    :return: The text of the closest comment and its line number, or None if no comment is found
+    """
+    closest_comment = None  # To store the last seen comment
+    
+    for event, elem in ET.iterparse(xml_file_path, events=("start", "comment")):
+        if event == "comment":
+            # Track the last comment
+            closest_comment = (elem.text, elem.sourceline)
+        elif event == "start" and elem.sourceline >= target_line:
+            # Stop parsing once we reach the target line
+            break
+
+    return closest_comment
+
+# Example usage:
+xml_file_path = "example.xml"
+target_line = 10  # Line number of <sub child3/>
+comment = get_closest_comment_before_line(xml_file_path, target_line)
+
+if comment:
+    print(f"Closest Comment: {comment[0]}, Line number: {comment[1]}")
+else:
+    print("No comment found before the specified line.")
+
+
+=#=
 import os
 
 def write_to_file(file_path, header, content):
