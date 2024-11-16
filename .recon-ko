@@ -1,4 +1,104 @@
 
+Yes, you can include the new link in the HTML template file as a placeholder and dynamically adjust its presence using the shell script. This approach makes the template more flexible and reduces the complexity of adding new elements.
+
+Updated Template (template.html):
+
+Add the new link directly in the template but wrap it with a condition-specific placeholder.
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dynamic HTML</title>
+    <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+    <div>
+        <a href="https://existing-link.com">Existing Link</a>
+        <!-- {{NEW_LINK}} -->
+        <a href="https://new-link.com" style="float: right; margin-left: 10px;">New Link</a>
+        <!-- {{END_NEW_LINK}} -->
+    </div>
+</body>
+</html>
+
+Shell Script (generate_html.sh):
+
+Use the script to either retain or remove the new link dynamically.
+
+#!/bin/bash
+
+# Define the condition
+CONDITION_OK=false  # Change this to true/false based on your logic
+
+# Define the HTML template and output file
+TEMPLATE_FILE="template.html"
+OUTPUT_FILE="output.html"
+
+if [ "$CONDITION_OK" = false ]; then
+    # Keep the new link by removing the placeholders
+    sed -E "s/<!-- \{\{NEW_LINK\}\} -->//; s/<!-- \{\{END_NEW_LINK\}\} -->//" "$TEMPLATE_FILE" > "$OUTPUT_FILE"
+else
+    # Remove the new link completely
+    sed -E "/<!-- \{\{NEW_LINK\}\} -->/,/<!-- \{\{END_NEW_LINK\}\} -->/d" "$TEMPLATE_FILE" > "$OUTPUT_FILE"
+fi
+
+echo "HTML file generated: $OUTPUT_FILE"
+
+Explanation:
+
+	1.	Template:
+	•	The new link is added to the template within placeholders: <!-- {{NEW_LINK}} --> and <!-- {{END_NEW_LINK}} -->.
+	•	This ensures the template is static and easy to maintain.
+	2.	Shell Script:
+	•	If the condition is not okay (CONDITION_OK=false), the script removes the placeholders around the new link so it becomes part of the output.
+	•	If the condition is okay (CONDITION_OK=true), the script deletes the entire block (from <!-- {{NEW_LINK}} --> to <!-- {{END_NEW_LINK}} -->), removing the new link entirely.
+	3.	Tools:
+	•	sed is used to manipulate the template:
+	•	s/ replaces placeholders with nothing to “uncomment” the new link.
+	•	/d deletes the entire block when the link is not needed.
+
+Run the Script:
+
+chmod +x generate_html.sh
+./generate_html.sh
+
+Output:
+
+If CONDITION_OK=false:
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dynamic HTML</title>
+    <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+    <div>
+        <a href="https://existing-link.com">Existing Link</a>
+        <a href="https://new-link.com" style="float: right; margin-left: 10px;">New Link</a>
+    </div>
+</body>
+</html>
+
+If CONDITION_OK=true:
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dynamic HTML</title>
+    <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+    <div>
+        <a href="https://existing-link.com">Existing Link</a>
+    </div>
+</body>
+</html>
+
+This approach keeps the logic clear and easy to manage while leveraging the flexibility of placeholders in the template.
+
+
+=#=#
 import os
 
 class UniqueContentFileWriter:
