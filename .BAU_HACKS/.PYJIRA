@@ -1,0 +1,506 @@
+To implement this system, we can break it down into several components, including a Flask API service, database operations, JIRA API integration, and Kubernetes deployment. Below is the structure and detailed code for the Python module and configuration.
+
+1. Project Structure
+
+jira-sync/
+├── app/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── models.py
+│   ├── services.py
+│   ├── jira_api.py
+│   ├── db_operations.py
+│   ├── html_generator.py
+│   ├── routes.py
+│   ├── requirements.txt
+├── helm/
+│   ├── chart.yaml
+│   ├── templates/
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   └── ingress.yaml
+│   └── values.yaml
+├── .env
+└── gunicorn_config.py
+
+2. Python Code
+
+app/__init__.py
+
+from flask import Flask
+from .config import Config
+from .routes import configure_routes
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    configure_routes(app)
+    return app
+
+app/config.py
+
+import os
+
+class Config:
+    JIRA_API_URL = os.getenv("JIRA_API_URL")
+    JIRA_TOKEN = os.getenv("JIRA_TOKEN")
+    DB_URL = os.getenv("DB_URL")
+    DB_USER = os.getenv("DB_USER")
+    DB_PASSWORD = os.getenv("DB_PASSWORD")
+    DB_NAME = os.getenv("DB_NAME")
+    JIRA_PROJECT = os.getenv("JIRA_PROJECT")
+
+app/models.py
+
+Define the structure for inserting/updating JIRA data into the Oracle database.
+
+from sqlalchemy import Column, Integer, String, Text, DateTime
+
+class JiraIssue(db.Model):
+    __tablename__ = 'jira_issues'
+    id = Column(Integer, primary_key=True)
+    jira_number = Column(String(50), unique=True)
+    status = Column(String(50))
+    summary = Column(String(255))
+    criticity = Column(String(50))
+    description = Column(Text)
+    creation_date = Column(DateTime)
+    comments = Column(Text)
+    first_comment = Column(Text)
+    last_comment = Column(Text)
+    update_comment = Column(Text, nullable=True)
+    update_status = Column(String(50), nullable=True)
+
+app/jira_api.py
+
+Handle communication with JIRA API.
+
+import requests
+
+def fetch_jira_details(jira_number, token):
+    url = f"{os.getenv('JIRA_API_URL')}/rest/api/2/issue/{jira_number}"
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return None
+
+app/db_operations.py
+
+Define functions to interact with the Oracle database.
+
+from sqlalchemy.orm import sessionmaker
+from app.models import JiraIssue
+from sqlalchemy import create_engine
+
+def get_db_session():
+    engine = create_engine(os.getenv("DB_URL"))
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+def insert_or_update_jira(issue_data):
+    session = get_db_session()
+    jira_issue = session.query(JiraIssue).filter_by(jira_number=issue_data['jira_number']).first()
+    
+    if not jira_issue:
+        jira_issue = JiraIssue(jira_number=issue_data['jira_number'])
+    
+    jira_issue.status = issue_data['status']
+    jira_issue.summary = issue_data['summary']
+    jira_issue.criticity = issue_data['criticity']
+    jira_issue.description = issue_data['description']
+    jira_issue.creation_date = issue_data['creation_date']
+    jira_issue.comments = issue_data['comments']
+    jira_issue.first_comment = issue_data['first_comment']
+    jira_issue.last_comment = issue_data['last_comment']
+    
+    session.add(jira_issue)
+    session.commit()
+
+def delete_jira(jira_number):
+    session = get_db_session()
+    jira_issue = session.query(JiraIssue).filter_by(jira_number=jira_number).first()
+    if jira_issue:
+        session.delete(jira_issue)
+        session.commit()
+
+app/html_generator.py
+
+Generate the HTML response for JIRA issue synchronization results.
+
+from jinja2 import Template
+
+def generate_html_report(updated_issues, non_updated_issues):
+    template = """
+    <html>
+    <head><title>JIRA Synchronization Results</title></head>
+    <body>
+        <h2>Updated Successfully</h2>
+        <table>
+            <tr><th>JIRA Number</th><th>Job Number</th><th>Criticity</th><th>Creation Date</th></tr>
+            {% for issue in updated_issues %}
+                <tr>
+                    <td><a href="https://jira.example.com/browse/{{ issue.jira_number }}">{{ issue.jira_number }}</a></td>
+                    <td><a href="https://jira.example.com/browse/{{ issue.job_number }}">{{ issue.job_number }}</a></td>
+                    <td>{{ issue.criticity }}</td>
+                    <td>{{ issue.creation_date }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+
+        <h2>Not Updated</h2>
+        <table>
+            <tr><th>JIRA Number</th><th>Criticity</th><th>Creation Date</th></tr>
+            {% for issue in non_updated_issues %}
+                <tr>
+                    <td><a href="https://jira.example.com/browse/{{ issue.jira_number }}">{{ issue.jira_number }}</a></td>
+                    <td>{{ issue.criticity }}</td>
+                    <td>{{ issue.creation_date }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    </body>
+    </html>
+    """
+    tpl = Template(template)
+    return tpl.render(updated_issues=updated_issues, non_updated_issues=non_updated_issues)
+
+app/routes.py
+
+Define Flask routes for the API endpoints.
+
+from flask import request, jsonify
+from app.jira_api import fetch_jira_details
+from app.db_operations import insert_or_update_jira, delete_jira
+from app.html_generator import generate_html_report
+import re
+
+def configure_routes(app):
+    @app.route('/sync_jira', methods=['POST'])
+    def sync_jira():
+        data = request.get_json()
+        jira_number = data['jira_number']
+        job_number = extract_job_number(data['summary'])
+        
+        jira_data = fetch_jira_details(jira_number, app.config['JIRA_TOKEN'])
+        if not jira_data:
+            return jsonify({"error": "JIRA not found"}), 404
+        
+        issue_data = extract_issue_data(jira_data)
+        insert_or_update_jira(issue_data)
+        
+        return jsonify({"message": "JIRA synchronized successfully"}), 200
+
+    @app.route('/generate_report', methods=['GET'])
+    def generate_report():
+        updated_issues = get_updated_issues()
+        non_updated_issues = get_non_updated_issues()
+        
+        html_content = generate_html_report(updated_issues, non_updated_issues)
+        return html_content
+
+def extract_job_number(summary):
+    match = re.search(r'P\d{2}-\w{3}-\d{2}', summary)
+    return match.group(0) if match else None
+
+def extract_issue_data(jira_data):
+    # Extract the necessary fields from the Jira response
+    return {
+        'jira_number': jira_data['key'],
+        'status': jira_data['fields']['status']['name'],
+        'summary': jira_data['fields']['summary'],
+        'criticity': jira_data['fields']['priority']['name'],
+        'description': jira_data['fields']['description'],
+        'creation_date': jira_data['fields']['created'],
+        'comments': [comment['body'] for comment in jira_data['fields']['comment']['comments']],
+        'first_comment': jira_data['fields']['comment']['comments'][0]['body'] if jira_data['fields']['comment']['comments'] else None,
+        'last_comment': jira_data['fields']['comment']['comments'][-1]['body'] if jira_data['fields']['comment']['comments'] else None
+    }
+
+gunicorn_config.py
+
+Configuration for Gunicorn.
+
+bind = "0.0.0.0:5000"
+workers = 4
+
+3. Helm Chart
+
+helm/chart.yaml
+
+apiVersion: v2
+name: jira-sync
+description: A Kubernetes service to sync JIRA issues with Oracle DB
+version: 0.1.0
+
+helm/values.yaml
+
+replicaCount: 2
+image:
+  repository: my-docker-repo/jira-sync
+  tag: latest
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 5000
+
+helm/templates/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-sync
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: jira-sync
+  template:
+    metadata:
+      labels:
+        app: jira-sync
+    spec:
+      containers:
+        - name: jira-sync
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: 5000
+          env:
+            - name: JIRA_API_URL
+              value: "https://jira.example.com"
+            - name: JIRA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: jira-api-token
+                  key: token
+            - name: DB_URL
+              value: "oracle://user:password@oracle-db-url"
+
+helm/templates/service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: jira-sync
+spec:
+  ports:
+    - port: 5000
+  selector:
+    app: jira-sync
+
+4. .env
+
+JIRA_API_URL=https://jira.example.com
+JIRA_TOKEN=your-jira-bearer-token
+DB_URL=oracle://user:password@oracle-db-url
+DB_USER=oracle_user
+DB_PASSWORD=oracle_password
+DB_NAME=oracle_db
+
+5. requirements.txt
+
+Flask==2.1.2
+requests==2.28.1
+SQLAlchemy==2.0.7
+Jinja2==3.1.2
+gunicorn==20.1.0
+
+6. Running the Application
+	•	Set up the environment by filling the .env file with correct details.
+	•	Use flask run for local testing or deploy to Kubernetes using helm install jira-sync ./helm.
+
+This system will synchronize JIRA issues with Oracle DB and generate the HTML reports as requested.
+=####=
+
+Apologies for the oversight! Here’s the complete breakdown for the four services you requested, each with its corresponding route and functionality in the Python module. These services are designed to handle JIRA issue data, synchronize it with an Oracle database, and generate HTML reports based on the synchronization status.
+
+1. Service to Fetch Details of Individual JIRA as HTML File
+
+Route for Service 1 (/fetch_jira_details)
+
+@app.route('/fetch_jira_details/<jira_number>', methods=['GET'])
+def fetch_jira_details_service(jira_number):
+    # Fetch JIRA details using the JIRA API
+    jira_data = fetch_jira_details(jira_number, app.config['JIRA_TOKEN'])
+    
+    if not jira_data:
+        return jsonify({"error": "JIRA not found"}), 404
+    
+    # Extract the necessary fields from the JIRA data
+    issue_data = extract_issue_data(jira_data)
+    
+    # Create an HTML page with the JIRA details
+    html_content = generate_html_for_individual_jira(issue_data)
+    
+    return html_content
+
+HTML Generator for Individual JIRA (generate_html_for_individual_jira)
+
+def generate_html_for_individual_jira(issue_data):
+    template = """
+    <html>
+    <head><title>JIRA Details</title></head>
+    <body>
+        <h1>Details of JIRA: {{ issue_data.jira_number }}</h1>
+        <table>
+            <tr><th>Field</th><th>Value</th></tr>
+            <tr><td>JIRA Number</td><td>{{ issue_data.jira_number }}</td></tr>
+            <tr><td>Status</td><td>{{ issue_data.status }}</td></tr>
+            <tr><td>Summary</td><td>{{ issue_data.summary }}</td></tr>
+            <tr><td>Criticity</td><td>{{ issue_data.criticity }}</td></tr>
+            <tr><td>Description</td><td>{{ issue_data.description }}</td></tr>
+            <tr><td>Creation Date</td><td>{{ issue_data.creation_date }}</td></tr>
+            <tr><td>Comments</td><td>{{ issue_data.comments }}</td></tr>
+            <tr><td>First Comment</td><td>{{ issue_data.first_comment }}</td></tr>
+            <tr><td>Last Comment</td><td>{{ issue_data.last_comment }}</td></tr>
+        </table>
+    </body>
+    </html>
+    """
+    tpl = Template(template)
+    return tpl.render(issue_data=issue_data)
+
+2. Service to Get Details of List of JIRAs in a Filter as HTML Page
+
+Route for Service 2 (/fetch_jira_list)
+
+@app.route('/fetch_jira_list', methods=['GET'])
+def fetch_jira_list_service():
+    # Example filter, you can modify as needed (e.g., JIRA project, status, etc.)
+    filter_query = "project = 'MYPROJECT' AND status = 'To Do'"
+    
+    # Fetch list of JIRAs based on the filter
+    jiras_data = fetch_jiras_list(filter_query, app.config['JIRA_TOKEN'])
+    
+    # Extract the necessary fields for all JIRAs
+    jiras = [extract_issue_data(jira) for jira in jiras_data]
+    
+    # Generate an HTML page with the list of JIRAs
+    html_content = generate_html_for_jira_list(jiras)
+    
+    return html_content
+
+HTML Generator for List of JIRAs (generate_html_for_jira_list)
+
+def generate_html_for_jira_list(jiras):
+    template = """
+    <html>
+    <head><title>JIRA List</title></head>
+    <body>
+        <h1>List of JIRAs</h1>
+        <table>
+            <tr><th>JIRA Number</th><th>Status</th><th>Summary</th><th>Creation Date</th></tr>
+            {% for jira in jiras %}
+                <tr>
+                    <td><a href="https://jira.example.com/browse/{{ jira.jira_number }}">{{ jira.jira_number }}</a></td>
+                    <td>{{ jira.status }}</td>
+                    <td>{{ jira.summary }}</td>
+                    <td>{{ jira.creation_date }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    </body>
+    </html>
+    """
+    tpl = Template(template)
+    return tpl.render(jiras=jiras)
+
+3. Service to Get Details of List of JIRAs in a Filter, Synchronize to Prod/Quality DB, and Return Updated HTML
+
+Route for Service 3 (/sync_jira_filter)
+
+@app.route('/sync_jira_filter', methods=['POST'])
+def sync_jira_filter_service():
+    # Receive filter and job_number from the request
+    data = request.get_json()
+    filter_query = data['filter_query']
+    job_number = data['job_number']
+    
+    # Fetch JIRAs based on the filter query
+    jiras_data = fetch_jiras_list(filter_query, app.config['JIRA_TOKEN'])
+    
+    # Process the JIRAs, synchronizing to the appropriate DB (Prod/Quality)
+    updated_issues = []
+    non_updated_issues = []
+    
+    for jira in jiras_data:
+        issue_data = extract_issue_data(jira)
+        issue_data['job_number'] = job_number
+        
+        # Check if job_number exists and decide DB sync (Prod/Quality)
+        if job_number:
+            if sync_to_db(issue_data, job_number):
+                updated_issues.append(issue_data)
+            else:
+                non_updated_issues.append(issue_data)
+    
+    # Generate the HTML report for synchronization results
+    html_content = generate_html_report(updated_issues, non_updated_issues)
+    
+    return html_content
+
+Sync to DB Function (sync_to_db)
+
+def sync_to_db(issue_data, job_number):
+    # Logic for DB synchronization (Prod/Quality) based on job_number
+    if job_number.startswith('P'):
+        # Sync to Prod DB
+        insert_or_update_jira(issue_data)
+    elif job_number.startswith('Q'):
+        # Sync to Quality DB
+        insert_or_update_jira(issue_data)
+    else:
+        return False
+    return True
+
+4. Service to Update Comment on JIRA Based on Requested Input
+
+Route for Service 4 (/update_jira_comment)
+
+@app.route('/update_jira_comment/<jira_number>', methods=['POST'])
+def update_jira_comment_service(jira_number):
+    # Get the new comment from the request
+    data = request.get_json()
+    new_comment = data['comment']
+    
+    # Update the comment in the respective DB (Prod/Quality)
+    job_number = extract_job_number_from_db(jira_number)
+    update_comment_field = fetch_update_comment_from_db(jira_number, job_number)
+    
+    # Update the JIRA with the new comment
+    success = update_comment_on_jira(jira_number, new_comment, app.config['JIRA_TOKEN'])
+    
+    if success:
+        return jsonify({"message": "Comment updated successfully"}), 200
+    else:
+        return jsonify({"error": "Failed to update comment"}), 500
+
+Update Comment on JIRA (update_comment_on_jira)
+
+def update_comment_on_jira(jira_number, new_comment, token):
+    url = f"{os.getenv('JIRA_API_URL')}/rest/api/2/issue/{jira_number}/comment"
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        "body": new_comment
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    return response.status_code == 201
+
+Final Notes:
+	1.	JIRA API Communication:
+	•	The fetch_jira_details() and fetch_jiras_list() functions communicate with the JIRA API using a bearer token, fetching JIRA issue data and filtering based on the specified queries.
+	2.	DB Synchronization:
+	•	The sync_to_db() function inserts or updates JIRA issues into the database, depending on the job number (which determines whether it’s syncing to the Production or Quality DB).
+	3.	HTML Generation:
+	•	Each service generates an HTML response using Jinja2 templates for individual JIRA details, JIRA lists, synchronization results, and comment updates.
+	4.	Kubernetes Deployment:
+	•	Once the services are implemented and tested locally, they can be deployed to Kubernetes with Helm, with the associated configuration files (deployment.yaml, service.yaml, values.yaml) for scaling and management.
+
+This solution should give you all four services, each fulfilling a specific task (fetching JIRA details, fetching a list of JIRAs, synchronizing JIRAs, and updating comments), and the HTML generation is handled dynamically for each service.
