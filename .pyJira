@@ -1,4 +1,178 @@
 
+To ensure synchronization happens with the correct database (Prod or Quality) based on the Job Number in the summary, you can configure separate database connections for Prod and Quality. Depending on the detected Job Number pattern, the application will dynamically switch to the corresponding database.
+
+Implementation Steps
+	1.	Set up Separate Configurations for Prod and Quality Databases
+Use Flask’s configuration settings to define separate connection strings for Prod and Quality.
+	2.	Detect Environment from Job Number
+Parse the Job Number from the Summary using a regular expression.
+	•	P01 in the Job Number maps to Prod.
+	•	Q01 in the Job Number maps to Quality.
+	3.	Use Scoped Sessions for Dynamic DB Binding
+Use SQLAlchemy’s scoped_session to dynamically bind the database session based on the environment.
+	4.	Modify the db.py to Dynamically Switch Connections
+
+Database Configurations
+
+config.py
+
+class Config:
+    # Default settings
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+class ProdConfig(Config):
+    SQLALCHEMY_DATABASE_URI = "oracle+cx_oracle://user:password@prod-db-host:1521/prod_service_name"
+
+class QualityConfig(Config):
+    SQLALCHEMY_DATABASE_URI = "oracle+cx_oracle://user:password@quality-db-host:1521/quality_service_name"
+
+Dynamic Database Switching
+
+app/db.py
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import scoped_session, sessionmaker
+from app.db_models import Base
+from flask import current_app
+
+class DatabaseSessionManager:
+    def __init__(self, prod_uri, quality_uri):
+        self.prod_engine = create_engine(prod_uri)
+        self.quality_engine = create_engine(quality_uri)
+        self.sessions = {
+            "prod": scoped_session(sessionmaker(bind=self.prod_engine)),
+            "quality": scoped_session(sessionmaker(bind=self.quality_engine)),
+        }
+
+    def get_session(self, environment):
+        """Get the database session for the specified environment."""
+        return self.sessions[environment]
+
+# Initialize the session manager
+db_manager = DatabaseSessionManager(
+    prod_uri=current_app.config["SQLALCHEMY_DATABASE_URI_PROD"],
+    quality_uri=current_app.config["SQLALCHEMY_DATABASE_URI_QUALITY"],
+)
+
+def get_environment_from_job_number(job_number):
+    """Determine the environment (prod or quality) based on the job number."""
+    if job_number.startswith("P01"):
+        return "prod"
+    elif job_number.startswith("Q01"):
+        return "quality"
+    else:
+        raise ValueError(f"Invalid job number format: {job_number}")
+
+Updated /sync Endpoint with Dynamic DB Switching
+
+@sync_service.route("/sync", methods=["POST"])
+def sync_issues():
+    try:
+        data = request.get_json()
+        filter_id = data["filter_id"]
+
+        # Fetch issues from JIRA API
+        issues_from_jira = jira_api.get_issues(filter_id)
+
+        # Categorize JIRA issues by environment
+        prod_issues = []
+        quality_issues = []
+        for issue in issues_from_jira:
+            job_number = extract_job_number(issue["fields"]["summary"])
+            if job_number.startswith("P01"):
+                prod_issues.append(issue)
+            elif job_number.startswith("Q01"):
+                quality_issues.append(issue)
+
+        # Sync issues to Prod DB
+        if prod_issues:
+            prod_session = db_manager.get_session("prod")
+            sync_issues_to_db(prod_issues, prod_session)
+
+        # Sync issues to Quality DB
+        if quality_issues:
+            quality_session = db_manager.get_session("quality")
+            sync_issues_to_db(quality_issues, quality_session)
+
+        # Generate HTML Report
+        html_content = generate_html(prod_issues, quality_issues)
+        with open("result_list.html", "w") as file:
+            file.write(html_content)
+
+        return send_file("result_list.html")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def sync_issues_to_db(issues, session):
+    """Synchronize JIRA issues with the database (insert, update, delete)."""
+    try:
+        # Fetch existing issues in the database
+        existing_issues = session.query(JiraIssue).all()
+        jira_keys_in_db = {issue.jira_number for issue in existing_issues}
+
+        # Identify operations
+        jira_keys_from_jira = {issue["key"] for issue in issues}
+        jira_keys_to_insert = jira_keys_from_jira - jira_keys_in_db
+        jira_keys_to_update = jira_keys_from_jira & jira_keys_in_db
+        jira_keys_to_delete = jira_keys_in_db - jira_keys_from_jira
+
+        # Insert new issues
+        for issue in issues:
+            if issue["key"] in jira_keys_to_insert:
+                job_number = extract_job_number(issue["fields"]["summary"])
+                new_issue = JiraIssue(
+                    jira_number=issue["key"],
+                    status=issue["fields"]["status"]["name"],
+                    summary=issue["fields"]["summary"],
+                    job_number=job_number,
+                    criticity=issue["fields"].get("priority", {}).get("name", "Unknown"),
+                    description=issue["fields"].get("description", ""),
+                    creation_date=issue["fields"]["created"],
+                    comments="\n".join([c["body"] for c in issue["fields"]["comment"]["comments"]]),
+                    first_comment=issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else "",
+                    last_comment=issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else "",
+                )
+                session.add(new_issue)
+
+        # Update existing issues
+        for issue in issues:
+            if issue["key"] in jira_keys_to_update:
+                db_issue = session.query(JiraIssue).get(issue["key"])
+                db_issue.status = issue["fields"]["status"]["name"]
+                db_issue.summary = issue["fields"]["summary"]
+                db_issue.job_number = extract_job_number(issue["fields"]["summary"])
+                db_issue.criticity = issue["fields"].get("priority", {}).get("name", "Unknown")
+                db_issue.description = issue["fields"].get("description", "")
+                db_issue.creation_date = issue["fields"]["created"]
+                db_issue.comments = "\n".join([c["body"] for c in issue["fields"]["comment"]["comments"]])
+                db_issue.first_comment = issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else ""
+                db_issue.last_comment = issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else ""
+
+        # Delete issues no longer in JIRA
+        for jira_key in jira_keys_to_delete:
+            db_issue = session.query(JiraIssue).get(jira_key)
+            if db_issue:
+                session.delete(db_issue)
+
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        raise Exception(f"Error during DB sync: {str(e)}")
+
+Summary of Updates
+	•	Separate Database Connections:
+	•	prod DB for job numbers starting with P01.
+	•	quality DB for job numbers starting with Q01.
+	•	Dynamic Switching Logic:
+Based on the job_number parsed from the issue’s summary.
+	•	DML Operations:
+	•	Insert, Update, and Delete implemented dynamically for each environment.
+
+Let me know if you need further assistance!
+
+
+#=#=#=#
 Here is the complete Python module structure and codebase, including Kubernetes deployment, secret management, and .env configuration for development. The deployment ensures JIRA token and database credentials are securely managed.
 
 Directory Structure
