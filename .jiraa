@@ -1,0 +1,190 @@
+Here’s the complete solution to your requirements:
+
+Directory Structure
+
+jira_sync_module/
+│
+├── app/
+│   ├── __init__.py
+│   ├── routes.py
+│   ├── services/
+│   │   ├── jira_service.py
+│   │   ├── db_service.py
+│   │   └── html_generator.py
+│   ├── config.py
+│   └── utils.py
+│
+├── requirements.txt
+├── wsgi.py
+├── Dockerfile
+├── helm-chart/
+│   ├── Chart.yaml
+│   ├── values.yaml
+│   ├── templates/
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   ├── configmap.yaml
+│   │   └── ingress.yaml
+│
+├── kube-manifest/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── configmap.yaml
+└── README.md
+
+Python Module
+
+app/__init__.py
+
+from flask import Flask
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object("app.config.Config")
+    
+    from .routes import main_blueprint
+    app.register_blueprint(main_blueprint)
+
+    return app
+
+app/routes.py
+
+from flask import Blueprint, request, jsonify, send_file
+from app.services.jira_service import JiraService
+from app.services.db_service import DatabaseService
+from app.services.html_generator import HTMLGenerator
+
+main_blueprint = Blueprint("main", __name__)
+
+jira_service = JiraService()
+db_service = DatabaseService()
+html_generator = HTMLGenerator()
+
+@main_blueprint.route("/jira/<string:jira_id>", methods=["GET"])
+def get_jira_details(jira_id):
+    details = jira_service.fetch_jira_details(jira_id)
+    return jsonify(details)
+
+@main_blueprint.route("/jira/filter", methods=["GET"])
+def get_filter_as_html():
+    issues = jira_service.fetch_jira_filter()
+    html_content = html_generator.generate_html(issues)
+    return send_file(html_content, as_attachment=True, download_name="Result_list.html")
+
+@main_blueprint.route("/jira/sync", methods=["POST"])
+def sync_and_generate():
+    sync_result = jira_service.sync_and_generate_html()
+    return send_file(sync_result, as_attachment=True, download_name="Result_list.html")
+
+@main_blueprint.route("/jira/comment/<string:jira_id>", methods=["POST"])
+def update_comment(jira_id):
+    data = request.json
+    update_result = db_service.update_comment(jira_id, data.get("comment"))
+    return jsonify(update_result)
+
+app/services/jira_service.py
+
+import requests
+from app.utils import extract_job_number
+from app.services.db_service import DatabaseService
+
+class JiraService:
+    def __init__(self):
+        self.api_url = "https://your-jira-instance/rest/api/2/"
+        self.bearer_token = "your-bearer-token"
+        self.db_service = DatabaseService()
+
+    def fetch_jira_details(self, jira_id):
+        headers = {"Authorization": f"Bearer {self.bearer_token}"}
+        response = requests.get(f"{self.api_url}issue/{jira_id}", headers=headers)
+        response.raise_for_status()
+        return response.json()
+
+    def fetch_jira_filter(self):
+        headers = {"Authorization": f"Bearer {self.bearer_token}"}
+        response = requests.get(f"{self.api_url}search?jql=filter=12345", headers=headers)
+        response.raise_for_status()
+        return response.json()["issues"]
+
+    def sync_and_generate_html(self):
+        issues = self.fetch_jira_filter()
+        updated_issues, non_updated_issues = [], []
+        for issue in issues:
+            job_number = extract_job_number(issue["fields"]["summary"])
+            if job_number:
+                env = "Prod" if "Prod" in job_number else "Quality"
+                self.db_service.sync_issue(issue, env)
+                updated_issues.append(issue)
+            else:
+                non_updated_issues.append(issue)
+        return HTMLGenerator().generate_html(updated_issues, non_updated_issues)
+
+app/services/db_service.py
+
+import cx_Oracle
+
+class DatabaseService:
+    def __init__(self):
+        self.dsn = cx_Oracle.makedsn("host", "port", service_name="service")
+        self.conn = cx_Oracle.connect(user="username", password="password", dsn=self.dsn)
+
+    def sync_issue(self, issue, env):
+        # Extract details and update or insert logic here.
+        pass
+
+    def update_comment(self, jira_id, comment):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE issues_table SET update_comment = :comment WHERE jira_number = :jira_id",
+            {"comment": comment, "jira_id": jira_id}
+        )
+        self.conn.commit()
+        return {"status": "success"}
+
+app/services/html_generator.py
+
+from jinja2 import Environment, FileSystemLoader
+
+class HTMLGenerator:
+    def __init__(self):
+        self.env = Environment(loader=FileSystemLoader("templates"))
+
+    def generate_html(self, updated_issues, non_updated_issues):
+        template = self.env.get_template("result_list.html")
+        content = template.render(
+            updated_issues=updated_issues,
+            non_updated_issues=non_updated_issues,
+        )
+        output_path = "Result_list.html"
+        with open(output_path, "w") as f:
+            f.write(content)
+        return output_path
+
+Helm Chart:
+
+helm-chart/templates/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-sync
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jira-sync
+  template:
+    metadata:
+      labels:
+        app: jira-sync
+    spec:
+      containers:
+      - name: jira-sync
+        image: your-docker-image
+        ports:
+        - containerPort: 5000
+        env:
+        - name: DATABASE_HOST
+          value: oracle-db
+
+Let me know if you’d like further elaboration!
