@@ -1,3 +1,161 @@
+
+To get a database session for a specific environment (such as “prod” or “quality”) in Python using SQLAlchemy, you can use multiple database connections and switch between them based on the environment. In SQLAlchemy, you can set up different databases and choose which one to connect to based on the environment you’re working in.
+
+Approach
+	1.	Define Multiple Database URIs:
+In the Flask configuration, set up different database URIs for different environments (e.g., prod_db_uri, quality_db_uri).
+	2.	Create a Custom Session Maker:
+Use SQLAlchemy’s sessionmaker to create a session for each environment.
+	3.	Switch Between Environments:
+Based on the environment (e.g., prod or quality), select the appropriate database URI and use the session to interact with that database.
+
+Step-by-Step Implementation
+
+1. Configuration (in .env or config.py)
+
+import os
+
+class Config:
+    # Common configuration
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+class DevelopmentConfig(Config):
+    # Database URIs for different environments
+    SQLALCHEMY_DATABASE_URI_PROD = os.getenv("SQLALCHEMY_DATABASE_URI_PROD")
+    SQLALCHEMY_DATABASE_URI_QUALITY = os.getenv("SQLALCHEMY_DATABASE_URI_QUALITY")
+
+In the .env file, you can specify the URIs for the databases:
+
+SQLALCHEMY_DATABASE_URI_PROD=postgresql://user:password@prod_host/dbname
+SQLALCHEMY_DATABASE_URI_QUALITY=postgresql://user:password@quality_host/dbname
+
+2. Create Database Sessions
+
+In your application code, set up a session maker that can switch between the environments:
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, scoped_session
+
+class DBSessionManager:
+    def __init__(self, app):
+        self.app = app
+        self.prod_session = None
+        self.quality_session = None
+
+    def get_session(self, environment):
+        """Get the session for the specified environment (prod or quality)."""
+        if environment == "prod":
+            if not self.prod_session:
+                # Create session for prod environment
+                engine = create_engine(self.app.config["SQLALCHEMY_DATABASE_URI_PROD"])
+                Session = scoped_session(sessionmaker(bind=engine))
+                self.prod_session = Session
+            return self.prod_session()
+        elif environment == "quality":
+            if not self.quality_session:
+                # Create session for quality environment
+                engine = create_engine(self.app.config["SQLALCHEMY_DATABASE_URI_QUALITY"])
+                Session = scoped_session(sessionmaker(bind=engine))
+                self.quality_session = Session
+            return self.quality_session()
+        else:
+            raise ValueError("Unknown environment: {}".format(environment))
+
+# Instantiate DBSessionManager in your app
+db_session_manager = DBSessionManager(app)
+
+3. Switching Between Environments
+
+When you need to interact with the database, you can call get_session() with the desired environment ("prod" or "quality").
+
+@app.route("/sync", methods=["POST"])
+def sync_issues():
+    try:
+        data = request.get_json()
+        filter_id = data["filter_id"]
+        environment = data["environment"]  # Pass either 'prod' or 'quality'
+
+        # Get the appropriate session based on the environment
+        session = db_session_manager.get_session(environment)
+        
+        # Fetch and sync issues
+        issues_from_jira = jira_api.get_issues(filter_id)
+        prod_issues, quality_issues = categorize_issues(issues_from_jira)
+        sync_issues_to_environment(prod_issues, session, "prod")
+        sync_issues_to_environment(quality_issues, session, "quality")
+
+        # Generate HTML content
+        html_content = generate_html(prod_issues, quality_issues)
+        
+        # Write the HTML content to a file
+        output_file = "/tmp/result_list.html"
+        with open(output_file, "w") as file:
+            file.write(html_content)
+
+        # Return the HTML file as a response to the client
+        response = send_file(output_file, as_attachment=True, download_name="Result_list.html")
+        
+        # Delete the file after sending
+        os.remove(output_file)
+
+        return response
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+In this code:
+	•	get_session: Retrieves the session based on the environment (prod or quality). This allows you to switch between databases.
+	•	sync_issues_to_environment: Passes the session to the function where database operations (insert, update) are performed for the correct environment.
+
+4. Session in the sync_issues_to_environment Function
+
+Here’s an example of how you might use the session in the sync_issues_to_environment function:
+
+def sync_issues_to_environment(issues, session, environment):
+    """Synchronize issues to the database for the given environment."""
+    for issue in issues:
+        job_number = extract_job_number(issue["fields"]["summary"])
+        existing_issue = session.query(JiraIssue).filter_by(jira_number=issue["key"]).first()
+
+        if existing_issue:
+            # Update existing record
+            existing_issue.status = issue["fields"]["status"]["name"]
+            existing_issue.summary = issue["fields"]["summary"]
+            existing_issue.criticity = issue["fields"]["priority"]["name"]
+            existing_issue.description = issue["fields"]["description"]
+            existing_issue.creation_date = issue["fields"]["created"]
+            existing_issue.comments = issue["fields"]["comment"]["comments"]
+            # Assume first and last comment are the first and last in the list
+            if issue["fields"]["comment"]["comments"]:
+                existing_issue.first_comment = issue["fields"]["comment"]["comments"][0]["body"]
+                existing_issue.last_comment = issue["fields"]["comment"]["comments"][-1]["body"]
+            existing_issue.job_number = job_number
+        else:
+            # Insert new record
+            new_issue = JiraIssue(
+                jira_number=issue["key"],
+                status=issue["fields"]["status"]["name"],
+                summary=issue["fields"]["summary"],
+                criticity=issue["fields"]["priority"]["name"],
+                description=issue["fields"]["description"],
+                creation_date=issue["fields"]["created"],
+                comments=issue["fields"]["comment"]["comments"],
+                first_comment=issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else None,
+                last_comment=issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else None,
+                job_number=job_number
+            )
+            session.add(new_issue)
+        
+        session.commit()
+
+Summary
+	•	Environment-Specific Database Sessions: The DBSessionManager class dynamically provides a session for the specified environment (prod or quality).
+	•	Switching Between Databases: Depending on the environment parameter passed to the API, the appropriate database session is used for synchronizing JIRA issues.
+	•	Session Management: By using scoped_session from SQLAlchemy, sessions are managed in a thread-safe way, ensuring each thread (or request) gets its own session.
+
+This approach allows you to easily switch between multiple databases in different environments within the same application, ensuring that operations are performed on the correct database based on the environment.
+=#=##
+
 Here is the complete implementation of the /sync endpoint along with all the dependent functions, including the necessary operations to sync JIRA issues to the database, generate the HTML report, and return it as a downloadable file.
 
 Complete Code for /sync Endpoint and Dependencies
