@@ -1,0 +1,445 @@
+
+
+Here is the full implementation of your requirement with Flask, Oracle Database interaction, and Kubernetes configuration:
+
+Directory Structure
+
+jira-sync-service/
+├── app/
+│   ├── __init__.py          # Initialize Flask app and DB
+│   ├── db.py                # Database model and utilities
+│   ├── jira_api.py          # Jira API interaction
+│   ├── sync_service.py      # Sync logic and main service routes
+│   ├── utils.py             # Utility functions for HTML generation, regex
+│   ├── templates/
+│   │   └── result_list.html # HTML template for the output
+├── helm/
+│   ├── Chart.yaml           # Helm chart metadata
+│   ├── templates/
+│   │   ├── deployment.yaml  # Kubernetes Deployment YAML
+│   │   ├── service.yaml     # Kubernetes Service YAML
+├── requirements.txt         # Python dependencies
+├── app.py                   # Entry point for Flask app
+├── Dockerfile               # Dockerfile for the service
+└── README.md                # Instructions
+
+Python Code
+
+app/__init__.py
+
+from flask import Flask
+from app.db import init_db
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_mapping({
+        "SQLALCHEMY_DATABASE_URI": "oracle+cx_oracle://user:password@host:port/service_name",
+        "SQLALCHEMY_TRACK_MODIFICATIONS": False
+    })
+    init_db(app)
+    return app
+
+app/db.py
+
+from flask_sqlalchemy import SQLAlchemy
+
+db = SQLAlchemy()
+
+class JiraIssue(db.Model):
+    __tablename__ = "jira_issues"
+
+    jira_number = db.Column(db.String(20), primary_key=True)
+    status = db.Column(db.String(50))
+    summary = db.Column(db.Text)
+    job_number = db.Column(db.String(50), nullable=True)
+    criticity = db.Column(db.String(20))
+    description = db.Column(db.Text)
+    creation_date = db.Column(db.DateTime)
+    comments = db.Column(db.Text)
+    first_comment = db.Column(db.Text)
+    last_comment = db.Column(db.Text)
+    update_comment = db.Column(db.Text, nullable=True)
+    update_status = db.Column(db.Text, nullable=True)
+
+def init_db(app):
+    db.init_app(app)
+    with app.app_context():
+        db.create_all()
+
+app/jira_api.py
+
+import requests
+
+class JiraAPI:
+    def __init__(self, base_url, token):
+        self.base_url = base_url
+        self.headers = {"Authorization": f"Bearer {token}"}
+
+    def get_issues(self, filter_id):
+        url = f"{self.base_url}/rest/api/2/search?jql=filter={filter_id}"
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        return response.json()["issues"]
+
+    def get_issue(self, jira_id):
+        url = f"{self.base_url}/rest/api/2/issue/{jira_id}"
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        return response.json()
+
+    def update_comment(self, jira_id, comment):
+        url = f"{self.base_url}/rest/api/2/issue/{jira_id}/comment"
+        response = requests.post(url, headers=self.headers, json={"body": comment})
+        response.raise_for_status()
+        return response.json()
+
+app/utils.py
+
+import re
+from flask import render_template
+
+def extract_job_number(summary):
+    match = re.search(r"JOB-(\d+)", summary)
+    return match.group(0) if match else None
+
+def generate_html(issues_with_job, issues_without_job):
+    return render_template(
+        "result_list.html",
+        updated_issues=issues_with_job,
+        not_updated_issues=issues_without_job
+    )
+
+app/sync_service.py
+
+from flask import Blueprint, request, jsonify, send_file
+from app.db import db, JiraIssue
+from app.jira_api import JiraAPI
+from app.utils import extract_job_number, generate_html
+import os
+
+sync_service = Blueprint("sync_service", __name__)
+
+# Initialize Jira API
+jira_api = JiraAPI(base_url="https://your-jira-instance.atlassian.net", token="your_bearer_token")
+
+@sync_service.route("/fetch_jira/<jira_id>", methods=["GET"])
+def fetch_jira(jira_id):
+    issue = jira_api.get_issue(jira_id)
+    return jsonify(issue)
+
+@sync_service.route("/sync", methods=["POST"])
+def sync_issues():
+    data = request.get_json()
+    filter_id = data["filter_id"]
+
+    # Fetch issues from JIRA API
+    issues = jira_api.get_issues(filter_id)
+
+    issues_with_job = []
+    issues_without_job = []
+
+    for issue in issues:
+        job_number = extract_job_number(issue["fields"]["summary"])
+        db_issue = JiraIssue.query.get(issue["key"])
+
+        if db_issue:
+            db_issue.status = issue["fields"]["status"]["name"]
+            db_issue.summary = issue["fields"]["summary"]
+            db_issue.job_number = job_number
+            db_issue.criticity = issue["fields"].get("priority", {}).get("name", "Unknown")
+            db_issue.description = issue["fields"].get("description", "")
+            db_issue.creation_date = issue["fields"]["created"]
+            db_issue.comments = "\n".join([comment["body"] for comment in issue["fields"]["comment"]["comments"]])
+            db_issue.first_comment = issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else ""
+            db_issue.last_comment = issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else ""
+        else:
+            db_issue = JiraIssue(
+                jira_number=issue["key"],
+                status=issue["fields"]["status"]["name"],
+                summary=issue["fields"]["summary"],
+                job_number=job_number,
+                criticity=issue["fields"].get("priority", {}).get("name", "Unknown"),
+                description=issue["fields"].get("description", ""),
+                creation_date=issue["fields"]["created"],
+                comments="\n".join([comment["body"] for comment in issue["fields"]["comment"]["comments"]]),
+                first_comment=issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else "",
+                last_comment=issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else ""
+            )
+            db.session.add(db_issue)
+
+        if job_number:
+            issues_with_job.append(issue)
+        else:
+            issues_without_job.append(issue)
+
+    db.session.commit()
+
+    # Generate HTML
+    html_content = generate_html(issues_with_job, issues_without_job)
+    with open("result_list.html", "w") as file:
+        file.write(html_content)
+
+    return send_file("result_list.html")
+
+app/templates/result_list.html
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Result List</title>
+</head>
+<body>
+    <h1>Updated successfully to respective environment</h1>
+    <table border="1">
+        <tr>
+            <th>JIRA Number</th>
+            <th>Job Number</th>
+            <th>Criticity</th>
+            <th>Creation Date</th>
+        </tr>
+        {% for issue in updated_issues %}
+        <tr>
+            <td><a href="https://your-jira-instance.atlassian.net/browse/{{ issue.key }}">{{ issue.key }}</a></td>
+            <td>{{ issue.fields.summary }}</td>
+            <td>{{ issue.fields.priority.name }}</td>
+            <td>{{ issue.fields.created }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h1>Not Updated into DB</h1>
+    <table border="1">
+        <tr>
+            <th>JIRA Number</th>
+            <th>Criticity</th>
+            <th>Creation Date</th>
+        </tr>
+        {% for issue in not_updated_issues %}
+        <tr>
+            <td><a href="https://your-jira-instance.atlassian.net/browse/{{ issue.key }}">{{ issue.key }}</a></td>
+            <td>{{ issue.fields.priority.name }}</td>
+            <td>{{ issue.fields.created }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
+
+Kubernetes Deployment and Helm Chart
+
+helm/templates/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-sync-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jira-sync-service
+  template:
+    metadata:
+      labels:
+        app: jira-sync-service
+    spec:
+      containers:
+      - name: jira-sync-service
+        image: your-docker-image
+        ports:
+        - containerPort: 5000
+        env:
+        - name: ORACLE_DB_URI
+          valueFrom:
+            secretKeyRef:
+              name: oracle-db-secret
+              key: uri
+
+Let me know if you need further details or customizations!
+
+=#=#=###
+
+
+Here is the complete implementation with all four services as requested:
+
+Updated Routes
+	1.	Fetch details of an individual JIRA (/fetch_jira/<jira_id>).
+	2.	Get details of the list of JIRAs in a filter as an HTML page (/fetch_issues/<filter_id>).
+	3.	Synchronize JIRAs to DB based on Job Number (/sync).
+	4.	Update a comment on a JIRA (/update_comment/<jira_id>).
+
+Complete app/sync_service.py
+
+from flask import Blueprint, request, jsonify, send_file
+from app.db import db, JiraIssue
+from app.jira_api import JiraAPI
+from app.utils import extract_job_number, generate_html
+import os
+
+sync_service = Blueprint("sync_service", __name__)
+
+# Initialize Jira API
+jira_api = JiraAPI(base_url="https://your-jira-instance.atlassian.net", token="your_bearer_token")
+
+
+# 1. Fetch details of an individual JIRA
+@sync_service.route("/fetch_jira/<jira_id>", methods=["GET"])
+def fetch_jira(jira_id):
+    try:
+        issue = jira_api.get_issue(jira_id)
+        return jsonify(issue)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# 2. Get details of the list of JIRAs in a filter as HTML page
+@sync_service.route("/fetch_issues/<filter_id>", methods=["GET"])
+def fetch_issues(filter_id):
+    try:
+        issues = jira_api.get_issues(filter_id)
+        issues_with_job = []
+        issues_without_job = []
+
+        for issue in issues:
+            job_number = extract_job_number(issue["fields"]["summary"])
+            if job_number:
+                issues_with_job.append(issue)
+            else:
+                issues_without_job.append(issue)
+
+        # Generate HTML
+        html_content = generate_html(issues_with_job, issues_without_job)
+        with open("result_list.html", "w") as file:
+            file.write(html_content)
+
+        return send_file("result_list.html")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# 3. Synchronize JIRAs to DB based on Job Number
+@sync_service.route("/sync", methods=["POST"])
+def sync_issues():
+    try:
+        data = request.get_json()
+        filter_id = data["filter_id"]
+
+        # Fetch issues from JIRA API
+        issues = jira_api.get_issues(filter_id)
+
+        issues_with_job = []
+        issues_without_job = []
+
+        for issue in issues:
+            job_number = extract_job_number(issue["fields"]["summary"])
+            db_issue = JiraIssue.query.get(issue["key"])
+
+            if db_issue:
+                db_issue.status = issue["fields"]["status"]["name"]
+                db_issue.summary = issue["fields"]["summary"]
+                db_issue.job_number = job_number
+                db_issue.criticity = issue["fields"].get("priority", {}).get("name", "Unknown")
+                db_issue.description = issue["fields"].get("description", "")
+                db_issue.creation_date = issue["fields"]["created"]
+                db_issue.comments = "\n".join([comment["body"] for comment in issue["fields"]["comment"]["comments"]])
+                db_issue.first_comment = issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else ""
+                db_issue.last_comment = issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else ""
+            else:
+                db_issue = JiraIssue(
+                    jira_number=issue["key"],
+                    status=issue["fields"]["status"]["name"],
+                    summary=issue["fields"]["summary"],
+                    job_number=job_number,
+                    criticity=issue["fields"].get("priority", {}).get("name", "Unknown"),
+                    description=issue["fields"].get("description", ""),
+                    creation_date=issue["fields"]["created"],
+                    comments="\n".join([comment["body"] for comment in issue["fields"]["comment"]["comments"]]),
+                    first_comment=issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else "",
+                    last_comment=issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else ""
+                )
+                db.session.add(db_issue)
+
+            if job_number:
+                issues_with_job.append(issue)
+            else:
+                issues_without_job.append(issue)
+
+        db.session.commit()
+
+        # Generate HTML
+        html_content = generate_html(issues_with_job, issues_without_job)
+        with open("result_list.html", "w") as file:
+            file.write(html_content)
+
+        return send_file("result_list.html")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# 4. Update a comment on a JIRA
+@sync_service.route("/update_comment/<jira_id>", methods=["POST"])
+def update_comment(jira_id):
+    try:
+        data = request.get_json()
+        comment = data["comment"]
+
+        # Fetch comment to update from DB if needed
+        db_issue = JiraIssue.query.get(jira_id)
+        if not db_issue:
+            return jsonify({"error": f"JIRA ID {jira_id} not found in DB"}), 404
+
+        db_issue.update_comment = comment
+        db.session.commit()
+
+        # Update the comment in JIRA
+        response = jira_api.update_comment(jira_id, comment)
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+Summary of Services
+	1.	Fetch Individual JIRA
+	•	URL: /fetch_jira/<jira_id>
+	•	Method: GET
+	•	Description: Fetches details of a single JIRA using its ID.
+	2.	Fetch Issues as HTML
+	•	URL: /fetch_issues/<filter_id>
+	•	Method: GET
+	•	Description: Fetches all issues in a filter and returns an HTML file categorizing them based on Job Numbers.
+	3.	Synchronize JIRAs to DB
+	•	URL: /sync
+	•	Method: POST
+	•	Description: Synchronizes JIRA issues with the database based on the filter and Job Numbers.
+	4.	Update Comment on JIRA
+	•	URL: /update_comment/<jira_id>
+	•	Method: POST
+	•	Payload: { "comment": "Updated comment text" }
+	•	Description: Updates the Update_comment field in DB and JIRA.
+
+Test Scenarios
+
+You can test these routes using curl or any REST API client like Postman.
+
+Example Requests:
+	1.	Fetch JIRA by ID:
+
+curl -X GET http://localhost:5000/fetch_jira/JIRA-123
+
+
+	2.	Fetch Issues as HTML:
+
+curl -X GET http://localhost:5000/fetch_issues/12345
+
+
+	3.	Synchronize Issues:
+
+curl -X POST http://localhost:5000/sync -H "Content-Type: application/json" -d '{"filter_id": "12345"}'
+
+
+	4.	Update Comment on JIRA:
+
+curl -X POST http://localhost:5000/update_comment/JIRA-123 -H "Content-Type: application/json" -d '{"comment": "This is an updated comment."}'
+
+
+
+Let me know if further clarifications are needed!
