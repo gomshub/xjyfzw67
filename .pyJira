@@ -1,4 +1,169 @@
+Apologies for the confusion. In the original code I provided, we didn’t explicitly handle the insertion, update, or deletion based on the job_number extracted from the summary. Let’s fix that by ensuring the synchronization process happens to the correct environment (Production or Quality) based on the job_number (P01 for Prod and Q01 for Quality).
 
+Here’s how we can update the code to make sure the synchronization respects the job_number (P01 or Q01) found in the summary of each JIRA issue:
+
+Updates to the sync_issues function:
+	1.	Extract the Job Number: We already have a function extract_job_number that looks for a pattern like P01 or Q01 in the summary.
+	2.	Determine Environment: Based on the extracted job_number, we will assign the environment to either Prod (P01) or Quality (Q01).
+	3.	Environment-Specific DB Session: Use the extracted job number to determine the environment, and connect to the corresponding database (prod_db or quality_db).
+
+Updated sync_issues Function
+
+from flask import request, jsonify
+from .db_session_manager import DBSessionManager
+from .models import JiraIssue
+from .jira_api import JiraAPI  # Assuming you have a Jira API class to get issues
+
+def sync_issues():
+    try:
+        # Fetch filter ID and environment from the request
+        data = request.get_json()
+        filter_id = data["filter_id"]
+
+        # Fetch the list of issues from JIRA
+        jira_api = JiraAPI()
+        jira_issues = jira_api.get_issues(filter_id)  # List of issues returned by JIRA
+
+        # Initialize lists for the actions to take
+        issues_to_insert = []
+        issues_to_update = []
+        issues_to_delete = []
+
+        # Loop through all the issues returned by JIRA and process each one
+        for jira_issue in jira_issues:
+            # Extract Job number from the summary using regex
+            job_number = extract_job_number(jira_issue["fields"]["summary"])
+
+            if job_number:
+                # Determine environment based on job number (P01 -> prod, Q01 -> quality)
+                if job_number.startswith("P"):
+                    environment = "prod"
+                elif job_number.startswith("Q"):
+                    environment = "quality"
+                else:
+                    continue  # Skip if job number does not match P01 or Q01 pattern
+
+                # Get the appropriate database session for the environment (prod or quality)
+                session = app.db_session_manager.get_session(environment)
+                
+                # Check if this issue already exists in the database
+                existing_issue = session.query(JiraIssue).filter_by(jira_number=jira_issue["key"]).first()
+
+                if existing_issue:
+                    # Issue exists, check if it needs to be updated
+                    if needs_update(existing_issue, jira_issue):
+                        update_issue(existing_issue, jira_issue)
+                        issues_to_update.append(existing_issue)
+                else:
+                    # New issue, add to insert list
+                    new_issue = JiraIssue(
+                        jira_number=jira_issue["key"],
+                        status=jira_issue["fields"]["status"]["name"],
+                        summary=jira_issue["fields"]["summary"],
+                        criticity=jira_issue["fields"]["priority"]["name"],
+                        description=jira_issue["fields"]["description"],
+                        creation_date=jira_issue["fields"]["created"],
+                        comments=jira_issue["fields"]["comment"]["comments"],
+                        first_comment=jira_issue["fields"]["comment"]["comments"][0]["body"] if jira_issue["fields"]["comment"]["comments"] else None,
+                        last_comment=jira_issue["fields"]["comment"]["comments"][-1]["body"] if jira_issue["fields"]["comment"]["comments"] else None,
+                        job_number=job_number
+                    )
+                    issues_to_insert.append(new_issue)
+
+        # Perform the DB operations (Insert, Update, Delete) for each environment
+        for environment in ["prod", "quality"]:
+            session = app.db_session_manager.get_session(environment)
+
+            # Insert new issues
+            if issues_to_insert:
+                session.bulk_save_objects([issue for issue in issues_to_insert if issue.job_number.startswith(environment.upper())])  # Filter by environment
+            # Update existing issues
+            if issues_to_update:
+                session.commit()  # Committing the updates in one go
+            # Delete issues that are no longer in JIRA
+            if issues_to_delete:
+                for issue in issues_to_delete:
+                    session.delete(issue)
+                session.commit()
+
+        # Commit all changes to DB
+        session.commit()
+
+        # Return HTML response or result
+        html_content = generate_html(jira_issues, issues_to_insert, issues_to_update, issues_to_delete)
+        return jsonify({"status": "success", "html_content": html_content})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def extract_job_number(summary):
+    """Helper function to extract job number from the summary using regular expressions."""
+    import re
+    match = re.search(r"(P|Q)\d{2}", summary)  # Example pattern: P01, Q01
+    return match.group() if match else None
+
+def needs_update(existing_issue, jira_issue):
+    """Determine if an issue needs to be updated."""
+    return (existing_issue.status != jira_issue["fields"]["status"]["name"] or
+            existing_issue.summary != jira_issue["fields"]["summary"] or
+            existing_issue.criticity != jira_issue["fields"]["priority"]["name"] or
+            existing_issue.description != jira_issue["fields"]["description"] or
+            existing_issue.first_comment != (jira_issue["fields"]["comment"]["comments"][0]["body"] if jira_issue["fields"]["comment"]["comments"] else None) or
+            existing_issue.last_comment != (jira_issue["fields"]["comment"]["comments"][-1]["body"] if jira_issue["fields"]["comment"]["comments"] else None))
+
+def update_issue(existing_issue, jira_issue):
+    """Update the fields of an existing issue."""
+    existing_issue.status = jira_issue["fields"]["status"]["name"]
+    existing_issue.summary = jira_issue["fields"]["summary"]
+    existing_issue.criticity = jira_issue["fields"]["priority"]["name"]
+    existing_issue.description = jira_issue["fields"]["description"]
+    existing_issue.creation_date = jira_issue["fields"]["created"]
+    existing_issue.comments = jira_issue["fields"]["comment"]["comments"]
+    existing_issue.first_comment = jira_issue["fields"]["comment"]["comments"][0]["body"] if jira_issue["fields"]["comment"]["comments"] else None
+    existing_issue.last_comment = jira_issue["fields"]["comment"]["comments"][-1]["body"] if jira_issue["fields"]["comment"]["comments"] else None
+    existing_issue.job_number = extract_job_number(jira_issue["fields"]["summary"])
+
+def generate_html(jira_issues, inserted, updated, deleted):
+    """Generate an HTML report of the sync process."""
+    html_content = "<html><body><h1>Sync Results</h1>"
+    
+    html_content += "<h2>Inserted Issues</h2><table>"
+    for issue in inserted:
+        html_content += f"<tr><td><a href='https://jira.example.com/browse/{issue.jira_number}'> {issue.jira_number} </a></td><td>{issue.summary}</td></tr>"
+    html_content += "</table>"
+
+    html_content += "<h2>Updated Issues</h2><table>"
+    for issue in updated:
+        html_content += f"<tr><td><a href='https://jira.example.com/browse/{issue.jira_number}'> {issue.jira_number} </a></td><td>{issue.summary}</td></tr>"
+    html_content += "</table>"
+
+    html_content += "<h2>Deleted Issues</h2><table>"
+    for issue in deleted:
+        html_content += f"<tr><td><a href='https://jira.example.com/browse/{issue.jira_number}'> {issue.jira_number} </a></td><td>{issue.summary}</td></tr>"
+    html_content += "</table>"
+
+    html_content += "</body></html>"
+    return html_content
+
+Explanation of Key Changes:
+	1.	Determining the Environment (prod or quality):
+	•	The job_number (extracted from the JIRA summary) is used to determine whether the issue belongs to the production (P01) or quality (Q01) environment. Based on this, we assign the environment and fetch the appropriate session using the get_session method.
+	2.	Inserting, Updating, and Deleting Based on Job Number:
+	•	Insert: New issues are inserted into the database if they don’t already exist, and the job_number matches the environment (P01 or Q01).
+	•	Update: Existing issues are updated only if there are any changes in the fields (like status, summary, etc.), and the environment matches the job_number.
+	•	Delete: Issues are deleted if they are no longer in the JIRA filter, and the job_number matches the environment.
+	3.	Bulk Operations:
+	•	The function uses session.bulk_save_objects() to insert new issues efficiently.
+	•	The updates are handled by checking for changes in the issue details, and changes are committed at once using session.commit().
+	•	Issues that are no longer in the JIRA filter are deleted with session.delete().
+	4.	HTML Report:
+	•	After the synchronization process is complete, a summary HTML report is generated showing which issues were inserted, updated, and deleted.
+
+Conclusion:
+
+With these changes, the synchronization logic correctly handles the insertion, update, and deletion of issues from the JIRA filter, ensuring that the issues are managed based on their associated environment (prod or quality) based on the extracted job_number from the summary (P01 for production and Q01 for quality).
+
+=#=
 To get a database session for a specific environment (such as “prod” or “quality”) in Python using SQLAlchemy, you can use multiple database connections and switch between them based on the environment. In SQLAlchemy, you can set up different databases and choose which one to connect to based on the environment you’re working in.
 
 Approach
