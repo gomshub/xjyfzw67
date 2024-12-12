@@ -1,0 +1,73 @@
+If your project does not use a build tool like Maven or Gradle, and consists of plain Java files organized into a module, you can still update the Java version, package an executable JAR, and resolve any compatibility issues manually. Here’s how:
+
+1. Update Java Version
+	•	Install a Newer JDK: Download and install the desired JDK (e.g., Java 11, 17, or 21).
+	•	Set the New JDK:
+	•	Update the JAVA_HOME environment variable to point to the new JDK.
+	•	Update the PATH variable to include the new JDK’s bin directory.
+
+export JAVA_HOME=/path/to/new/jdk
+export PATH=$JAVA_HOME/bin:$PATH
+
+
+	•	Check the Java Version:
+
+java -version
+
+2. Compile the Code
+	•	Use the javac command to compile all .java files in your module directory.
+
+javac -d out -sourcepath src -source 17 -target 17 src/**/*.java
+
+	•	src: Root directory of your source files.
+	•	out: Directory where compiled .class files will be placed.
+
+3. Package the Executable JAR
+	•	Create a MANIFEST.MF file in a temporary directory (e.g., temp/):
+
+Manifest-Version: 1.0
+Main-Class: com.example.MainClass
+
+Replace com.example.MainClass with the fully qualified name of your main class.
+
+	•	Use the jar command to package the JAR:
+
+jar cfm app.jar temp/MANIFEST.MF -C out .
+
+This will create app.jar with the specified main class.
+
+4. Test the JAR
+	•	Run the JAR file:
+
+java -jar app.jar
+
+
+	•	If it runs successfully, your application is ready for further testing.
+
+5. Resolve Version Incompatibilities
+
+When upgrading from Java 8 to a newer version, some APIs may be deprecated or removed. Address incompatibilities as follows:
+	1.	Analyze Compatibility:
+Use jdeps to analyze dependencies:
+
+jdeps --multi-release 17 -cp app.jar
+
+
+	2.	Handle Removed/Deprecated APIs:
+	•	Replace removed APIs with newer equivalents.
+	•	Refer to Java SE documentation for updates on removed or deprecated APIs.
+	3.	Update Reflection Code:
+	•	Java 9+ introduces stricter module system restrictions on reflection.
+	•	Use --add-opens or --add-modules JVM options to bypass issues temporarily, but update the code for long-term solutions.
+
+6. Testing
+	•	Write test classes for all major functionalities.
+	•	Compile and run tests using the JDK:
+
+javac -d out -cp . src/**/*.java tests/**/*.java
+java -cp out TestMainClass
+
+
+	•	Fix issues as they arise.
+
+Let me know if you’d like detailed help with resolving specific errors or refactoring code!
