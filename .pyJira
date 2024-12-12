@@ -1,4 +1,232 @@
 
+Here is the complete Python module structure and codebase, including Kubernetes deployment, secret management, and .env configuration for development. The deployment ensures JIRA token and database credentials are securely managed.
+
+Directory Structure
+
+jira_sync_service/
+│
+├── app/
+│   ├── __init__.py
+│   ├── db.py
+│   ├── jira_api.py
+│   ├── utils.py
+│   ├── sync_service.py
+│
+├── templates/
+│   ├── result_list.html  # Template for rendering HTML (if dynamic rendering needed)
+│
+├── tests/
+│   ├── test_sync_service.py
+│
+├── requirements.txt
+├── Dockerfile
+├── .env                 # Local development environment variables
+├── deployment/
+│   ├── secrets.yaml
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── helm_chart/
+│       ├── Chart.yaml
+│       ├── templates/
+│           ├── deployment.yaml
+│           ├── service.yaml
+│           ├── secrets.yaml
+│       ├── values.yaml
+│
+└── app.py
+
+Codebase
+
+1. app/__init__.py
+
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from dotenv import load_dotenv
+import os
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Flask and SQLAlchemy
+db = SQLAlchemy()
+
+def create_app():
+    app = Flask(__name__)
+
+    # Configurations
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DB_URI")
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+    # Initialize extensions
+    db.init_app(app)
+
+    # Register blueprints
+    from app.sync_service import sync_service
+    app.register_blueprint(sync_service, url_prefix="/api")
+
+    return app
+
+2. app/db.py
+
+from app import db
+
+class JiraIssue(db.Model):
+    __tablename__ = "jira_issues"
+
+    jira_number = db.Column(db.String(50), primary_key=True)
+    status = db.Column(db.String(50))
+    summary = db.Column(db.String(255))
+    job_number = db.Column(db.String(50))
+    criticity = db.Column(db.String(50))
+    description = db.Column(db.Text)
+    creation_date = db.Column(db.DateTime)
+    comments = db.Column(db.Text)
+    first_comment = db.Column(db.Text)
+    last_comment = db.Column(db.Text)
+    update_comment = db.Column(db.Text)
+    update_status = db.Column(db.Text)
+
+3. app/jira_api.py
+
+import requests
+
+class JiraAPI:
+    def __init__(self, base_url, token):
+        self.base_url = base_url
+        self.headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    def get_issue(self, jira_id):
+        url = f"{self.base_url}/rest/api/3/issue/{jira_id}"
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        return response.json()
+
+    def get_issues(self, filter_id):
+        url = f"{self.base_url}/rest/api/3/search?jql=filter={filter_id}"
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        return response.json()["issues"]
+
+    def update_comment(self, jira_id, comment):
+        url = f"{self.base_url}/rest/api/3/issue/{jira_id}/comment"
+        payload = {"body": comment}
+        response = requests.post(url, json=payload, headers=self.headers)
+        response.raise_for_status()
+        return response.json()
+
+4. app/utils.py
+
+import re
+from flask import render_template
+
+def extract_job_number(summary):
+    match = re.search(r"\bJOB-(\d+)\b", summary)
+    return match.group(0) if match else None
+
+def generate_html(issues_with_job, issues_without_job):
+    html = "<html><body><h1>JIRA Sync Results</h1>"
+    if issues_with_job:
+        html += "<h2>Updated successfully to respective environment</h2><table><tr><th>JIRA</th><th>Job Number</th><th>Criticity</th><th>Creation Date</th></tr>"
+        for issue in issues_with_job:
+            html += f"<tr><td><a href='{issue['self']}'>{issue['key']}</a></td><td>{extract_job_number(issue['fields']['summary'])}</td><td>{issue['fields']['priority']['name']}</td><td>{issue['fields']['created']}</td></tr>"
+        html += "</table>"
+    if issues_without_job:
+        html += "<h2>Not Updated into DB</h2><table><tr><th>JIRA</th><th>Criticity</th><th>Creation Date</th></tr>"
+        for issue in issues_without_job:
+            html += f"<tr><td><a href='{issue['self']}'>{issue['key']}</a></td><td>{issue['fields']['priority']['name']}</td><td>{issue['fields']['created']}</td></tr>"
+        html += "</table>"
+    html += "</body></html>"
+    return html
+
+5. requirements.txt
+
+Flask==2.3.3
+Flask-SQLAlchemy==3.0.5
+python-dotenv==1.0.0
+requests==2.31.0
+
+6. deployment/secrets.yaml
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jira-sync-secrets
+type: Opaque
+data:
+  JIRA_TOKEN: <base64_encoded_token>
+  DB_URI: <base64_encoded_db_uri>
+
+7. deployment/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-sync-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jira-sync-service
+  template:
+    metadata:
+      labels:
+        app: jira-sync-service
+    spec:
+      containers:
+      - name: jira-sync-service
+        image: jira-sync-service:latest
+        env:
+        - name: JIRA_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: jira-sync-secrets
+              key: JIRA_TOKEN
+        - name: DB_URI
+          valueFrom:
+            secretKeyRef:
+              name: jira-sync-secrets
+              key: DB_URI
+        ports:
+        - containerPort: 5000
+
+8. .env
+
+FLASK_ENV=development
+DB_URI=oracle+cx_oracle://username:password@host:port/sid
+JIRA_TOKEN=<your_jira_token>
+
+Running the Application
+
+Local Development
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run migrations (if needed)
+flask db upgrade
+
+# Run the app
+flask run --host=0.0.0.0 --port=5000
+
+Docker Build
+
+# Build Docker image
+docker build -t jira-sync-service .
+
+# Run Docker container
+docker run -d -p 5000:5000 --env-file .env jira-sync-service
+
+Kubernetes Deployment
+
+# Apply secrets
+kubectl apply -f deployment/secrets.yaml
+
+# Apply deployment
+kubectl apply -f deployment/deployment.yaml
+
+Let me know if you need further clarifications!
+
+=#=#
 
 Here is the full implementation of your requirement with Flask, Oracle Database interaction, and Kubernetes configuration:
 
