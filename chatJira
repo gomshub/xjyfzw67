@@ -1,0 +1,213 @@
+Creating a Python module to synchronize issues from JIRA into an Oracle database involves several components, including service definitions, HTML response formatting, and interactions with both JIRA and the database. Below is a structured approach considering the requirements you provided.
+### Python Module Structure
+Here's the modular structure for your application:
+```
+jira_sync/
+├── app.py
+├── db.py
+├── jira.py
+├── utils.py
+├── requirements.txt
+├── templates/
+│   └── result_list.html
+├── helm/
+│   └── chart.yaml
+├── kubernetes/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── configmap.yaml
+└── Dockerfile
+```
+### 1. app.py
+This will be the main entry point of your Flask application.
+```python
+from flask import Flask, request, jsonify, send_file
+from db import sync_issues, get_individual_jira, get_filter_jiras, update_jira_comment
+from jira import get_jira_issues
+import os
+app = Flask(__name__)
+@app.route('/sync_jira', methods=['POST'])
+def sync_jira():
+    filter_id = request.json.get('filter_id')
+    job_number = request.json.get('job_number')
+    result_html = sync_issues(filter_id, job_number)
+    return send_file(result_html, as_attachment=True)
+@app.route('/jira/<jira_number>', methods=['GET'])
+def fetch_jira(jira_number):
+    jira_details = get_individual_jira(jira_number)
+    return jsonify(jira_details)
+@app.route('/filter_jira', methods=['GET'])
+def fetch_jira_filter():
+    filter_id = request.args.get('filter_id')
+    jiras = get_filter_jiras(filter_id)
+    return jsonify(jiras)
+@app.route('/update_comment/<jira_number>', methods=['POST'])
+def comment_on_jira(jira_number):
+    comment = request.json.get('comment')
+    return update_jira_comment(jira_number, comment)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+```
+### 2. db.py
+Contains functionality to interact with the Oracle database.
+```python
+import cx_Oracle
+def get_db_connection():
+    # Establish connection to Oracle DB
+    dsn = cx_Oracle.makedsn("yourhost", "yourport", service_name="your_service")
+    connection = cx_Oracle.connect(user="your_user", password="your_password", dsn=dsn)
+    return connection
+def sync_issues_to_db(issue_data):
+    # Insert or update logic here
+    pass
+def fetch_issue(jira_number):
+    # Retrieve issue data from DB
+    pass
+def update_comment_in_db(jira_number, comment):
+    # Update comment in DB
+    pass
+```
+### 3. jira.py
+Handles JIRA API interactions.
+```python
+import requests
+BASE_URL = "https://your_jira_instance.atlassian.net/rest/api/2"
+def get_jira_issues(api_token, filter_id):
+    url = f"{BASE_URL}/search?jql=filter={filter_id}"
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Accept": "application/json"
+    }
+    response = requests.get(url, headers=headers)
+    return response.json()
+def fetch_individual_jira(api_token, jira_number):
+    url = f"{BASE_URL}/issue/{jira_number}"
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Accept": "application/json"
+    }
+    response = requests.get(url, headers=headers)
+    return response.json()
+```
+### 4. utils.py
+Utility functions for common tasks (like HTML generation).
+```python
+from jinja2 import Environment, FileSystemLoader
+def generate_html_report(jira_data, job_number):
+    env = Environment(loader=FileSystemLoader('templates'))
+    template = env.get_template('result_list.html')
+    html_output = template.render(jira_data=jira_data, job_number=job_number)
+    
+    html_file_path = "Result_list.html"
+    with open(html_file_path, 'w') as f:
+        f.write(html_output)
+    
+    return html_file_path
+```
+### 5. templates/result_list.html
+Basic HTML structure to render the results.
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JIRA Sync Results</title>
+</head>
+<body>
+    <h1>{{ job_number ? "Updated successfully to respective environment" : "Not Updated into DB" }}</h1>
+    <table border="1">
+        <tr>
+            <th>JIRA Number</th>
+            <th>Job Number</th>
+            <th>Criticity</th>
+            <th>Creation Date</th>
+        </tr>
+        {% for jira in jira_data %}
+        <tr>
+            <td><a href="https://your_jira_instance.atlassian.net/browse/{{ jira['jira_number'] }}">{{ jira['jira_number'] }}</a></td>
+            <td>{% if jira['job_number'] %}<a href="job_link_here">{{ jira['job_number'] }}</a>{% else %}N/A{% endif %}</td>
+            <td>{{ jira['criticity'] }}</td>
+            <td>{{ jira['creation_date'] }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
+```
+### 6. requirements.txt
+List of dependencies.
+```
+Flask
+cx_Oracle
+requests
+Jinja2
+gunicorn
+```
+### 7. Helm Chart (chart.yaml)
+A simple Helm chart configuration.
+```yaml
+apiVersion: v2
+name: jira-sync
+description: A Helm chart for JIRA sync to Oracle DB
+version: 0.1.0
+appVersion: "1.0"
+```
+### 8. Kubernetes deployment.yaml
+Deployment configuration for K8s.
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jira-sync
+  template:
+    metadata:
+      labels:
+        app: jira-sync
+    spec:
+      containers:
+      - name: jira-sync
+        image: your_docker_image:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: JIRA_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: jira-api-secret
+              key: token
+      restartPolicy: Always
+```
+### 9. Kubernetes service.yaml
+Service configuration for K8s.
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: jira-sync-service
+spec:
+  selector:
+    app: jira-sync
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 5000
+  type: LoadBalancer
+```
+### 10. Dockerfile
+Containerizing your application.
+```Dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
+```
+### Conclusion
+This structure and configuration allow for a modular and organized approach to develop your Flask application that synchronizes JIRA issues into an Oracle database. You will need to adjust environment variables, database credentials, JIRA instance URLs, and other specifics according to your use case. Make sure to test each service carefully and implement error handling for robustness.
