@@ -1,3 +1,291 @@
+To implement the 5 services as per your requirements, you can structure your routes.py in Flask to handle each of these services. Here is a breakdown of how you can implement each service, including routes and relevant functions:
+
+1. Service to Fetch Details of Individual JIRA as HTML File
+
+This service fetches the details of a specific JIRA issue and presents it in an HTML file.
+
+Route for Service 1
+
+@app.route('/jira/<jira_number>', methods=['GET'])
+def fetch_individual_jira(jira_number):
+    # Fetch JIRA details using API
+    jira_details = fetch_jira_details(jira_number)
+    
+    # Generate HTML content for the JIRA details
+    html_content = generate_jira_html(jira_details)
+    
+    return html_content
+
+Fetch JIRA Details (fetch_jira_details)
+
+def fetch_jira_details(jira_number):
+    url = f"{os.getenv('JIRA_API_URL')}/rest/api/2/issue/{jira_number}"
+    headers = {
+        'Authorization': f'Bearer {os.getenv("JIRA_API_TOKEN")}',
+        'Content-Type': 'application/json'
+    }
+    response = requests.get(url, headers=headers)
+    return response.json()
+
+Generate HTML (generate_jira_html)
+
+def generate_jira_html(jira_details):
+    template = """
+    <html>
+    <head><title>JIRA Issue Details</title></head>
+    <body>
+        <h1>JIRA Issue: {{ jira_number }}</h1>
+        <table>
+            <tr><th>Field</th><th>Value</th></tr>
+            <tr><td>Summary</td><td>{{ jira_details.summary }}</td></tr>
+            <tr><td>Status</td><td>{{ jira_details.status }}</td></tr>
+            <tr><td>Criticity</td><td>{{ jira_details.criticity }}</td></tr>
+            <tr><td>Description</td><td>{{ jira_details.description }}</td></tr>
+            <tr><td>Creation Date</td><td>{{ jira_details.creation_date }}</td></tr>
+            <tr><td>First Comment</td><td>{{ jira_details.first_comment }}</td></tr>
+            <tr><td>Last Comment</td><td>{{ jira_details.last_comment }}</td></tr>
+        </table>
+    </body>
+    </html>
+    """
+    tpl = Template(template)
+    return tpl.render(jira_number=jira_details['jira_number'], jira_details=jira_details)
+
+2. Service to Get Details of List of JIRAs in Filter as HTML Page
+
+This service fetches a list of JIRAs using a filter query and presents them in an HTML table.
+
+Route for Service 2
+
+@app.route('/jira/filter', methods=['POST'])
+def fetch_jira_filter():
+    data = request.get_json()
+    filter_query = data['filter_query']
+    
+    # Fetch JIRA issues using filter query
+    jiras_list = fetch_jiras_list(filter_query)
+    
+    # Generate HTML content for the list of JIRAs
+    html_content = generate_jiras_list_html(jiras_list)
+    
+    return html_content
+
+Fetch JIRAs List (fetch_jiras_list)
+
+def fetch_jiras_list(filter_query):
+    url = f"{os.getenv('JIRA_API_URL')}/rest/api/2/search"
+    headers = {
+        'Authorization': f'Bearer {os.getenv("JIRA_API_TOKEN")}',
+        'Content-Type': 'application/json'
+    }
+    params = {'jql': filter_query}
+    response = requests.get(url, headers=headers, params=params)
+    return response.json().get('issues', [])
+
+Generate HTML for JIRA List (generate_jiras_list_html)
+
+def generate_jiras_list_html(jiras_list):
+    template = """
+    <html>
+    <head><title>JIRA Filter Results</title></head>
+    <body>
+        <h1>JIRA Issues List</h1>
+        <table>
+            <tr><th>JIRA Number</th><th>Summary</th><th>Status</th><th>Criticity</th><th>Creation Date</th></tr>
+            {% for jira in jiras_list %}
+                <tr>
+                    <td><a href="https://jira.example.com/browse/{{ jira.jira_number }}">{{ jira.jira_number }}</a></td>
+                    <td>{{ jira.summary }}</td>
+                    <td>{{ jira.status }}</td>
+                    <td>{{ jira.criticity }}</td>
+                    <td>{{ jira.creation_date }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    </body>
+    </html>
+    """
+    tpl = Template(template)
+    return tpl.render(jiras_list=jiras_list)
+
+3. Service to Get List of JIRAs and Synchronize to Prod/Quality DB
+
+This service synchronizes a list of JIRAs from the JIRA API to either the Prod or Quality DB based on the job_number in the summary and returns an HTML result.
+
+Route for Service 3
+
+@app.route('/jira/sync', methods=['POST'])
+def sync_jira_filter():
+    data = request.get_json()
+    filter_query = data['filter_query']
+    job_number = data['job_number']
+    
+    # Fetch JIRAs based on the filter query
+    jiras_data = fetch_jiras_list(filter_query)
+    
+    # Process and sync JIRAs to the appropriate DB (Prod/Quality)
+    updated_issues, non_updated_issues, deleted_issues = sync_jiras_to_db(jiras_data, job_number)
+    
+    # Generate HTML content with results of the sync
+    html_content = generate_sync_result_html(updated_issues, non_updated_issues, deleted_issues)
+    
+    return html_content
+
+Sync JIRAs to DB (sync_jiras_to_db)
+
+def sync_jiras_to_db(jiras_data, job_number):
+    updated_issues = []
+    non_updated_issues = []
+    deleted_issues = []
+    
+    for jira in jiras_data:
+        issue_data = extract_issue_data(jira)
+        issue_data['job_number'] = job_number
+        
+        sync_result = sync_to_db(issue_data, job_number)
+        
+        if sync_result == 'inserted':
+            updated_issues.append(issue_data)
+        elif sync_result == 'updated':
+            updated_issues.append(issue_data)
+        elif sync_result == 'deleted':
+            deleted_issues.append(issue_data)
+        else:
+            non_updated_issues.append(issue_data)
+    
+    return updated_issues, non_updated_issues, deleted_issues
+
+Generate HTML for Sync Results (generate_sync_result_html)
+
+def generate_sync_result_html(updated_issues, non_updated_issues, deleted_issues):
+    template = """
+    <html>
+    <head><title>JIRA Sync Results</title></head>
+    <body>
+        <h1>JIRA Sync Results</h1>
+        
+        <h2>Updated Issues</h2>
+        <table>
+            <tr><th>JIRA Number</th><th>Criticity</th><th>Creation Date</th></tr>
+            {% for issue in updated_issues %}
+                <tr>
+                    <td><a href="https://jira.example.com/browse/{{ issue.jira_number }}">{{ issue.jira_number }}</a></td>
+                    <td>{{ issue.criticity }}</td>
+                    <td>{{ issue.creation_date }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+        
+        <h2>Not Updated Issues</h2>
+        <table>
+            <tr><th>JIRA Number</th><th>Criticity</th><th>Creation Date</th></tr>
+            {% for issue in non_updated_issues %}
+                <tr>
+                    <td><a href="https://jira.example.com/browse/{{ issue.jira_number }}">{{ issue.jira_number }}</a></td>
+                    <td>{{ issue.criticity }}</td>
+                    <td>{{ issue.creation_date }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+        
+        <h2>Deleted Issues</h2>
+        <table>
+            <tr><th>JIRA Number</th><th>Criticity</th><th>Creation Date</th></tr>
+            {% for issue in deleted_issues %}
+                <tr>
+                    <td><a href="https://jira.example.com/browse/{{ issue.jira_number }}">{{ issue.jira_number }}</a></td>
+                    <td>{{ issue.criticity }}</td>
+                    <td>{{ issue.creation_date }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    </body>
+    </html>
+    """
+    tpl = Template(template)
+    return tpl.render(updated_issues=updated_issues, non_updated_issues=non_updated_issues, deleted_issues=deleted_issues)
+
+4. Service to Update Comment on JIRA for Requested Input JIRA NO
+
+This service updates the comment on a JIRA issue using the input jira_number and the comment stored in the PROD or Quality DB.
+
+Route for Service 4
+
+@app.route('/jira/<jira_number>/comment', methods=['POST'])
+def update_jira_comment(jira_number):
+    data = request.get_json()
+    comment = data['comment']
+    
+    # Fetch the existing comment to update from DB (Prod/Quality)
+    comment_to_update = fetch_comment_from_db(jira_number)
+    
+    # Update JIRA comment via JIRA API
+    success = update_jira_comment_on_api(jira_number, comment_to_update)
+    
+    if success:
+        return jsonify({"message": "Comment updated successfully"}), 200
+    else:
+        return jsonify({"error": "Failed to update comment"}), 500
+
+Update JIRA Comment on API (update_jira_comment_on_api)
+
+def update_jira_comment_on_api(jira_number, comment):
+    url = f"{os.getenv('JIRA_API_URL')}/rest/api/2/issue/{jira_number}/comment"
+    headers = {
+        'Authorization': f'Bearer {os.getenv("JIRA_API_TOKEN")}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        "body": comment
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    return response.status_code == 201
+
+5. Service to Update Comment on JIRA Using API Token from Request
+
+This service updates the comment on JIRA using the provided API token in the request.
+
+Route for Service 5
+
+@app.route('/jira/<jira_number>/comment/token', methods=['POST'])
+def update_jira_comment_with_token(jira_number):
+    data = request.get_json()
+    comment = data['comment']
+    api_token = data['api_token']
+    
+    # Update JIRA comment using the API token passed in the request
+    success = update_jira_comment_on_api_with_token(jira_number, comment, api_token)
+    
+    if success:
+        return jsonify({"message": "Comment updated successfully"}), 200
+    else:
+        return jsonify({"error": "Failed to update comment"}), 500
+
+Update JIRA Comment on API with Token (update_jira_comment_on_api_with_token)
+
+def update_jira_comment_on_api_with_token(jira_number, comment, api_token):
+    url = f"{os.getenv('JIRA_API_URL')}/rest/api/2/issue/{jira_number}/comment"
+    headers = {
+        'Authorization': f'Bearer {api_token}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        "body": comment
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    return response.status_code == 201
+
+Summary of Services:
+	1.	Fetch individual JIRA details and present as an HTML file.
+	2.	Fetch a list of JIRAs from a filter and present as an HTML table.
+	3.	Sync JIRAs to the DB (Prod or Quality) and return the result as an HTML page with the status (inserted, updated, or deleted).
+	4.	Update JIRA comment using the comment from the respective DB (Prod/Quality).
+	5.	Update JIRA comment using the API token passed dynamically in the request.
+
+Let me know if you need further assistance with implementing or testing these services!
+
+=#=#=#
+
 To implement this system, we can break it down into several components, including a Flask API service, database operations, JIRA API integration, and Kubernetes deployment. Below is the structure and detailed code for the Python module and configuration.
 
 1. Project Structure
