@@ -1,4 +1,207 @@
+Here is the complete implementation of the /sync endpoint along with all the dependent functions, including the necessary operations to sync JIRA issues to the database, generate the HTML report, and return it as a downloadable file.
 
+Complete Code for /sync Endpoint and Dependencies
+
+import os
+from flask import Flask, request, jsonify, send_file, current_app
+from flask_sqlalchemy import SQLAlchemy
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+app = Flask(__name__)
+app.config.from_pyfile('.env')  # Load config from .env file
+db = SQLAlchemy(app)
+
+# Assuming you have models for prod and quality environments
+class JiraIssue(db.Model):
+    __tablename__ = 'jira_issues'
+    id = db.Column(db.Integer, primary_key=True)
+    jira_number = db.Column(db.String(50), nullable=False)
+    status = db.Column(db.String(50))
+    summary = db.Column(db.String(255))
+    job_number = db.Column(db.String(50))
+    criticity = db.Column(db.String(50))
+    description = db.Column(db.String(255))
+    creation_date = db.Column(db.DateTime)
+    comments = db.Column(db.Text)
+    first_comment = db.Column(db.Text)
+    last_comment = db.Column(db.Text)
+    update_comment = db.Column(db.Text)
+    update_status = db.Column(db.String(50))
+
+# Helper functions
+def extract_job_number(summary):
+    """Extract job number from summary using regex."""
+    import re
+    match = re.search(r'(P01|Q01)\d+', summary)
+    return match.group(0) if match else None
+
+def categorize_issues(issues_from_jira):
+    """Categorize issues into Prod and Quality based on job number."""
+    prod_issues = []
+    quality_issues = []
+
+    for issue in issues_from_jira:
+        job_number = extract_job_number(issue["fields"]["summary"])
+        if job_number and job_number.startswith("P01"):
+            prod_issues.append(issue)
+        elif job_number and job_number.startswith("Q01"):
+            quality_issues.append(issue)
+
+    return prod_issues, quality_issues
+
+def sync_issues_to_environment(issues, environment):
+    """Synchronize issues to the database for the given environment."""
+    session = db.session  # Connect to the appropriate environment session
+    for issue in issues:
+        job_number = extract_job_number(issue["fields"]["summary"])
+        existing_issue = JiraIssue.query.filter_by(jira_number=issue["key"]).first()
+
+        if existing_issue:
+            # Update existing record
+            existing_issue.status = issue["fields"]["status"]["name"]
+            existing_issue.summary = issue["fields"]["summary"]
+            existing_issue.criticity = issue["fields"]["priority"]["name"]
+            existing_issue.description = issue["fields"]["description"]
+            existing_issue.creation_date = issue["fields"]["created"]
+            existing_issue.comments = issue["fields"]["comment"]["comments"]
+            # Assume first and last comment are the first and last in the list
+            if issue["fields"]["comment"]["comments"]:
+                existing_issue.first_comment = issue["fields"]["comment"]["comments"][0]["body"]
+                existing_issue.last_comment = issue["fields"]["comment"]["comments"][-1]["body"]
+            existing_issue.job_number = job_number
+        else:
+            # Insert new record
+            new_issue = JiraIssue(
+                jira_number=issue["key"],
+                status=issue["fields"]["status"]["name"],
+                summary=issue["fields"]["summary"],
+                criticity=issue["fields"]["priority"]["name"],
+                description=issue["fields"]["description"],
+                creation_date=issue["fields"]["created"],
+                comments=issue["fields"]["comment"]["comments"],
+                first_comment=issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else None,
+                last_comment=issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else None,
+                job_number=job_number
+            )
+            session.add(new_issue)
+        
+        session.commit()
+
+def generate_html(prod_issues, quality_issues):
+    """Generate HTML content for the result."""
+    html = "<html><body>"
+    
+    # Prod Issues
+    if prod_issues:
+        html += "<h2>Updated Successfully to Prod Environment</h2>"
+        html += "<table border='1'><tr><th>JIRA</th><th>Job Number</th><th>Criticity</th><th>Creation Date</th></tr>"
+        for issue in prod_issues:
+            job_number = extract_job_number(issue["fields"]["summary"])
+            html += (
+                f"<tr><td><a href='{issue['self']}'>{issue['key']}</a></td>"
+                f"<td>{job_number}</td>"
+                f"<td>{issue['fields'].get('priority', {}).get('name', 'N/A')}</td>"
+                f"<td>{issue['fields']['created']}</td></tr>"
+            )
+        html += "</table>"
+
+    # Quality Issues
+    if quality_issues:
+        html += "<h2>Updated Successfully to Quality Environment</h2>"
+        html += "<table border='1'><tr><th>JIRA</th><th>Job Number</th><th>Criticity</th><th>Creation Date</th></tr>"
+        for issue in quality_issues:
+            job_number = extract_job_number(issue["fields"]["summary"])
+            html += (
+                f"<tr><td><a href='{issue['self']}'>{issue['key']}</a></td>"
+                f"<td>{job_number}</td>"
+                f"<td>{issue['fields'].get('priority', {}).get('name', 'N/A')}</td>"
+                f"<td>{issue['fields']['created']}</td></tr>"
+            )
+        html += "</table>"
+
+    html += "</body></html>"
+    return html
+
+@app.route("/sync", methods=["POST"])
+def sync_issues():
+    try:
+        data = request.get_json()
+        filter_id = data["filter_id"]
+
+        # Fetch and sync issues
+        issues_from_jira = jira_api.get_issues(filter_id)
+        prod_issues, quality_issues = categorize_issues(issues_from_jira)
+        sync_issues_to_environment(prod_issues, "prod")
+        sync_issues_to_environment(quality_issues, "quality")
+
+        # Generate HTML content
+        html_content = generate_html(prod_issues, quality_issues)
+        
+        # Write the HTML content to a file
+        output_file = "/tmp/result_list.html"
+        with open(output_file, "w") as file:
+            file.write(html_content)
+
+        # Return the HTML file as a response to the client
+        response = send_file(output_file, as_attachment=True, download_name="Result_list.html")
+        
+        # Delete the file after sending
+        os.remove(output_file)
+
+        return response
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+Explanation of the Code:
+	1.	JiraIssue Model:
+The JiraIssue model represents the structure of your database table where JIRA issues will be stored. It has all necessary fields like jira_number, status, summary, etc.
+	2.	Helper Functions:
+	•	extract_job_number: This function extracts the job number from the JIRA issue summary using regular expressions.
+	•	categorize_issues: This function separates the issues into prod_issues and quality_issues based on the job number extracted from the summary.
+	•	sync_issues_to_environment: This function synchronizes issues to the database. If the issue already exists, it updates the record; otherwise, it inserts a new record.
+	3.	Generate HTML:
+	•	The generate_html function builds an HTML report containing tables of JIRA issues categorized into Prod and Quality environments.
+	4.	/sync Endpoint:
+	•	This endpoint fetches JIRA issues using a given filter, categorizes them, syncs them to the database, generates an HTML report, and returns it as a downloadable file (Result_list.html).
+	•	The file is temporarily stored in /tmp/result_list.html and is returned to the user for download.
+	•	After sending the file, the temporary file is deleted to keep the environment clean.
+
+Usage Flow:
+	1.	Sync Issues:
+JIRA issues are fetched, categorized, and synchronized with the database (Prod/Quality).
+	2.	Generate Report:
+An HTML file containing the sync results is generated.
+	3.	Download File:
+The HTML file is returned to the client for download.
+	4.	File Cleanup:
+The temporary file is deleted after it is sent to the user.
+
+Environment Configuration (.env):
+
+SQLALCHEMY_DATABASE_URI=your_database_uri
+SQLALCHEMY_TRACK_MODIFICATIONS=False
+
+Dependencies:
+	1.	Flask for web framework.
+	2.	SQLAlchemy for ORM-based database interaction.
+	3.	smtplib for email sending (if needed for other operations).
+	4.	Regex for extracting job numbers.
+
+Install the necessary dependencies using pip:
+
+pip install flask flask_sqlalchemy
+
+This structure should fulfill your requirements for syncing JIRA issues to the database and returning an HTML report as a downloadable file. Let me know if you need further assistance!
+
+
+
+=#=#
 To ensure synchronization happens with the correct database (Prod or Quality) based on the Job Number in the summary, you can configure separate database connections for Prod and Quality. Depending on the detected Job Number pattern, the application will dynamically switch to the corresponding database.
 
 Implementation Steps
