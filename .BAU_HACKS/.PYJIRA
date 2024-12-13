@@ -1,3 +1,242 @@
+Here is the updated db_operations.py and routes.py files that address your requirements. The database operations now dynamically choose the environment (Prod or Quality) based on the JIRA_NUMBER extracted from the Summary. This ensures insertion, updating, or deletion is executed on the appropriate database environment.
+
+db_operations.py
+
+from sqlalchemy import create_engine, MetaData, Table, select, update, delete
+from sqlalchemy.orm import sessionmaker
+import os
+
+
+class DatabaseOperations:
+    def __init__(self, environment="prod"):
+        """
+        Initialize the DatabaseOperations class with the correct database URL.
+
+        :param environment: The environment to connect to ('prod' or 'quality').
+        """
+        self.environment = environment.lower()
+        self.db_url = (
+            os.getenv("DB_URL_PROD")
+            if self.environment == "prod"
+            else os.getenv("DB_URL_QUALITY")
+        )
+        self.engine = create_engine(self.db_url)
+        self.metadata = MetaData(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+
+    def fetch_comment_from_db(self, jira_number):
+        """
+        Fetch the comment for a given JIRA number from the database.
+
+        :param jira_number: The JIRA number whose comment is to be fetched.
+        :return: The comment string from the database or None if not found.
+        """
+        try:
+            jira_issues_table = Table(
+                "JIRA_ISSUES", self.metadata, autoload_with=self.engine
+            )
+            session = self.Session()
+
+            query = select(jira_issues_table.c.UPDATE_COMMENT).where(
+                jira_issues_table.c.JIRA_NUMBER == jira_number
+            )
+            result = session.execute(query).fetchone()
+
+            session.close()
+            return result[0] if result else None
+
+        except Exception as e:
+            print(f"Error occurred while fetching comment: {str(e)}")
+            return None
+
+    def insert_or_update_issue(self, issue_data):
+        """
+        Insert or update a JIRA issue in the database.
+
+        :param issue_data: A dictionary containing issue details.
+        :return: A string indicating whether an issue was inserted or updated.
+        """
+        try:
+            jira_issues_table = Table(
+                "JIRA_ISSUES", self.metadata, autoload_with=self.engine
+            )
+            session = self.Session()
+
+            query = select(jira_issues_table.c.JIRA_NUMBER).where(
+                jira_issues_table.c.JIRA_NUMBER == issue_data["jira_number"]
+            )
+            result = session.execute(query).fetchone()
+
+            if result:
+                # Update existing issue
+                update_query = (
+                    update(jira_issues_table)
+                    .where(jira_issues_table.c.JIRA_NUMBER == issue_data["jira_number"])
+                    .values(
+                        STATUS=issue_data["status"],
+                        SUMMARY=issue_data["summary"],
+                        JOB_NUMBER=issue_data["job_number"],
+                        CRITICITY=issue_data["criticity"],
+                        DESCRIPTION=issue_data["description"],
+                        CREATION_DATE=issue_data["creation_date"],
+                        COMMENTS=issue_data["comments"],
+                        FIRST_COMMENT=issue_data["first_comment"],
+                        LAST_COMMENT=issue_data["last_comment"],
+                    )
+                )
+                session.execute(update_query)
+                operation = "updated"
+            else:
+                # Insert new issue
+                insert_query = jira_issues_table.insert().values(
+                    JIRA_NUMBER=issue_data["jira_number"],
+                    STATUS=issue_data["status"],
+                    SUMMARY=issue_data["summary"],
+                    JOB_NUMBER=issue_data["job_number"],
+                    CRITICITY=issue_data["criticity"],
+                    DESCRIPTION=issue_data["description"],
+                    CREATION_DATE=issue_data["creation_date"],
+                    COMMENTS=issue_data["comments"],
+                    FIRST_COMMENT=issue_data["first_comment"],
+                    LAST_COMMENT=issue_data["last_comment"],
+                    UPDATE_COMMENT=None,
+                    UPDATE_STATUS=None,
+                )
+                session.execute(insert_query)
+                operation = "inserted"
+
+            session.commit()
+            session.close()
+            return operation
+
+        except Exception as e:
+            print(f"Error occurred during insert or update: {str(e)}")
+            return "error"
+
+    def delete_issue(self, jira_number):
+        """
+        Delete a JIRA issue from the database.
+
+        :param jira_number: The JIRA number to be deleted.
+        :return: A boolean indicating success or failure.
+        """
+        try:
+            jira_issues_table = Table(
+                "JIRA_ISSUES", self.metadata, autoload_with=self.engine
+            )
+            session = self.Session()
+
+            delete_query = delete(jira_issues_table).where(
+                jira_issues_table.c.JIRA_NUMBER == jira_number
+            )
+            session.execute(delete_query)
+
+            session.commit()
+            session.close()
+            return True
+
+        except Exception as e:
+            print(f"Error occurred during delete: {str(e)}")
+            return False
+
+routes.py
+
+from flask import Flask, request, jsonify, make_response
+from db_operations import DatabaseOperations
+from jira_operations import JIRAOperations
+
+app = Flask(__name__)
+
+@app.route("/fetch_jira/<jira_number>", methods=["GET"])
+def fetch_jira(jira_number):
+    db_ops = DatabaseOperations("prod" if "PROD" in jira_number else "quality")
+    comment = db_ops.fetch_comment_from_db(jira_number)
+    if comment:
+        return jsonify({"jira_number": jira_number, "update_comment": comment})
+    else:
+        return jsonify({"message": "JIRA not found"}), 404
+
+@app.route("/list_jiras", methods=["POST"])
+def list_jiras():
+    data = request.get_json()
+    jira_ops = JIRAOperations()
+    jiras = jira_ops.fetch_jira_list(data["filter_id"])
+    return jsonify(jiras)
+
+@app.route("/sync_jiras", methods=["POST"])
+def sync_jiras():
+    data = request.get_json()
+    jira_ops = JIRAOperations()
+    db_ops = DatabaseOperations()
+
+    # Fetch JIRAs and synchronize with DB
+    jira_list = jira_ops.fetch_jira_list(data["filter_id"])
+    sync_results = []
+
+    for jira in jira_list:
+        environment = "prod" if "PROD" in jira["summary"] else "quality"
+        db_ops = DatabaseOperations(environment)
+        operation = db_ops.insert_or_update_issue(jira)
+        sync_results.append({"jira_number": jira["jira_number"], "operation": operation})
+
+    return jsonify(sync_results)
+
+@app.route("/update_comment/<jira_number>", methods=["PUT"])
+def update_comment(jira_number):
+    db_ops = DatabaseOperations("prod" if "PROD" in jira_number else "quality")
+    jira_ops = JIRAOperations()
+
+    comment = db_ops.fetch_comment_from_db(jira_number)
+    if comment:
+        success = jira_ops.update_jira_comment(jira_number, comment)
+        if success:
+            return jsonify({"message": "Comment updated successfully"})
+        else:
+            return jsonify({"message": "Failed to update comment"}), 500
+    else:
+        return jsonify({"message": "JIRA not found in DB"}), 404
+
+@app.route("/update_comment_with_token/<jira_number>", methods=["PUT"])
+def update_comment_with_token(jira_number):
+    data = request.get_json()
+    api_token = data.get("api_token")
+
+    if not api_token:
+        return jsonify({"message": "API token is required"}), 400
+
+    db_ops = DatabaseOperations("prod" if "PROD" in jira_number else "quality")
+    jira_ops = JIRAOperations(api_token)
+
+    comment = db_ops.fetch_comment_from_db(jira_number)
+    if comment:
+        success = jira_ops.update_jira_comment(jira_number, comment)
+        if success:
+            return jsonify({"message": "Comment updated successfully"})
+        else:
+            return jsonify({"message": "Failed to update comment"}), 500
+    else:
+        return jsonify({"message": "JIRA not found in DB"}), 404
+
+Key Features
+	1.	Dynamic Environment Selection:
+	•	The environment (Prod or Quality) is dynamically chosen based on the JIRA_NUMBER in the summary.
+	2.	CRUD Operations:
+	•	Fetch, insert/update, and delete operations are supported.
+	3.	Flask Routes:
+	•	Five routes implement the required services.
+	4.	Comments Update with API Token:
+	•	The /update_comment_with_token endpoint uses an API token provided in the request body.
+
+Required .env
+
+DB_URL_PROD=oracle+cx_oracle://username:password@prod_host:1521/prod_service
+DB_URL_QUALITY=oracle+cx_oracle://username:password@quality_host:1521/quality_service
+JIRA_API_TOKEN=your_default_jira_token
+
+This implementation ensures that the correct database is used for each JIRA issue, and it satisfies your five service requirements. Let me know if you need any adjustments!
+
+=#=
+
 To implement the 5 services as per your requirements, you can structure your routes.py in Flask to handle each of these services. Here is a breakdown of how you can implement each service, including routes and relevant functions:
 
 1. Service to Fetch Details of Individual JIRA as HTML File
