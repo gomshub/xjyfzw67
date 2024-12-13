@@ -1,3 +1,49 @@
+
+from sqlalchemy import create_engine, MetaData, Table, select
+from sqlalchemy.orm import sessionmaker
+import os
+
+def fetch_comment_from_db(jira_number):
+    """
+    Fetch the comment for a given JIRA number from the database (Prod/Quality) using SQLAlchemy.
+
+    :param jira_number: The JIRA number whose comment is to be fetched.
+    :return: The comment string from the database or None if not found.
+    """
+    try:
+        # Determine the appropriate database connection based on the JIRA number
+        db_url = (
+            os.getenv("DB_URL_PROD") if "PROD" in jira_number else os.getenv("DB_URL_QUALITY")
+        )
+        
+        # Create the database engine
+        engine = create_engine(db_url)
+
+        # Reflect the table structure
+        metadata = MetaData(bind=engine)
+        jira_issues_table = Table("JIRA_ISSUES", metadata, autoload_with=engine)
+
+        # Start a new session
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        # Query the database
+        query = select(jira_issues_table.c.UPDATE_COMMENT).where(
+            jira_issues_table.c.JIRA_NUMBER == jira_number
+        )
+        result = session.execute(query).fetchone()
+
+        # Close the session
+        session.close()
+
+        # Return the comment if found
+        return result[0] if result else None
+
+    except Exception as e:
+        print(f"Error occurred while fetching comment: {str(e)}")
+        return None
+
+=#=#=#
 Here is the updated db_operations.py and routes.py files that address your requirements. The database operations now dynamically choose the environment (Prod or Quality) based on the JIRA_NUMBER extracted from the Summary. This ensures insertion, updating, or deletion is executed on the appropriate database environment.
 
 db_operations.py
