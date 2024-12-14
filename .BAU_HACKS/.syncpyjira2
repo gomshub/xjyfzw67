@@ -1,3 +1,260 @@
+Below are the required HTML templates for rendering JIRA data into tables, as per your services. These templates use Jinja2 templating and are dynamic to accommodate different inputs.
+
+1. Template: templates/individual_jira.html
+
+For Service 1, which fetches details of an individual JIRA:
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JIRA Details</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>JIRA Details</h1>
+    <table>
+        <tr>
+            <th>Field</th>
+            <th>Value</th>
+        </tr>
+        <tr>
+            <td>JIRA Number</td>
+            <td>{{ jira_number }}</td>
+        </tr>
+        <tr>
+            <td>Status</td>
+            <td>{{ status }}</td>
+        </tr>
+        <tr>
+            <td>Summary</td>
+            <td>{{ summary }}</td>
+        </tr>
+        <tr>
+            <td>Job Number</td>
+            <td>{{ job_number }}</td>
+        </tr>
+        <tr>
+            <td>Criticity</td>
+            <td>{{ criticity }}</td>
+        </tr>
+        <tr>
+            <td>Description</td>
+            <td>{{ description }}</td>
+        </tr>
+        <tr>
+            <td>Creation Date</td>
+            <td>{{ creation_date }}</td>
+        </tr>
+        <tr>
+            <td>Comments</td>
+            <td>{{ comments }}</td>
+        </tr>
+        <tr>
+            <td>First Comment</td>
+            <td>{{ first_comment }}</td>
+        </tr>
+        <tr>
+            <td>Last Comment</td>
+            <td>{{ last_comment }}</td>
+        </tr>
+    </table>
+</body>
+</html>
+
+2. Template: templates/list_jiras.html
+
+For Service 2, which fetches a list of JIRAs as a table:
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>List of JIRAs</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>List of JIRAs</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Status</th>
+                <th>Summary</th>
+                <th>Criticity</th>
+                <th>Creation Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for jira in jiras %}
+            <tr>
+                <td><a href="{{ jira.jira_url }}">{{ jira.jira_number }}</a></td>
+                <td>{{ jira.status }}</td>
+                <td>{{ jira.summary }}</td>
+                <td>{{ jira.criticity }}</td>
+                <td>{{ jira.creation_date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
+
+3. Template: templates/sync_results.html
+
+For Service 3, which syncs data and returns the result as an HTML file:
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sync Results</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>Sync Results</h1>
+    
+    <h2>Updated Successfully to Respective Environment</h2>
+    {% if updated %}
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Job Number</th>
+                <th>Criticity</th>
+                <th>Creation Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for jira in updated %}
+            <tr>
+                <td><a href="{{ jira.jira_url }}">{{ jira.jira_number }}</a></td>
+                <td>{{ jira.job_number }}</td>
+                <td>{{ jira.criticity }}</td>
+                <td>{{ jira.creation_date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No JIRAs were updated.</p>
+    {% endif %}
+
+    <h2>Not Updated into DB</h2>
+    {% if not_updated %}
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Criticity</th>
+                <th>Creation Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for jira in not_updated %}
+            <tr>
+                <td><a href="{{ jira.jira_url }}">{{ jira.jira_number }}</a></td>
+                <td>{{ jira.criticity }}</td>
+                <td>{{ jira.creation_date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>All JIRAs were updated.</p>
+    {% endif %}
+</body>
+</html>
+
+4. Template: templates/update_comment.html
+
+For Services 4 & 5, which updates comments on JIRA:
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JIRA Comment Update</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>JIRA Comment Update</h1>
+    <table>
+        <tr>
+            <th>JIRA Number</th>
+            <td><a href="{{ jira_url }}">{{ jira_number }}</a></td>
+        </tr>
+        <tr>
+            <th>Status</th>
+            <td>{{ status }}</td>
+        </tr>
+        <tr>
+            <th>Comment Updated</th>
+            <td>{{ updated_comment }}</td>
+        </tr>
+    </table>
+</body>
+</html>
+
+How Templates Work with Services
+	•	Data is dynamically rendered into templates using Jinja2.
+	•	Templates are populated with dictionary values (e.g., jiras, jira_number, updated_comment) passed from the Flask service.
+
+Would you like me to integrate these into the project structure with route examples?
+=#=#
+
 Here is the complete project structure with detailed implementation, including Kubernetes secrets, configurations, local .env files for development, test routes, and a Dockerized setup. It provides all the requested components with explanations and configurations for production and local environments.
 
 Project Structure
