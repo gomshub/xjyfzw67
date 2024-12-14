@@ -1,3 +1,145 @@
+To ensure your Flask application runs smoothly in both local and production environments, it’s common to configure Gunicorn through a Python configuration file (gunicorn.py), and integrate it properly with the wsgi.py and app.py (or routes.py).
+
+Below are the steps to set up a gunicorn.py configuration in the config/ directory, update wsgi.py to use the configuration, and ensure Flask runs correctly.
+
+1. gunicorn.py (in config/ directory)
+
+This configuration file will allow you to define Gunicorn settings, such as the number of worker processes, logging configuration, and more.
+
+# config/gunicorn.py
+
+import multiprocessing
+
+# Gunicorn configuration
+bind = "0.0.0.0:8000"  # Binding to host and port
+workers = multiprocessing.cpu_count() * 2 + 1  # Number of worker processes based on CPU cores
+worker_class = 'sync'  # Sync worker class (others: gevent, eventlet, etc.)
+accesslog = '-'  # Log access requests to stdout
+errorlog = '-'  # Log error messages to stdout
+loglevel = 'info'  # Log level
+timeout = 30  # Worker timeout in seconds
+
+Explanation:
+	•	bind: Specifies the host and port that Gunicorn will listen on (default is 8000).
+	•	workers: Sets the number of worker processes based on the CPU cores (adjusted dynamically).
+	•	worker_class: The type of worker to use (in this case, we use sync, which is the default).
+	•	accesslog and errorlog: Logs to stdout to see logs easily in containers or cloud environments.
+	•	loglevel: Sets the level of logging.
+	•	timeout: Defines the timeout in seconds for workers.
+
+2. wsgi.py (Updated for Gunicorn)
+
+In wsgi.py, we don’t need to specify the configuration file directly. Gunicorn will automatically use the gunicorn.py file if it’s in the correct directory.
+
+Here’s the updated version of wsgi.py:
+
+# wsgi.py
+
+from app import app  # Importing Flask app from app.py or routes.py
+
+# This will start the Flask application with WSGI, for deployment purposes.
+if __name__ == "__main__":
+    app.run(debug=True)  # Running Flask app directly for local development
+
+3. Modify app.py (or routes.py) for Proper Flask Entry Point
+
+If you’re using app.py (or routes.py) as the main entry point, ensure that the application object is initialized properly. Here’s an example of what app.py might look like:
+
+# app.py (or routes.py)
+
+from flask import Flask
+
+# Initialize the Flask app
+app = Flask(__name__)
+
+@app.route('/')
+def hello_world():
+    return 'Hello, World!'
+
+# Any additional routes or logic would be added here
+
+4. Running Flask with Gunicorn
+
+Development:
+
+For local development, you can still run the application using Flask’s built-in server (for quick testing). Use:
+
+python wsgi.py
+
+This will use the Flask server for local development. However, for production environments, you should use Gunicorn to handle requests efficiently.
+
+Production (Gunicorn):
+
+For production (e.g., Kubernetes, Docker, or direct server deployment), run the app using Gunicorn with the following command:
+
+gunicorn --config config/gunicorn.py wsgi:app
+
+This command tells Gunicorn to:
+	•	Use the gunicorn.py configuration file (--config config/gunicorn.py).
+	•	Run the Flask app defined in wsgi.py (wsgi:app).
+
+5. Docker Integration (Optional)
+
+If you’re using Docker for deployment, ensure that Gunicorn is installed and properly configured in your Dockerfile:
+
+# Dockerfile
+
+FROM python:3.9-slim
+
+# Set work directory
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Expose port 8000
+EXPOSE 8000
+
+# Run the application with Gunicorn
+CMD ["gunicorn", "--config", "config/gunicorn.py", "wsgi:app"]
+
+This Dockerfile does the following:
+	•	Installs Python dependencies from requirements.txt.
+	•	Copies your app code into the container.
+	•	Runs Gunicorn using the configuration from config/gunicorn.py to start the application.
+
+6. Final Directory Structure
+
+With the new gunicorn.py, wsgi.py, and Dockerfile updates, your project directory should now look like this:
+
+/your-flask-app
+│
+├── app.py (or routes.py)           # Flask application logic
+├── wsgi.py                         # WSGI entry point for Gunicorn
+├── config/
+│   ├── settings.py                 # Configuration (e.g., DB settings)
+│   ├── gunicorn.py                 # Gunicorn configuration
+├── db_operations.py                # DB operations
+├── jira_operations.py              # Jira operations
+├── template_renderer.py            # Template rendering utility
+├── requirements.txt                # Python dependencies
+├── templates/                      # Jinja templates
+│   ├── individual_jira.html
+│   ├── list_jiras.html
+│   ├── sync_results.html
+│   ├── update_comment.html
+├── static/                         # Static files (e.g., CSS, JS, images)
+├── .env                            # Environment variables (e.g., DB passwords, API keys)
+├── Dockerfile                      # Dockerfile for containerization
+└── helm-chart/                     # Kubernetes Helm chart for deployment
+
+7. Final Steps
+	1.	Test Locally: You can run the application locally using Flask (via python wsgi.py), or directly using Gunicorn (gunicorn --config config/gunicorn.py wsgi:app).
+	2.	Deploy to Production: Use Gunicorn and Kubernetes (or Docker) for production environments to serve your Flask app.
+	3.	Update .env: Make sure sensitive data like database credentials and API tokens are stored in the .env file and accessed using environment variables.
+
+With this setup, your Flask application will be properly configured for both local development and production environments, with Gunicorn managing the app’s performance.
+=#=##
+
 To simplify the use of templates and promote reusability, we can create a utility module to manage the rendering of templates dynamically. This module will handle the data binding with Jinja templates and return the rendered HTML content to be served by the routes.
 
 New Utility Module: template_renderer.py
