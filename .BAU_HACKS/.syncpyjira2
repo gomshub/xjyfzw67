@@ -1,3 +1,58 @@
+
+To create a conda environment and install the dependencies from requirements.txt, follow these steps:
+
+1. Create Conda Environment
+	1.	Open your terminal (or Anaconda Prompt if you are on Windows).
+	2.	Navigate to your project directory (where requirements.txt is located).
+	3.	Run the following command to create a new Conda environment with a specified Python version (e.g., Python 3.9):
+
+conda create --name my_flask_app python=3.9
+
+This will create a Conda environment named my_flask_app. You can replace my_flask_app with any name you prefer.
+
+2. Activate the Environment
+
+Activate the newly created environment:
+
+conda activate my_flask_app
+
+You should now be in the my_flask_app Conda environment.
+
+3. Install Dependencies from requirements.txt
+
+Once the environment is activated, install the dependencies from requirements.txt by running:
+
+pip install -r requirements.txt
+
+This will install all the required packages specified in your requirements.txt file.
+
+4. Verify Installation
+
+After installation, you can verify that the packages are correctly installed by running:
+
+pip list
+
+This will display a list of installed packages and their versions.
+
+5. Deactivate the Environment
+
+Once you’re done working in the environment, you can deactivate it by running:
+
+conda deactivate
+
+This will return you to the base environment or your previous shell environment.
+
+Optional: Create requirements.txt
+
+If you don’t have a requirements.txt file yet and need to generate one for your project, run the following command while the Conda environment is activated:
+
+pip freeze > requirements.txt
+
+This will create a requirements.txt file that lists all installed packages and their versions in your Conda environment. You can then use this file to share dependencies with others.
+
+Now your Conda environment is set up with the dependencies from requirements.txt!
+
+=##
 You’re right to point out that settings.py in the config/ directory hasn’t been explicitly referenced in the provided code or architecture. In Flask, a settings.py file is typically used to manage application configurations (like database credentials, API keys, etc.) in a clean and centralized manner.
 
 Here’s how you can use settings.py in your Flask application:
