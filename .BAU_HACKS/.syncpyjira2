@@ -1,3 +1,164 @@
+You’re right to point out that settings.py in the config/ directory hasn’t been explicitly referenced in the provided code or architecture. In Flask, a settings.py file is typically used to manage application configurations (like database credentials, API keys, etc.) in a clean and centralized manner.
+
+Here’s how you can use settings.py in your Flask application:
+
+1. Create settings.py in the config/ directory
+
+You can store configuration values such as database URLs, environment-specific settings, API tokens, etc., in settings.py. Here’s an example:
+
+# config/settings.py
+
+import os
+
+# Environment-specific settings
+class Config:
+    # General settings
+    SECRET_KEY = os.getenv('SECRET_KEY', 'your-default-secret-key')
+
+    # Database settings (example: Oracle DB)
+    DB_USER = os.getenv('DB_USER', 'your-db-user')
+    DB_PASSWORD = os.getenv('DB_PASSWORD', 'your-db-password')
+    DB_HOST = os.getenv('DB_HOST', 'localhost')
+    DB_PORT = os.getenv('DB_PORT', 1521)  # Default Oracle port
+    DB_NAME = os.getenv('DB_NAME', 'your-db-name')
+
+    # API tokens and keys
+    JIRA_API_TOKEN = os.getenv('JIRA_API_TOKEN', 'your-jira-api-token')
+    JIRA_BASE_URL = os.getenv('JIRA_BASE_URL', 'https://your-jira-instance.com')
+
+    # Environment-specific settings (e.g., Prod, Quality, or Dev)
+    ENV = os.getenv('FLASK_ENV', 'development')  # Default to development
+    DEBUG = ENV == 'development'
+
+
+class DevelopmentConfig(Config):
+    DEBUG = True
+
+
+class ProductionConfig(Config):
+    DEBUG = False
+
+
+class TestingConfig(Config):
+    TESTING = True
+
+Explanation:
+	•	Config class: Contains general settings that are applicable across all environments (e.g., secret keys, database connection details).
+	•	Environment-specific classes: DevelopmentConfig, ProductionConfig, and TestingConfig inherit from Config and adjust settings like DEBUG, TESTING, etc., depending on the environment.
+	•	os.getenv(): Fetches environment variables, providing a flexible way to configure your app for different environments (local development, production, etc.).
+
+2. Use settings.py in the Flask application
+
+In app.py (or routes.py), you can import and apply the configuration classes from settings.py.
+
+Updated app.py (or routes.py) to Use settings.py:
+
+# app.py (or routes.py)
+
+from flask import Flask
+from config.settings import DevelopmentConfig, ProductionConfig
+
+# Initialize Flask app with environment-specific configuration
+app = Flask(__name__)
+
+# Choose which configuration to load based on the environment
+app.config.from_object(DevelopmentConfig if app.env == 'development' else ProductionConfig)
+
+@app.route('/')
+def hello_world():
+    return 'Hello, World!'
+
+# Any additional routes or logic would be added here
+
+Explanation:
+	•	app.config.from_object(): Loads the configuration into the Flask app. The DevelopmentConfig or ProductionConfig class is chosen based on the environment (app.env).
+	•	app.env: This automatically picks the environment Flask is running in. You can also manually set this via an environment variable FLASK_ENV (e.g., FLASK_ENV=development).
+
+3. Update .env for Sensitive Data
+
+Ensure that sensitive data like database credentials and API tokens are stored in environment variables, typically inside a .env file. This file should not be committed to version control (e.g., .gitignore it).
+
+Example .env file:
+
+# .env
+SECRET_KEY=supersecretkey
+DB_USER=mydbuser
+DB_PASSWORD=mydbpassword
+DB_HOST=your-db-host
+DB_PORT=1521
+DB_NAME=mydbname
+JIRA_API_TOKEN=my-jira-api-token
+JIRA_BASE_URL=https://your-jira-instance.com
+FLASK_ENV=development
+
+4. Access Configuration in Other Files (e.g., db_operations.py)
+
+You can access the values in settings.py within any other file (e.g., db_operations.py) using app.config.
+
+Example db_operations.py:
+
+# db_operations.py
+
+from app import app
+import cx_Oracle
+
+def get_db_connection():
+    # Use app.config to fetch settings from settings.py
+    db_user = app.config['DB_USER']
+    db_password = app.config['DB_PASSWORD']
+    db_host = app.config['DB_HOST']
+    db_port = app.config['DB_PORT']
+    db_name = app.config['DB_NAME']
+    
+    # Connect to Oracle DB using cx_Oracle
+    connection_str = f"{db_user}/{db_password}@{db_host}:{db_port}/{db_name}"
+    connection = cx_Oracle.connect(connection_str)
+    
+    return connection
+
+5. Final Directory Structure with settings.py
+
+Now your project structure will look like this:
+
+/your-flask-app
+│
+├── app.py (or routes.py)           # Flask application logic
+├── wsgi.py                         # WSGI entry point for Gunicorn
+├── config/
+│   ├── settings.py                 # Configuration (e.g., DB settings, API tokens)
+│   ├── gunicorn.py                 # Gunicorn configuration
+├── db_operations.py                # DB operations using app.config
+├── jira_operations.py              # Jira operations
+├── template_renderer.py            # Template rendering utility
+├── requirements.txt                # Python dependencies
+├── templates/                      # Jinja templates
+│   ├── individual_jira.html
+│   ├── list_jiras.html
+│   ├── sync_results.html
+│   ├── update_comment.html
+├── static/                         # Static files (e.g., CSS, JS, images)
+├── .env                            # Environment variables (e.g., DB passwords, API keys)
+├── Dockerfile                      # Dockerfile for containerization
+└── helm-chart/                     # Kubernetes Helm chart for deployment
+
+6. Running the Application
+	•	Local Development: Make sure you have the correct environment variables set in .env or your local environment (e.g., FLASK_ENV=development). Then you can run the app using:
+
+python wsgi.py  # Starts Flask server in development mode
+
+
+	•	Production with Gunicorn: Run the app with Gunicorn using the following command:
+
+gunicorn --config config/gunicorn.py wsgi:app  # Runs Gunicorn with the app
+
+Conclusion
+
+By following this setup:
+	•	settings.py centralizes all your configuration and environment-specific settings.
+	•	Flask reads from this configuration in both development and production environments.
+	•	Sensitive data is managed securely via the .env file.
+
+=#=#=
 To ensure your Flask application runs smoothly in both local and production environments, it’s common to configure Gunicorn through a Python configuration file (gunicorn.py), and integrate it properly with the wsgi.py and app.py (or routes.py).
 
 Below are the steps to set up a gunicorn.py configuration in the config/ directory, update wsgi.py to use the configuration, and ensure Flask runs correctly.
