@@ -1,4 +1,210 @@
 
+Here’s the complete updated db_operations.py using the oracledb library. The code is tailored for the requirements you provided, including connection handling for both Prod and Quality environments based on the Oracle Database URLs.
+
+Updated db_operations.py
+
+import oracledb
+from settings import DB_CONFIG
+
+class DBOperations:
+    """
+    Handles database operations for the project.
+    Supports Oracle Database connections using oracledb.
+    """
+
+    def __init__(self, environment):
+        """
+        Initialize the DBOperations class with the appropriate environment.
+
+        :param environment: "prod" or "quality" to determine the database configuration.
+        """
+        if environment not in DB_CONFIG:
+            raise ValueError("Invalid environment! Choose either 'prod' or 'quality'.")
+        
+        self.db_config = DB_CONFIG[environment]
+
+    def __enter__(self):
+        """
+        Establishes the database connection using a context manager.
+        """
+        try:
+            self.connection = oracledb.connect(
+                user=self.db_config["user"],
+                password=self.db_config["password"],
+                dsn=self.db_config["dsn"],
+                encoding="UTF-8"
+            )
+            self.cursor = self.connection.cursor()
+            return self
+        except oracledb.DatabaseError as e:
+            raise Exception(f"Database connection error: {e}")
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Ensures the connection is closed when exiting the context.
+        """
+        if hasattr(self, "cursor") and self.cursor:
+            self.cursor.close()
+        if hasattr(self, "connection") and self.connection:
+            self.connection.close()
+
+    def fetch_all(self, query, params=None):
+        """
+        Fetches all rows for the given query.
+
+        :param query: SQL query string.
+        :param params: Parameters for the query.
+        :return: List of rows.
+        """
+        self.cursor.execute(query, params or {})
+        return self.cursor.fetchall()
+
+    def execute(self, query, params=None):
+        """
+        Executes a single SQL query.
+
+        :param query: SQL query string.
+        :param params: Parameters for the query.
+        """
+        self.cursor.execute(query, params or {})
+
+    def commit(self):
+        """
+        Commits the current transaction.
+        """
+        self.connection.commit()
+
+    def fetch_jira_records(self, jira_number):
+        """
+        Fetch JIRA records by JIRA number.
+
+        :param jira_number: JIRA number to search for.
+        :return: Fetched record.
+        """
+        query = """
+        SELECT JIRA_NO, STATUS, SUMMARY, JOB_NUMBER, CRITICITY, DESCRIPTION,
+               CREATION_DATE, COMMENTS, FIRST_COMMENT, LAST_COMMENT, UPDATE_COMMENT, UPDATE_STATUS
+        FROM jira_table
+        WHERE JIRA_NO = :jira_number
+        """
+        return self.fetch_all(query, {"jira_number": jira_number})
+
+    def sync_jira_data(self, jira_data):
+        """
+        Synchronize JIRA data with the database. Handles insert, update, and delete operations.
+
+        :param jira_data: List of JIRA dictionaries containing data to sync.
+        """
+        for jira in jira_data:
+            # Extract job_number and determine if it's for 'prod' or 'quality'
+            job_number = jira.get("job_number")
+            if not job_number:
+                # Skip syncing for JIRA records without job_number
+                continue
+
+            # Check if the JIRA record already exists
+            existing_record = self.fetch_jira_records(jira["jira_no"])
+            if existing_record:
+                # Update the existing record
+                update_query = """
+                UPDATE jira_table
+                SET STATUS = :status,
+                    SUMMARY = :summary,
+                    JOB_NUMBER = :job_number,
+                    CRITICITY = :criticity,
+                    DESCRIPTION = :description,
+                    CREATION_DATE = :creation_date,
+                    COMMENTS = :comments,
+                    FIRST_COMMENT = :first_comment,
+                    LAST_COMMENT = :last_comment,
+                    UPDATE_STATUS = :update_status
+                WHERE JIRA_NO = :jira_no
+                """
+                self.execute(update_query, jira)
+            else:
+                # Insert new JIRA record
+                insert_query = """
+                INSERT INTO jira_table (
+                    JIRA_NO, STATUS, SUMMARY, JOB_NUMBER, CRITICITY, DESCRIPTION,
+                    CREATION_DATE, COMMENTS, FIRST_COMMENT, LAST_COMMENT, UPDATE_STATUS
+                ) VALUES (
+                    :jira_no, :status, :summary, :job_number, :criticity, :description,
+                    :creation_date, :comments, :first_comment, :last_comment, :update_status
+                )
+                """
+                self.execute(insert_query, jira)
+
+        # Commit the transaction
+        self.commit()
+
+Explanation of Key Components
+	1.	Dynamic Environment Handling:
+The class constructor (__init__) takes an environment parameter (prod or quality) to select the correct database configuration from settings.py.
+	2.	Connection Handling:
+	•	Connections are created using context management (__enter__ and __exit__) to ensure proper resource cleanup.
+	•	Supports UTF-8 encoding for compatibility with various Oracle character sets.
+	3.	Fetch and Execute Methods:
+	•	fetch_all: For fetching results from SELECT queries.
+	•	execute: For INSERT, UPDATE, DELETE operations.
+	•	commit: Ensures that database changes are saved.
+	4.	Synchronize Logic:
+The sync_jira_data method:
+	•	Checks if a JIRA record already exists using fetch_jira_records.
+	•	Updates the record if it exists or inserts a new one otherwise.
+	5.	JIRA-Specific Queries:
+	•	Queries are tailored to interact with the jira_table.
+
+Updated settings.py
+
+Ensure settings.py includes database configurations for both prod and quality environments.
+
+DB_CONFIG = {
+    "prod": {
+        "user": "prod_user",
+        "password": "prod_password",
+        "dsn": "prod_db_hostname:1521/prod_service_name"
+    },
+    "quality": {
+        "user": "quality_user",
+        "password": "quality_password",
+        "dsn": "quality_db_hostname:1521/quality_service_name"
+    }
+}
+
+Testing Locally
+	1.	Install oracledb:
+Ensure oracledb is installed in your environment:
+
+pip install oracledb
+
+
+	2.	Test the Sync:
+Create a script to test database synchronization:
+
+from db_operations import DBOperations
+
+sample_jira_data = [
+    {
+        "jira_no": "JIRA-001",
+        "status": "Open",
+        "summary": "Test JIRA",
+        "job_number": "P01-ABC-05",
+        "criticity": "High",
+        "description": "Test Description",
+        "creation_date": "2024-12-14",
+        "comments": "Test Comments",
+        "first_comment": "Initial Comment",
+        "last_comment": "Final Comment",
+        "update_status": None,
+    }
+]
+
+with DBOperations(environment="prod") as db_ops:
+    db_ops.sync_jira_data(sample_jira_data)
+
+Let me know if you’d like additional help!
+
+=#=#
 The error message “Failed to build installable wheels for some pyproject.toml based projects” usually occurs when cx_Oracle (or other dependencies) has issues during the installation process, especially when trying to build from source.
 
 Here are some common causes and potential solutions:
