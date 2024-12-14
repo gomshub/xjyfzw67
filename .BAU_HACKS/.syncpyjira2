@@ -1,4 +1,50 @@
+# Flask web framework
+Flask==2.3.2
 
+# Oracle Database support
+cx_Oracle==8.3.0  # For interacting with Oracle Database
+
+# For querying and interacting with Jira API
+requests==2.31.0  # HTTP requests, including for Jira API
+
+# Jinja templating (included with Flask, but specify for clarity)
+Jinja2==3.1.2
+
+# Gunicorn for serving the Flask app in production
+gunicorn==20.2.1
+
+# For environment variable management
+python-dotenv==1.0.0  # For reading .env files
+
+# SQLAlchemy (if you are migrating from cx_Oracle to full ORM support)
+SQLAlchemy==2.0.7
+
+# Flask-SQLAlchemy for Flask and SQLAlchemy integration (optional for ORM)
+Flask-SQLAlchemy==3.0.2
+
+# To manage database migrations, Alembic (optional)
+Flask-Migrate==4.0.0
+
+# For testing
+pytest==7.5.0  # Testing framework for unit tests
+Flask-Testing==0.8.1  # For testing Flask apps
+
+# For template rendering and other utilities
+Jinja2==3.1.2  # Template engine (used within Flask)
+
+# For better debugging during development
+Flask-DebugToolbar==0.11.0
+
+# For Kubernetes API interaction (Helm charts or interacting with Kube)
+kubernetes==25.1.0  # For Kubernetes client API
+
+# Additional utilities (if needed for app utilities)
+pyyaml==6.0  # YAML parsing (often used for Kubernetes)
+
+# Requests for handling JIRA API interaction
+requests_oauthlib==1.3.0  # For OAuth interactions if needed in JIRA
+
+=#=#
 To create a conda environment and install the dependencies from requirements.txt, follow these steps:
 
 1. Create Conda Environment
