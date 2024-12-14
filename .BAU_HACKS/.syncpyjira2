@@ -1,4 +1,229 @@
+Here is the updated implementation of the project. The database environment (prod or quality) is chosen dynamically based on the job_number in the summary. If the summary contains P01, the environment is set to prod, and if it contains Q01, it is set to quality.
 
+db_operations.py
+
+Handles all database interactions using SQLAlchemy.
+
+from sqlalchemy import create_engine, MetaData, Table, Column, String, DateTime, Text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
+from settings import DB_CONFIG
+
+
+class DBOperations:
+    """
+    Handles database operations for JIRA synchronization using SQLAlchemy.
+    """
+
+    def __init__(self, environment):
+        """
+        Initialize DBOperations for the given environment.
+
+        :param environment: 'prod' or 'quality'
+        """
+        if environment not in DB_CONFIG:
+            raise ValueError("Invalid environment! Choose either 'prod' or 'quality'.")
+
+        self.db_url = DB_CONFIG[environment]["url"]
+        self.engine = create_engine(self.db_url, echo=False)
+        self.metadata = MetaData(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+
+        self.jira_table = Table(
+            "jira_table",
+            self.metadata,
+            autoload_with=self.engine,
+        )
+
+    def fetch_jira_record(self, jira_no):
+        """
+        Fetch a single JIRA record from the database.
+        """
+        try:
+            with self.Session() as session:
+                select_query = self.jira_table.select().where(self.jira_table.c.jira_no == jira_no)
+                result = session.execute(select_query).fetchone()
+                return dict(result) if result else None
+        except SQLAlchemyError as e:
+            raise Exception(f"Error fetching JIRA record: {e}")
+
+    def fetch_all_jira_records(self):
+        """
+        Fetch all JIRA records from the database.
+        """
+        try:
+            with self.Session() as session:
+                select_query = self.jira_table.select()
+                results = session.execute(select_query).fetchall()
+                return [dict(row) for row in results]
+        except SQLAlchemyError as e:
+            raise Exception(f"Error fetching JIRA records: {e}")
+
+    def sync_jira_data(self, jira_data_list):
+        """
+        Synchronize JIRA data with the database.
+        """
+        try:
+            with self.Session() as session:
+                for jira_data in jira_data_list:
+                    existing_record = session.execute(
+                        self.jira_table.select().where(self.jira_table.c.jira_no == jira_data["jira_no"])
+                    ).fetchone()
+
+                    if existing_record:
+                        # Update record
+                        update_query = (
+                            self.jira_table.update()
+                            .where(self.jira_table.c.jira_no == jira_data["jira_no"])
+                            .values(**jira_data)
+                        )
+                        session.execute(update_query)
+                    else:
+                        # Insert new record
+                        insert_query = self.jira_table.insert().values(**jira_data)
+                        session.execute(insert_query)
+
+                session.commit()
+        except SQLAlchemyError as e:
+            raise Exception(f"Error syncing JIRA data: {e}")
+
+    def update_comment(self, jira_no, comment):
+        """
+        Update the comment field of a JIRA record in the database.
+        """
+        try:
+            with self.Session() as session:
+                update_query = (
+                    self.jira_table.update()
+                    .where(self.jira_table.c.jira_no == jira_no)
+                    .values(update_comment=comment)
+                )
+                session.execute(update_query)
+                session.commit()
+        except SQLAlchemyError as e:
+            raise Exception(f"Error updating comment: {e}")
+
+template_renderer.py
+
+Handles rendering HTML templates.
+
+from flask import render_template
+
+
+def render_individual_jira(jira_record):
+    """
+    Render an individual JIRA record as HTML.
+    """
+    return render_template("individual_jira.html", jira=jira_record)
+
+
+def render_all_jiras(jira_records):
+    """
+    Render all JIRA records as an HTML table.
+    """
+    return render_template("all_jiras.html", jiras=jira_records)
+
+
+def render_sync_result(updated, not_updated):
+    """
+    Render the results of JIRA data synchronization.
+    """
+    return render_template("sync_result.html", updated=updated, not_updated=not_updated)
+
+routes.py
+
+Implements all 5 services, dynamically selecting the database environment based on the job_number in the summary.
+
+from flask import Flask, request, jsonify
+from db_operations import DBOperations
+from jira_operations import JIRAOperations
+from template_renderer import render_individual_jira, render_all_jiras, render_sync_result
+
+app = Flask(__name__)
+
+
+def determine_environment(summary):
+    """
+    Determine the environment based on the job_number in the summary.
+    """
+    if "P01" in summary:
+        return "prod"
+    elif "Q01" in summary:
+        return "quality"
+    return "prod"  # Default to 'prod'
+
+
+@app.route("/fetch_individual_jira/<string:jira_no>", methods=["GET"])
+def fetch_individual_jira(jira_no):
+    summary = request.args.get("summary", "")
+    environment = determine_environment(summary)
+    db_ops = DBOperations(environment)
+    jira_record = db_ops.fetch_jira_record(jira_no)
+    if jira_record:
+        return render_individual_jira(jira_record)
+    return "JIRA record not found.", 404
+
+
+@app.route("/fetch_all_jiras", methods=["GET"])
+def fetch_all_jiras():
+    summary = request.args.get("summary", "")
+    environment = determine_environment(summary)
+    db_ops = DBOperations(environment)
+    jira_records = db_ops.fetch_all_jira_records()
+    return render_all_jiras(jira_records)
+
+
+@app.route("/sync_jira_data", methods=["POST"])
+def sync_jira_data():
+    summary = request.args.get("summary", "")
+    environment = determine_environment(summary)
+    db_ops = DBOperations(environment)
+    jira_data_list = request.json.get("jira_data", [])
+    db_ops.sync_jira_data(jira_data_list)
+
+    # Example of updated and not updated records (mock data for now)
+    updated, not_updated = [], []  # Replace with real logic if needed
+    return render_sync_result(updated, not_updated)
+
+
+@app.route("/update_jira_comment/<string:jira_no>", methods=["POST"])
+def update_jira_comment(jira_no):
+    summary = request.args.get("summary", "")
+    environment = determine_environment(summary)
+    db_ops = DBOperations(environment)
+    update_comment = request.json.get("update_comment")
+    if not update_comment:
+        return "No comment provided.", 400
+    db_ops.update_comment(jira_no, update_comment)
+    return "Comment updated successfully."
+
+
+@app.route("/update_jira_comment_with_token/<string:jira_no>", methods=["POST"])
+def update_jira_comment_with_token(jira_no):
+    api_token = request.headers.get("Authorization")
+    if not api_token:
+        return "Authorization token missing.", 401
+    jira_ops = JIRAOperations()
+    comment = request.json.get("update_comment")
+    jira_ops.update_jira_comment(jira_no, comment)
+    return "Comment updated successfully."
+
+Explanation
+	1.	Dynamic Environment Selection: The determine_environment function reads the summary to determine the database environment:
+	•	P01 → prod
+	•	Q01 → quality
+	2.	Routing and Services:
+	•	/fetch_individual_jira: Fetches a single JIRA record by jira_no and returns HTML.
+	•	/fetch_all_jiras: Fetches all JIRA records and renders them in an HTML table.
+	•	/sync_jira_data: Accepts JSON data to sync with the database.
+	•	/update_jira_comment: Updates the comment field of a JIRA record in the database.
+	•	/update_jira_comment_with_token: Updates JIRA comments via the JIRA API.
+	3.	HTML Rendering:
+	•	Templates like individual_jira.html, all_jiras.html, and sync_result.html are used to render responses as HTML.
+
+Let me know if you’d like the templates for rendering HTML or additional refinements!
+
+==#
 Here’s the complete updated db_operations.py using the oracledb library. The code is tailored for the requirements you provided, including connection handling for both Prod and Quality environments based on the Oracle Database URLs.
 
 Updated db_operations.py
