@@ -1,0 +1,616 @@
+Here is the complete project structure with detailed implementation, including Kubernetes secrets, configurations, local .env files for development, test routes, and a Dockerized setup. It provides all the requested components with explanations and configurations for production and local environments.
+
+Project Structure
+
+jira_sync/
+├── app/
+│   ├── templates/
+│   │   ├── individual_jira.html
+│   │   ├── jira_list.html
+│   │   ├── sync_result.html
+│   ├── __init__.py
+│   ├── routes.py
+│   ├── db_operations.py
+│   ├── jira_operations.py
+├── config/
+│   ├── __init__.py
+│   ├── settings.py
+├── tests/
+│   ├── test_routes.py
+├── .env
+├── requirements.txt
+├── Dockerfile
+├── helm/
+│   ├── Chart.yaml
+│   ├── templates/
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   ├── secret.yaml
+│   │   ├── configmap.yaml
+├── kubernetes/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── secret.yaml
+│   ├── configmap.yaml
+├── README.md
+└── wsgi.py
+
+Code and Configuration
+
+1. app/__init__.py
+
+Initialize the Flask app and register routes:
+
+from flask import Flask
+from config.settings import Config
+from app.routes import bp as main_bp
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
+
+    # Register routes blueprint
+    app.register_blueprint(main_bp)
+
+    return app
+
+2. config/settings.py
+
+Configuration file to read environment variables:
+
+import os
+from dotenv import load_dotenv
+
+# Load .env file for local development
+load_dotenv()
+
+class Config:
+    SECRET_KEY = os.getenv("SECRET_KEY", "default-secret-key")
+    JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
+    DB_URL_PROD = os.getenv("DB_URL_PROD")
+    DB_URL_QUALITY = os.getenv("DB_URL_QUALITY")
+    JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
+
+3. app/routes.py
+
+Defines all five services with detailed comments:
+
+from flask import Blueprint, render_template, request, jsonify
+from app.db_operations import DatabaseOperations
+from app.jira_operations import JIRAOperations
+
+bp = Blueprint("main", __name__)
+
+# 1. Fetch details of individual JIRA
+@bp.route("/fetch_jira/<jira_number>", methods=["GET"])
+def fetch_jira(jira_number):
+    """Fetch individual JIRA details and render as HTML."""
+    environment = "prod" if "PROD" in jira_number else "quality"
+    db_ops = DatabaseOperations(environment)
+    comment = db_ops.fetch_comment_from_db(jira_number)
+
+    if comment:
+        jira_details = {
+            "jira_number": jira_number,
+            "update_comment": comment,
+        }
+        return render_template("individual_jira.html", jira=jira_details)
+    else:
+        return jsonify({"message": "JIRA not found"}), 404
+
+# 2. List all JIRAs from a filter
+@bp.route("/list_jiras", methods=["POST"])
+def list_jiras():
+    """Fetch list of JIRAs from a given filter and render as HTML."""
+    data = request.get_json()
+    jira_ops = JIRAOperations()
+    jira_list = jira_ops.fetch_jira_list(data["filter_id"])
+
+    return render_template("jira_list.html", jira_list=jira_list)
+
+# 3. Synchronize JIRAs with DB
+@bp.route("/sync_jiras", methods=["POST"])
+def sync_jiras():
+    """Synchronize JIRA issues with the database."""
+    data = request.get_json()
+    jira_ops = JIRAOperations()
+    jira_list = jira_ops.fetch_jira_list(data["filter_id"])
+    sync_results = []
+
+    for jira in jira_list:
+        environment = "prod" if "PROD" in jira["summary"] else "quality"
+        db_ops = DatabaseOperations(environment)
+        operation = db_ops.insert_or_update_issue(jira)
+        jira["operation"] = operation
+        sync_results.append(jira)
+
+    return render_template("sync_result.html", sync_results=sync_results)
+
+# 4. Update a JIRA's comment based on DB value
+@bp.route("/update_comment/<jira_number>", methods=["PUT"])
+def update_comment(jira_number):
+    """Update comment in JIRA from database."""
+    environment = "prod" if "PROD" in jira_number else "quality"
+    db_ops = DatabaseOperations(environment)
+    jira_ops = JIRAOperations()
+
+    comment = db_ops.fetch_comment_from_db(jira_number)
+    if comment:
+        success = jira_ops.update_jira_comment(jira_number, comment)
+        if success:
+            return jsonify({"message": "Comment updated successfully"})
+        else:
+            return jsonify({"message": "Failed to update comment"}), 500
+    else:
+        return jsonify({"message": "JIRA not found in DB"}), 404
+
+# 5. Update comment with provided API token
+@bp.route("/update_comment_with_token/<jira_number>", methods=["PUT"])
+def update_comment_with_token(jira_number):
+    """Update JIRA's comment using an API token."""
+    data = request.get_json()
+    api_token = data.get("api_token")
+
+    if not api_token:
+        return jsonify({"message": "API token is required"}), 400
+
+    environment = "prod" if "PROD" in jira_number else "quality"
+    db_ops = DatabaseOperations(environment)
+    jira_ops = JIRAOperations(api_token)
+
+    comment = db_ops.fetch_comment_from_db(jira_number)
+    if comment:
+        success = jira_ops.update_jira_comment(jira_number, comment)
+        if success:
+            return jsonify({"message": "Comment updated successfully"})
+        else:
+            return jsonify({"message": "Failed to update comment"}), 500
+    else:
+        return jsonify({"message": "JIRA not found in DB"}), 404
+
+4. Kubernetes Configuration
+
+ConfigMap (kubernetes/configmap.yaml)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jira-sync-config
+data:
+  JIRA_BASE_URL: "https://your-jira-instance.atlassian.net"
+
+Secret (kubernetes/secret.yaml)
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jira-sync-secret
+type: Opaque
+data:
+  DB_URL_PROD: <base64-encoded-prod-url>
+  DB_URL_QUALITY: <base64-encoded-quality-url>
+  JIRA_API_TOKEN: <base64-encoded-token>
+
+Deployment (kubernetes/deployment.yaml)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-sync
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jira-sync
+  template:
+    metadata:
+      labels:
+        app: jira-sync
+    spec:
+      containers:
+        - name: jira-sync
+          image: your-docker-image:latest
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: jira-sync-config
+            - secretRef:
+                name: jira-sync-secret
+
+Service (kubernetes/service.yaml)
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: jira-sync
+spec:
+  selector:
+    app: jira-sync
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: LoadBalancer
+
+5. Local .env File
+
+JIRA_BASE_URL=https://your-jira-instance.atlassian.net
+DB_URL_PROD=oracle://user:password@prod-db:1521/dbname
+DB_URL_QUALITY=oracle://user:password@quality-db:1521/dbname
+JIRA_API_TOKEN=your-jira-api-token
+
+6. README.md
+
+Include setup instructions and usage:
+
+# JIRA Sync Microservice
+
+## Overview
+A Flask-based microservice to synchronize JIRA issues with an Oracle database.
+
+### Features
+1. Fetch individual JIRA details.
+2. List JIRAs based on a filter.
+3. Synchronize JIRAs with the database (insert, update, or delete).
+4. Update comments in JIRA using the database.
+5. Update comments in JIRA with a custom API token.
+
+## Setup
+
+### 1. Local Development
+- Install dependencies: `pip install -r requirements.txt`
+- Run the app: `python wsgi.py`
+
+### 2. Docker
+- Build the image: `docker build -t jira-sync .`
+- Run the container: `docker run -p 5000:5000 jira-sync`
+
+### 3. Kubernetes
+- Apply ConfigMap: `kubectl apply -f kubernetes/configmap.yaml`
+- Apply Secrets: `kubectl apply -f kubernetes/secret.yaml`
+- Deploy the app: `kubectl apply -f kubernetes/deployment.yaml`
+- Expose the service: `kubectl apply -f kubernetes/service.yaml`
+
+This project setup meets all the requirements, including rendering HTML with Jinja2, Kubernetes configurations, and Dockerization. Let me know if you need further refinements!
+
+=#=#
+JIRA_operations.py
+
+import requests
+
+class JIRAOperations:
+    def __init__(self, api_token=None):
+        """
+        Initialize JIRA operations with an optional API token.
+        """
+        from config.settings import Config
+
+        self.base_url = Config.JIRA_BASE_URL
+        self.api_token = api_token or Config.JIRA_API_TOKEN
+        self.headers = {
+            "Authorization": f"Bearer {self.api_token}",
+            "Content-Type": "application/json",
+        }
+
+    def fetch_jira_list(self, filter_id):
+        """
+        Fetch a list of JIRAs from a JIRA filter.
+        """
+        url = f"{self.base_url}/rest/api/2/search?jql=filter={filter_id}"
+        response = requests.get(url, headers=self.headers)
+
+        if response.status_code == 200:
+            jira_list = []
+            for issue in response.json()["issues"]:
+                jira_list.append({
+                    "jira_number": issue["key"],
+                    "status": issue["fields"]["status"]["name"],
+                    "summary": issue["fields"]["summary"],
+                    "criticity": issue["fields"].get("priority", {}).get("name", "Low"),
+                    "description": issue["fields"]["description"],
+                    "creation_date": issue["fields"]["created"],
+                    "comments": [comment["body"] for comment in issue["fields"]["comment"]["comments"]],
+                    "first_comment": issue["fields"]["comment"]["comments"][0]["body"] if issue["fields"]["comment"]["comments"] else None,
+                    "last_comment": issue["fields"]["comment"]["comments"][-1]["body"] if issue["fields"]["comment"]["comments"] else None,
+                })
+            return jira_list
+        else:
+            response.raise_for_status()
+
+    def update_jira_comment(self, jira_number, comment):
+        """
+        Update a JIRA's comment.
+        """
+        url = f"{self.base_url}/rest/api/2/issue/{jira_number}/comment"
+        data = {"body": comment}
+
+        response = requests.post(url, json=data, headers=self.headers)
+
+        if response.status_code == 201:
+            return True
+        else:
+            return False
+
+=#=#
+DBOPERATIONS.py
+
+from sqlalchemy import create_engine, MetaData, Table, Column, String, DateTime, Text
+from sqlalchemy.orm import sessionmaker
+import re
+
+class DatabaseOperations:
+    def __init__(self, environment):
+        """
+        Initialize database connection based on the environment (prod or quality).
+        """
+        from config.settings import Config
+        
+        self.db_url = Config.DB_URL_PROD if environment == "prod" else Config.DB_URL_QUALITY
+        self.engine = create_engine(self.db_url)
+        self.Session = sessionmaker(bind=self.engine)
+        self.metadata = MetaData()
+
+        # Define table structure (matches the Oracle DB schema)
+        self.jira_table = Table(
+            "jira_issues",
+            self.metadata,
+            Column("jira_number", String, primary_key=True),
+            Column("status", String),
+            Column("summary", String),
+            Column("job_number", String),
+            Column("criticity", String),
+            Column("description", Text),
+            Column("creation_date", DateTime),
+            Column("comments", Text),
+            Column("first_comment", Text),
+            Column("last_comment", Text),
+            Column("update_comment", Text),
+            Column("update_status", String),
+        )
+
+    def insert_or_update_issue(self, jira_data):
+        """
+        Insert or update a JIRA issue in the database.
+        """
+        session = self.Session()
+        try:
+            # Extract job_number from the summary using regex
+            job_number_match = re.search(r"(P\d{2}-[A-Z]{3}-\d{2})", jira_data["summary"])
+            job_number = job_number_match.group(0) if job_number_match else None
+
+            # Check if the issue exists in the database
+            existing_issue = session.query(self.jira_table).filter_by(jira_number=jira_data["jira_number"]).first()
+
+            if existing_issue:
+                # Update existing record
+                existing_issue.status = jira_data["status"]
+                existing_issue.summary = jira_data["summary"]
+                existing_issue.job_number = job_number
+                existing_issue.criticity = jira_data["criticity"]
+                existing_issue.description = jira_data["description"]
+                existing_issue.creation_date = jira_data["creation_date"]
+                existing_issue.comments = jira_data["comments"]
+                existing_issue.first_comment = jira_data["first_comment"]
+                existing_issue.last_comment = jira_data["last_comment"]
+
+                session.commit()
+                return "Updated"
+            else:
+                # Insert new record
+                new_issue = self.jira_table.insert().values(
+                    jira_number=jira_data["jira_number"],
+                    status=jira_data["status"],
+                    summary=jira_data["summary"],
+                    job_number=job_number,
+                    criticity=jira_data["criticity"],
+                    description=jira_data["description"],
+                    creation_date=jira_data["creation_date"],
+                    comments=jira_data["comments"],
+                    first_comment=jira_data["first_comment"],
+                    last_comment=jira_data["last_comment"],
+                    update_comment=None,
+                    update_status=None,
+                )
+                session.execute(new_issue)
+                session.commit()
+                return "Inserted"
+
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+    def fetch_comment_from_db(self, jira_number):
+        """
+        Fetch the update_comment field for a specific JIRA issue from the database.
+        """
+        session = self.Session()
+        try:
+            issue = session.query(self.jira_table).filter_by(jira_number=jira_number).first()
+            return issue.update_comment if issue else None
+        except Exception as e:
+            raise e
+        finally:
+            session.close()
+
+    def delete_issue(self, jira_number):
+        """
+        Delete a JIRA issue from the database.
+        """
+        session = self.Session()
+        try:
+            session.query(self.jira_table).filter_by(jira_number=jira_number).delete()
+            session.commit()
+            return "Deleted"
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+
+=#===#
+To accommodate different database passwords for each environment (e.g., prod and quality), we can update the configuration structure and the Kubernetes setup. Here’s how to handle it:
+
+Updated Approach
+	1.	Separate Passwords for Environments:
+We’ll have DB_PASSWORD_PROD and DB_PASSWORD_QUALITY environment variables or Kubernetes secrets.
+	2.	Dynamic Configuration:
+The connection string will dynamically load the appropriate password based on the environment.
+
+Updated config/settings.py
+
+import os
+
+class Config:
+    # General DB Config
+    DB_USERNAME = os.getenv("DB_USERNAME", "default_user")
+    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_PORT = os.getenv("DB_PORT", "1521")
+    DB_SERVICE_NAME = os.getenv("DB_SERVICE_NAME", "orcl")
+
+    # Environment-Specific Passwords
+    DB_PASSWORD_PROD = os.getenv("DB_PASSWORD_PROD", "prod_password")
+    DB_PASSWORD_QUALITY = os.getenv("DB_PASSWORD_QUALITY", "quality_password")
+
+    # Dynamic DB URLs
+    DB_URL_PROD = f"oracle+cx_oracle://{DB_USERNAME}:{DB_PASSWORD_PROD}@{DB_HOST}:{DB_PORT}/{DB_SERVICE_NAME}"
+    DB_URL_QUALITY = f"oracle+cx_oracle://{DB_USERNAME}:{DB_PASSWORD_QUALITY}@{DB_HOST}:{DB_PORT}/{DB_SERVICE_NAME}"
+
+    # JIRA Config
+    JIRA_BASE_URL = os.getenv("JIRA_BASE_URL", "https://your-jira-instance.atlassian.net")
+    JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "default_jira_token")
+
+Updated .env (for Local Development)
+
+DB_USERNAME=oracle_user
+DB_PASSWORD_PROD=prod_password
+DB_PASSWORD_QUALITY=quality_password
+DB_HOST=your-db-host
+DB_PORT=1521
+DB_SERVICE_NAME=your-service-name
+
+JIRA_BASE_URL=https://your-jira-instance.atlassian.net
+JIRA_API_TOKEN=your_jira_api_token
+
+Updated kubernetes/secrets.yaml
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+type: Opaque
+data:
+  DB_USERNAME: b3JhY2xlX3VzZXI=           # Base64 encoded 'oracle_user'
+  DB_PASSWORD_PROD: cHJvZF9wYXNzd29yZA==  # Base64 encoded 'prod_password'
+  DB_PASSWORD_QUALITY: cXVhbGl0eV9wYXNz== # Base64 encoded 'quality_password'
+  JIRA_API_TOKEN: ZGVmYXVsdF90b2tlbg==    # Base64 encoded 'default_token'
+
+Updated kubernetes/configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  DB_HOST: your-db-host
+  DB_PORT: "1521"
+  DB_SERVICE_NAME: your-service-name
+  JIRA_BASE_URL: https://your-jira-instance.atlassian.net
+
+Updated deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+      - name: app
+        image: your-app-image:latest
+        env:
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: DB_USERNAME
+        - name: DB_PASSWORD_PROD
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: DB_PASSWORD_PROD
+        - name: DB_PASSWORD_QUALITY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: DB_PASSWORD_QUALITY
+        - name: JIRA_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: JIRA_API_TOKEN
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_PORT
+        - name: DB_SERVICE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_SERVICE_NAME
+        - name: JIRA_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: JIRA_BASE_URL
+
+DatabaseOperations Class Update
+
+Update the db_operations.py to dynamically select the appropriate password for the given environment (prod or quality).
+
+class DatabaseOperations:
+    def __init__(self, environment):
+        """
+        Initialize database connection based on the environment (prod or quality).
+        """
+        from config.settings import Config
+
+        if environment == "prod":
+            self.db_url = Config.DB_URL_PROD
+        elif environment == "quality":
+            self.db_url = Config.DB_URL_QUALITY
+        else:
+            raise ValueError("Invalid environment specified. Choose 'prod' or 'quality'.")
+
+        self.engine = create_engine(self.db_url)
+        self.Session = sessionmaker(bind=self.engine)
+        self.metadata = MetaData()
+
+        # Define the table structure here
+
+Dynamic Password Flow
+	1.	Kubernetes Deployment:
+Secrets like DB_PASSWORD_PROD and DB_PASSWORD_QUALITY are passed to the app as environment variables.
+	2.	Local Development:
+Passwords are read from the .env file.
+	3.	Dynamic Selection:
+The DatabaseOperations class selects the correct password based on the environment parameter (prod or quality) when initializing.
+
+Let me know if you’d like a complete project structure updated with these changes!
