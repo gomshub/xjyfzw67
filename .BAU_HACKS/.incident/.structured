@@ -1,0 +1,231 @@
+Here is the complete project structure, code, and configurations as requested.
+
+Project Structure
+
+project_root/
+├── app/
+│   ├── routes.py
+│   ├── wsgi.py
+│   ├── Utils/
+│   │   ├── jira_operations.py
+│   │   ├── db_operations.py
+│   │   ├── models.py
+│   │   ├── template_renderer.py
+│   ├── Config/
+│   │   ├── settings.py
+│   │   ├── gunicorn.py
+│   ├── templates/
+│   │   ├── sync_results.html
+│   │   ├── comment_update.html
+│   │   ├── jira_details.html
+│   │   ├── jira_list.html
+├── .env
+├── requirements.txt
+├── Kube/
+│   ├── jira-secrets.yaml
+│   ├── jira-configmap.yaml
+│   ├── deployment.yaml
+│   ├── service.yaml
+├── Helm/
+│   ├── Chart.yaml
+│   ├── values.yaml
+├── Readme.md
+
+Code Details
+
+1. routes.py
+
+Manages the Flask routes for the five services.
+
+Code for routes.py
+
+2. wsgi.py
+
+Entry point for running the Flask app with Gunicorn.
+
+from app.routes import app
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+
+3. jira_operations.py
+
+Handles communication with the JIRA API.
+
+Code for jira_operations.py
+
+4. db_operations.py
+
+Manages database operations using SQLAlchemy.
+
+Code for db_operations.py
+
+5. models.py
+
+Defines the database models.
+
+from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
+
+class JIRATable(Base):
+    __tablename__ = "jira_table"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    jira_no = Column(String(50), unique=True, nullable=False)
+    status = Column(String(50))
+    summary = Column(String(255))
+    job_number = Column(String(50))
+    criticity = Column(String(50))
+    description = Column(Text)
+    creation_date = Column(DateTime)
+    comments = Column(Text)
+    first_comment = Column(Text)
+    last_comment = Column(Text)
+    update_comment = Column(Text)
+    update_status = Column(String(50), default="")
+
+6. template_renderer.py
+
+Renders HTML templates.
+
+Code for template_renderer.py
+
+7. settings.py
+
+Configuration for the database and JIRA API.
+
+import os
+
+class Config:
+    JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
+    PROD_DB_URL = os.getenv("PROD_DB_URL")
+    QUALITY_DB_URL = os.getenv("QUALITY_DB_URL")
+    JIRA_TOKEN = os.getenv("JIRA_TOKEN")
+
+8. gunicorn.py
+
+Configuration for Gunicorn.
+
+bind = "0.0.0.0:5000"
+workers = 3
+timeout = 120
+
+9. Templates
+
+Templates for HTML rendering.
+
+Code for Templates
+
+Environment Configuration
+
+.env
+
+JIRA_BASE_URL=https://your-jira-instance.atlassian.net
+PROD_DB_URL=postgresql://user:prod_password@prod_db_host/prod_db
+QUALITY_DB_URL=postgresql://user:quality_password@quality_db_host/quality_db
+JIRA_TOKEN=your_jira_api_token
+
+Kubernetes Configurations
+
+Secrets (jira-secrets.yaml)
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jira-secrets
+type: Opaque
+data:
+  jira_token: <base64_encoded_token>
+  prod_db_password: <base64_encoded_prod_password>
+  quality_db_password: <base64_encoded_quality_password>
+
+ConfigMap (jira-configmap.yaml)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jira-config
+data:
+  JIRA_BASE_URL: https://your-jira-instance.atlassian.net
+  PROD_DB_URL: postgresql://user:<prod_db_password>@prod_db_host/prod_db
+  QUALITY_DB_URL: postgresql://user:<quality_db_password>@quality_db_host/quality_db
+
+Deployment (deployment.yaml)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-sync-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jira-sync
+  template:
+    metadata:
+      labels:
+        app: jira-sync
+    spec:
+      containers:
+      - name: jira-sync
+        image: your-docker-image:latest
+        envFrom:
+        - configMapRef:
+            name: jira-config
+        - secretRef:
+            name: jira-secrets
+        ports:
+        - containerPort: 5000
+
+Requirements
+
+requirements.txt
+
+Flask==2.3.0
+SQLAlchemy==2.0.0
+psycopg2-binary==2.9.7
+requests==2.31.0
+gunicorn==20.1.0
+python-dotenv==1.0.0
+Jinja2==3.1.2
+
+Local Testing Instructions
+
+1. Clone the Repository
+
+git clone <repository-url>
+cd project_root
+
+2. Create a Virtual Environment
+
+python -m venv venv
+source venv/bin/activate # Use `venv\Scripts\activate` on Windows
+
+3. Install Requirements
+
+pip install -r requirements.txt
+
+4. Run the Flask App
+
+flask run
+
+5. Test Endpoints
+	•	Sync Service:
+
+curl -X POST -H "Content-Type: application/json" \
+-d '{"filter_id": "10001"}' \
+http://127.0.0.1:5000/sync/prod
+
+	•	Update Comment:
+
+curl -X POST -H "Content-Type: application/json" \
+-d '{"environment": "quality"}' \
+http://127.0.0.1:5000/update_comment/TEST-123
+
+README.md
+
+Detailed README File to include documentation for deployment, running locally, and Kubernetes setup.
+
+This completes the full project structure, code, and setup instructions. Let me know if you need additional assistance!
