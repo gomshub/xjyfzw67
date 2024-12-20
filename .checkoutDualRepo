@@ -1,0 +1,61 @@
+In Bamboo, you can dynamically retrieve the plan branch name using the built-in variable bamboo.planRepository.branchName. This variable holds the name of the branch for the current Bamboo plan branch execution.
+
+Here’s an updated version of the script where the feature branch name is dynamically set based on the Bamboo plan branch name:
+
+Shell Script
+
+# Define the repository URL
+REPO_URL="https://your.git.repo.url.git"
+
+# Define the master branch
+MASTER_BRANCH="master"
+
+# Get the feature branch name dynamically from the Bamboo plan branch name
+FEATURE_BRANCH="${bamboo.planRepository.branchName}"
+
+# Define the directories for each branch
+MASTER_DIR="master-folder"
+FEATURE_DIR="feature-folder"
+
+echo "Feature branch name is: $FEATURE_BRANCH"
+
+# Clone and checkout the master branch
+echo "Cloning master branch..."
+if [ ! -d "$MASTER_DIR" ]; then
+  git clone -b "$MASTER_BRANCH" "$REPO_URL" "$MASTER_DIR"
+else
+  echo "Master directory exists. Pulling latest changes..."
+  cd "$MASTER_DIR"
+  git pull origin "$MASTER_BRANCH"
+  cd ..
+fi
+
+# Clone and checkout the feature branch
+echo "Cloning feature branch..."
+if [ ! -d "$FEATURE_DIR" ]; then
+  git clone -b "$FEATURE_BRANCH" "$REPO_URL" "$FEATURE_DIR"
+else
+  echo "Feature directory exists. Pulling latest changes..."
+  cd "$FEATURE_DIR"
+  git pull origin "$FEATURE_BRANCH"
+  cd ..
+fi
+
+echo "Branches successfully checked out."
+
+Key Changes
+	1.	FEATURE_BRANCH Variable:
+	•	Dynamically set to the Bamboo plan branch name using bamboo.planRepository.branchName.
+	2.	Echo the Branch Name:
+	•	The script prints the feature branch name for debugging purposes (echo "Feature branch name is: $FEATURE_BRANCH").
+
+Steps in Bamboo Plan
+	1.	Add a Script task in your Bamboo job.
+	2.	Copy and paste the script above.
+	3.	Bamboo will replace the variable ${bamboo.planRepository.branchName} with the actual branch name at runtime.
+
+Example
+
+If the Bamboo plan branch name is feature/add-login, the script will dynamically set FEATURE_BRANCH to feature/add-login and checkout this branch.
+
+Let me know if you have more questions!
