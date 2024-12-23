@@ -1,0 +1,217 @@
+Here’s the updated version of the sync service in routes.py and db_operations.py, where the system fetches JIRA numbers from both prod and quality databases and determines whether to insert, update, or delete records for the respective database based on the JIRA filter list.
+
+Updated db_operations.py
+
+This version includes fetching all JIRA numbers from the database for both environments (prod and quality).
+
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, select
+from .models import JiraRecord
+
+class DBOperations:
+    def __init__(self, db_url):
+        self.engine = create_engine(db_url)
+        self.Session = sessionmaker(bind=self.engine)
+
+    def get_all_jira_numbers(self):
+        """
+        Fetch all existing JIRA numbers from the database.
+        """
+        with self.Session() as session:
+            return {record.jira_number for record in session.query(JiraRecord.jira_number).all()}
+
+    def get_next_primary_key(self):
+        """
+        Get the next primary key as a 2-digit number based on the last record.
+        """
+        with self.Session() as session:
+            last_record = session.query(JiraRecord).order_by(JiraRecord.id.desc()).first()
+            if last_record:
+                return (last_record.id + 1) % 100  # Ensures it stays 2-digit
+            return 1  # Start from 1 if no records exist
+
+    def insert_record(self, record_data):
+        """
+        Insert a new record into the database with a unique primary key.
+        """
+        with self.Session() as session:
+            record_data['id'] = self.get_next_primary_key()
+            new_record = JiraRecord(**record_data)
+            session.add(new_record)
+            session.commit()
+
+    def update_record(self, jira_number, update_data):
+        """
+        Update an existing record based on JIRA number.
+        """
+        with self.Session() as session:
+            session.query(JiraRecord).filter_by(jira_number=jira_number).update(update_data)
+            session.commit()
+
+    def delete_record(self, jira_number):
+        """
+        Delete a record based on JIRA number.
+        """
+        with self.Session() as session:
+            session.query(JiraRecord).filter_by(jira_number=jira_number).delete()
+            session.commit()
+
+Updated routes.py
+
+This version compares JIRA numbers fetched from both the database and the JIRA API filter to decide on inserts, updates, and deletions.
+
+from flask import Flask, request, render_template
+from .Utils.db_operations import DBOperations
+from .Utils.jira_operations import JiraOperations
+from .Utils.template_renderer import TemplateRenderer
+from .Config.settings import PROD_DB_URL, QUALITY_DB_URL
+
+app = Flask(__name__)
+
+@app.route('/sync', methods=['POST'])
+def sync_service():
+    """
+    Sync JIRA issues with both `prod` and `quality` databases:
+    - Fetch JIRA numbers from both DBs
+    - Compare with JIRA API filter result
+    - Perform insert, update, delete operations
+    """
+    filter_id = request.json.get('filter_id')
+    if not filter_id:
+        return "Filter ID is required", 400
+
+    prod_db_ops = DBOperations(PROD_DB_URL)
+    quality_db_ops = DBOperations(QUALITY_DB_URL)
+    jira_ops = JiraOperations()
+
+    # Fetch JIRA issues from the JIRA API
+    jira_issues = jira_ops.fetch_issues_by_filter(filter_id)
+    jira_numbers_from_api = {issue['jira_number'] for issue in jira_issues}
+
+    # Fetch JIRA numbers from both databases
+    prod_jira_numbers = prod_db_ops.get_all_jira_numbers()
+    quality_jira_numbers = quality_db_ops.get_all_jira_numbers()
+
+    # Initialize result lists
+    prod_insert, prod_update, prod_delete = [], [], []
+    quality_insert, quality_update, quality_delete = [], [], []
+
+    # Process JIRA issues from API
+    for issue in jira_issues:
+        jira_number = issue['jira_number']
+        job_number = extract_job_number_from_summary(issue['summary'])
+
+        # Determine database and operation
+        if job_number.startswith("P01"):  # PROD environment
+            if jira_number in prod_jira_numbers:
+                prod_update.append(issue)
+            else:
+                prod_insert.append(issue)
+        elif job_number.startswith("Q01"):  # QUALITY environment
+            if jira_number in quality_jira_numbers:
+                quality_update.append(issue)
+            else:
+                quality_insert.append(issue)
+
+    # Determine deletions
+    prod_delete = prod_jira_numbers - jira_numbers_from_api
+    quality_delete = quality_jira_numbers - jira_numbers_from_api
+
+    # Perform database operations
+    for issue in prod_insert:
+        prod_db_ops.insert_record(issue)
+    for issue in prod_update:
+        prod_db_ops.update_record(issue['jira_number'], issue)
+    for jira_number in prod_delete:
+        prod_db_ops.delete_record(jira_number)
+
+    for issue in quality_insert:
+        quality_db_ops.insert_record(issue)
+    for issue in quality_update:
+        quality_db_ops.update_record(issue['jira_number'], issue)
+    for jira_number in quality_delete:
+        quality_db_ops.delete_record(jira_number)
+
+    # Generate HTML results
+    html_content = TemplateRenderer.render_sync_results(
+        prod_insert=prod_insert, prod_update=prod_update, prod_delete=prod_delete,
+        quality_insert=quality_insert, quality_update=quality_update, quality_delete=quality_delete
+    )
+    return html_content
+
+Updated template_renderer.py
+
+Render sync results separately for prod and quality.
+
+class TemplateRenderer:
+    @staticmethod
+    def render_sync_results(prod_insert, prod_update, prod_delete, quality_insert, quality_update, quality_delete):
+        """
+        Render the sync results into an HTML template.
+        """
+        return render_template(
+            'sync_results.html',
+            prod_insert=prod_insert, prod_update=prod_update, prod_delete=prod_delete,
+            quality_insert=quality_insert, quality_update=quality_update, quality_delete=quality_delete
+        )
+
+Updated sync_results.html
+
+Display sync results for both prod and quality.
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sync Results</title>
+</head>
+<body>
+    <h1>Sync Results</h1>
+
+    <h2>PROD Environment</h2>
+    <h3>Inserted Records</h3>
+    <ul>
+        {% for record in prod_insert %}
+            <li>{{ record.jira_number }} - {{ record.summary }}</li>
+        {% endfor %}
+    </ul>
+    <h3>Updated Records</h3>
+    <ul>
+        {% for record in prod_update %}
+            <li>{{ record.jira_number }} - {{ record.summary }}</li>
+        {% endfor %}
+    </ul>
+    <h3>Deleted Records</h3>
+    <ul>
+        {% for jira_number in prod_delete %}
+            <li>{{ jira_number }}</li>
+        {% endfor %}
+    </ul>
+
+    <h2>QUALITY Environment</h2>
+    <h3>Inserted Records</h3>
+    <ul>
+        {% for record in quality_insert %}
+            <li>{{ record.jira_number }} - {{ record.summary }}</li>
+        {% endfor %}
+    </ul>
+    <h3>Updated Records</h3>
+    <ul>
+        {% for record in quality_update %}
+            <li>{{ record.jira_number }} - {{ record.summary }}</li>
+        {% endfor %}
+    </ul>
+    <h3>Deleted Records</h3>
+    <ul>
+        {% for jira_number in quality_delete %}
+            <li>{{ jira_number }}</li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
+
+Key Updates
+	1.	Dual DB Fetch: JIRA numbers are fetched from both prod and quality databases before deciding operations.
+	2.	Separate Results: Results are divided into insert, update, and delete for both environments.
+	3.	HTML Render: Results are displayed in separate sections for better clarity.
+
+Let me know if you need further clarification!
