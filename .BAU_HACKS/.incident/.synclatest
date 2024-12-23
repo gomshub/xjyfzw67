@@ -1,3 +1,135 @@
+
+To store separate variables for host, password, and other connection parameters for both prod and ctlq environments, we can restructure the .env file and adjust the settings and db_operations.py files accordingly. Here’s how you can do it:
+
+Step 1: Update .env File
+
+Store the connection parameters individually:
+
+# PROD Environment
+PROD_DB_HOST=prod-host
+PROD_DB_PORT=1521
+PROD_DB_SERVICE=PROD_SID
+PROD_DB_USERNAME=prod_user
+PROD_DB_PASSWORD=prod_password
+
+# CTLQ Environment
+CTLQ_DB_HOST=ctlq-host
+CTLQ_DB_PORT=1521
+CTLQ_DB_SERVICE=CTLQ_SID
+CTLQ_DB_USERNAME=ctlq_user
+CTLQ_DB_PASSWORD=ctlq_password
+
+Step 2: Update settings.py
+
+Load the environment variables and construct the database URLs dynamically:
+
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
+
+# PROD Environment
+PROD_DB_HOST = os.getenv("PROD_DB_HOST")
+PROD_DB_PORT = os.getenv("PROD_DB_PORT")
+PROD_DB_SERVICE = os.getenv("PROD_DB_SERVICE")
+PROD_DB_USERNAME = os.getenv("PROD_DB_USERNAME")
+PROD_DB_PASSWORD = os.getenv("PROD_DB_PASSWORD")
+
+# CTLQ Environment
+CTLQ_DB_HOST = os.getenv("CTLQ_DB_HOST")
+CTLQ_DB_PORT = os.getenv("CTLQ_DB_PORT")
+CTLQ_DB_SERVICE = os.getenv("CTLQ_DB_SERVICE")
+CTLQ_DB_USERNAME = os.getenv("CTLQ_DB_USERNAME")
+CTLQ_DB_PASSWORD = os.getenv("CTLQ_DB_PASSWORD")
+
+# Construct DB URLs dynamically
+PROD_DB_URL = (
+    f"oracle+oracledb://{PROD_DB_USERNAME}:{PROD_DB_PASSWORD}@{PROD_DB_HOST}:{PROD_DB_PORT}/{PROD_DB_SERVICE}"
+)
+CTLQ_DB_URL = (
+    f"oracle+oracledb://{CTLQ_DB_USERNAME}:{CTLQ_DB_PASSWORD}@{CTLQ_DB_HOST}:{CTLQ_DB_PORT}/{CTLQ_DB_SERVICE}"
+)
+
+Step 3: Update db_operations.py
+
+Modify the DBOperations class to work with the dynamically constructed URLs:
+
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
+from contextlib import contextmanager
+from app.Config.settings import PROD_DB_URL, CTLQ_DB_URL
+from .models import JiraRecord
+
+class DBOperations:
+    def __init__(self, environment):
+        """
+        Initialize DBOperations with the appropriate database URL.
+        :param environment: 'prod' or 'ctlq'
+        """
+        if environment == "prod":
+            db_url = PROD_DB_URL
+        elif environment == "ctlq":
+            db_url = CTLQ_DB_URL
+        else:
+            raise ValueError("Invalid environment specified. Use 'prod' or 'ctlq'.")
+        
+        self.engine = create_engine(db_url)
+        self.Session = sessionmaker(bind=self.engine)
+
+    @contextmanager
+    def session_scope(self):
+        """
+        Provide a transactional scope around a series of operations.
+        Automatically handles session closing.
+        """
+        session = self.Session()
+        try:
+            yield session
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+    # Add methods for database operations (insert, update, delete, fetch) here
+
+Step 4: Example Usage
+
+Determine Environment Based on Job Number
+
+def get_environment_from_job_number(job_number):
+    """
+    Determine the database environment based on the job number prefix.
+    :param job_number: Job number string (e.g., 'P01-XYZ-123').
+    :return: 'prod' if 'P01' is found, 'ctlq' if 'Q01' is found, or None.
+    """
+    if job_number.startswith("P01"):
+        return "prod"
+    elif job_number.startswith("Q01"):
+        return "ctlq"
+    return None
+
+Initialize DBOperations
+
+job_number = "P01-XYZ-123"  # Example job number
+environment = get_environment_from_job_number(job_number)
+if environment:
+    db_ops = DBOperations(environment)
+    # Use db_ops to perform insert, update, delete, or fetch operations
+else:
+    print("Invalid job number. Cannot determine environment.")
+
+Step 5: Benefits of this Structure
+	•	Separation of Concerns: Keeps sensitive credentials (passwords) and configuration (host, service name) separate.
+	•	Environment Flexibility: Easily modify database configurations without changing the code.
+	•	Scalability: Easily extendable for additional environments or connection parameters.
+
+Let me know if you need further clarification or updates!
+
+=#=#=
+
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, select
 from contextlib import contextmanager
