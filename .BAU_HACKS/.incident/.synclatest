@@ -1,3 +1,70 @@
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, select
+from contextlib import contextmanager
+from .models import JiraRecord
+
+class DBOperations:
+    def __init__(self, db_url):
+        self.engine = create_engine(db_url)
+        self.Session = sessionmaker(bind=self.engine)
+
+    @contextmanager
+    def session_scope(self):
+        """
+        Provide a transactional scope around a series of operations.
+        Automatically handles session closing.
+        """
+        session = self.Session()
+        try:
+            yield session
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+    def get_all_jira_numbers(self):
+        """
+        Fetch all existing JIRA numbers from the database.
+        """
+        with self.session_scope() as session:
+            return {record.jira_number for record in session.query(JiraRecord.jira_number).all()}
+
+    def get_next_primary_key(self):
+        """
+        Get the next primary key as a 2-digit number based on the last record.
+        """
+        with self.session_scope() as session:
+            last_record = session.query(JiraRecord).order_by(JiraRecord.id.desc()).first()
+            if last_record:
+                return (last_record.id + 1) % 100  # Ensures it stays 2-digit
+            return 1  # Start from 1 if no records exist
+
+    def insert_record(self, record_data):
+        """
+        Insert a new record into the database with a unique primary key.
+        """
+        with self.session_scope() as session:
+            record_data['id'] = self.get_next_primary_key()
+            new_record = JiraRecord(**record_data)
+            session.add(new_record)
+
+    def update_record(self, jira_number, update_data):
+        """
+        Update an existing record based on JIRA number.
+        """
+        with self.session_scope() as session:
+            session.query(JiraRecord).filter_by(jira_number=jira_number).update(update_data)
+
+    def delete_record(self, jira_number):
+        """
+        Delete a record based on JIRA number.
+        """
+        with self.session_scope() as session:
+            session.query(JiraRecord).filter_by(jira_number=jira_number).delete()
+
+==#
 Here’s the updated version of the sync service in routes.py and db_operations.py, where the system fetches JIRA numbers from both prod and quality databases and determines whether to insert, update, or delete records for the respective database based on the JIRA filter list.
 
 Updated db_operations.py
