@@ -1,0 +1,205 @@
+Here is the updated code for the sync service to handle the insert, update, and delete operations based on the JIRA filter results. Additionally, on insertion, it generates a unique 2-digit primary key that increments from the last record in the table.
+
+Updated db_operations.py
+
+This version includes a method to fetch the last primary key and calculate the next incremented value.
+
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, select, update, delete
+from .models import JiraRecord
+
+class DBOperations:
+    def __init__(self, db_url):
+        self.engine = create_engine(db_url)
+        self.Session = sessionmaker(bind=self.engine)
+
+    def get_next_primary_key(self):
+        """
+        Get the next primary key as a 2-digit number based on the last record.
+        """
+        with self.Session() as session:
+            last_record = session.query(JiraRecord).order_by(JiraRecord.id.desc()).first()
+            if last_record:
+                return (last_record.id + 1) % 100  # Ensures it stays 2-digit
+            return 1  # Start from 1 if no records exist
+
+    def insert_record(self, record_data):
+        """
+        Insert a new record into the database with a unique primary key.
+        """
+        with self.Session() as session:
+            record_data['id'] = self.get_next_primary_key()
+            new_record = JiraRecord(**record_data)
+            session.add(new_record)
+            session.commit()
+
+    def update_record(self, jira_number, update_data):
+        """
+        Update an existing record based on JIRA number.
+        """
+        with self.Session() as session:
+            session.query(JiraRecord).filter_by(jira_number=jira_number).update(update_data)
+            session.commit()
+
+    def delete_record(self, jira_number):
+        """
+        Delete a record based on JIRA number.
+        """
+        with self.Session() as session:
+            session.query(JiraRecord).filter_by(jira_number=jira_number).delete()
+            session.commit()
+
+    def get_all_jira_numbers(self):
+        """
+        Get all existing JIRA numbers from the database.
+        """
+        with self.Session() as session:
+            return {record.jira_number for record in session.query(JiraRecord.jira_number).all()}
+
+Updated routes.py
+
+The sync_service logic is now enhanced to include database interactions for insert, update, and delete.
+
+from flask import Flask, request, render_template
+from .Utils.db_operations import DBOperations
+from .Utils.jira_operations import JiraOperations
+from .Utils.template_renderer import TemplateRenderer
+from .Config.settings import PROD_DB_URL, QUALITY_DB_URL
+
+app = Flask(__name__)
+
+@app.route('/sync/<environment>', methods=['POST'])
+def sync_service(environment):
+    """
+    Sync JIRA issues with the database (insert, update, delete).
+    Database environment (prod or quality) is chosen based on job numbers in the issue summary.
+    """
+    filter_id = request.json.get('filter_id')
+    if not filter_id:
+        return "Filter ID is required", 400
+
+    db_url = PROD_DB_URL if environment == "prod" else QUALITY_DB_URL
+    db_ops = DBOperations(db_url)
+    jira_ops = JiraOperations()
+
+    # Fetch issues from JIRA API
+    jira_issues = jira_ops.fetch_issues_by_filter(filter_id)
+    jira_numbers_in_db = db_ops.get_all_jira_numbers()
+
+    to_insert = []
+    to_update = []
+    to_delete = list(jira_numbers_in_db)  # Start with all DB JIRA numbers for deletion tracking
+
+    for issue in jira_issues:
+        jira_number = issue['jira_number']
+        job_number = extract_job_number_from_summary(issue['summary'])
+
+        # Match environment to job_number
+        if environment == "prod" and not job_number.startswith("P01"):
+            continue
+        if environment == "quality" and not job_number.startswith("Q01"):
+            continue
+
+        # Determine insertion or update
+        if jira_number in jira_numbers_in_db:
+            to_update.append(issue)
+            to_delete.remove(jira_number)  # Exclude from deletion list
+        else:
+            to_insert.append(issue)
+
+    # Perform database operations
+    for issue in to_insert:
+        db_ops.insert_record(issue)
+    for issue in to_update:
+        db_ops.update_record(issue['jira_number'], issue)
+    for jira_number in to_delete:
+        db_ops.delete_record(jira_number)
+
+    # Generate HTML result
+    html_content = TemplateRenderer.render_sync_results(to_insert, to_update, to_delete)
+    return html_content
+
+Updated models.py
+
+The id column is now defined as an integer for storing the primary key.
+
+from sqlalchemy import Column, String, Integer, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
+
+class JiraRecord(Base):
+    __tablename__ = 'jira_records'
+
+    id = Column(Integer, primary_key=True)  # Unique 2-digit primary key
+    jira_number = Column(String, unique=True, nullable=False)
+    status = Column(String)
+    summary = Column(String)
+    job_number = Column(String)
+    criticity = Column(String)
+    description = Column(String)
+    creation_date = Column(DateTime)
+    comments = Column(String)
+    first_comment = Column(String)
+    last_comment = Column(String)
+    update_comment = Column(String, nullable=True)
+    update_status = Column(String, nullable=True)
+
+Updated template_renderer.py
+
+Generate the HTML content for the sync results.
+
+class TemplateRenderer:
+    @staticmethod
+    def render_sync_results(inserted, updated, deleted):
+        """
+        Render the sync results into an HTML template.
+        """
+        return render_template(
+            'sync_results.html',
+            inserted=inserted,
+            updated=updated,
+            deleted=deleted
+        )
+
+Updated sync_results.html
+
+Add a simple HTML template for displaying sync results.
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sync Results</title>
+</head>
+<body>
+    <h1>Sync Results</h1>
+
+    <h2>Inserted Records</h2>
+    <ul>
+        {% for record in inserted %}
+            <li>{{ record.jira_number }} - {{ record.summary }}</li>
+        {% endfor %}
+    </ul>
+
+    <h2>Updated Records</h2>
+    <ul>
+        {% for record in updated %}
+            <li>{{ record.jira_number }} - {{ record.summary }}</li>
+        {% endfor %}
+    </ul>
+
+    <h2>Deleted Records</h2>
+    <ul>
+        {% for jira_number in deleted %}
+            <li>{{ jira_number }}</li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
+
+Additional Notes
+	1.	Primary Key Management: The get_next_primary_key function ensures that the primary key is incremented and stays within 2 digits.
+	2.	Environment Filtering: The sync_service filters JIRA issues based on the job_number prefix to decide the target database.
+	3.	HTML Rendering: All sync operations’ results are displayed in the sync_results.html template.
+
+Let me know if you need more details or adjustments!
