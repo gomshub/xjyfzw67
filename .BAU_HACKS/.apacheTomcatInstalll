@@ -1,0 +1,66 @@
+If you don’t want to change the owner of the binary scripts folder, you can grant Tomcat the necessary read-only access to the folder while keeping the current owner unchanged. Here’s how:
+
+Steps to Link the Folder Without Changing Ownership
+
+1. Grant Read Permissions to the Tomcat User
+
+Ensure the Tomcat user (tomcat, www-data, or similar) has read permissions to the folder and its contents:
+	•	Use an ACL (Access Control List) to give read permissions to the Tomcat user without changing ownership:
+
+sudo setfacl -R -m u:tomcat:rX /path/to/binary/scripts
+
+	•	-R: Recursive for all files and subfolders.
+	•	-m: Modify ACL to grant read and execute (rX) permissions.
+
+	•	Verify the permissions:
+
+getfacl /path/to/binary/scripts
+
+2. Create a Context File in Tomcat
+
+Set up a context file to map the binary scripts folder in Tomcat:
+	•	Create the context file:
+
+sudo nano /etc/tomcatX/Catalina/localhost/scripts.xml
+
+
+	•	Add the following configuration:
+
+<Context docBase="/path/to/binary/scripts" path="/scripts" />
+
+	•	Replace /path/to/binary/scripts with the actual path to your folder.
+
+3. Enable Directory Listing (Optional)
+
+If you want to enable directory listing to browse the folder contents, configure Tomcat as follows:
+	1.	Edit Tomcat’s web.xml file:
+
+sudo nano /etc/tomcatX/web.xml
+
+
+	2.	Uncomment or add the following block:
+
+<servlet>
+    <servlet-name>default</servlet-name>
+    <servlet-class>org.apache.catalina.servlets.DefaultServlet</servlet-class>
+    <init-param>
+        <param-name>listings</param-name>
+        <param-value>true</param-value>
+    </init-param>
+</servlet>
+
+
+	3.	Save the file and restart Tomcat:
+
+sudo systemctl restart tomcatX
+
+4. Test Access
+	•	Access the folder using your browser or a tool like curl:
+
+http://<your-server-ip>:8080/scripts/
+
+Or using your DNS name:
+
+http://my-vm.domain.local:8080/scripts/
+
+This approach ensures the folder owner remains unchanged while Tomcat has the necessary permissions to serve the files. Let me know if you encounter any issues!
