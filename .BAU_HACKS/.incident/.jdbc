@@ -1,0 +1,257 @@
+Below are the implementations for db_operations.py, routes.py, and settings.py to handle the /sync service along with proper environment variable management.
+
+db_operations.py
+
+This module contains the database interaction logic.
+
+import jaydebeapi
+from contextlib import contextmanager
+
+
+class DatabaseManager:
+    def __init__(self, jdbc_url, driver_class, jar_path, username, password):
+        self.jdbc_url = jdbc_url
+        self.driver_class = driver_class
+        self.jar_path = jar_path
+        self.username = username
+        self.password = password
+
+    @contextmanager
+    def connect(self):
+        """Context manager to establish and close the database connection."""
+        conn = None
+        try:
+            conn = jaydebeapi.connect(
+                self.driver_class,
+                self.jdbc_url,
+                [self.username, self.password],
+                self.jar_path,
+            )
+            yield conn
+        finally:
+            if conn:
+                conn.close()
+
+    def sync_issues(self, issues, environment):
+        """
+        Synchronize issues into the database.
+        Insert or update if JIRA exists, delete if missing from the response.
+        """
+        with self.connect() as conn:
+            cursor = conn.cursor()
+
+            # Insert or Update issues
+            for issue in issues:
+                cursor.execute(
+                    """
+                    MERGE INTO issues_table i
+                    USING (SELECT ? AS jira_number FROM dual) src
+                    ON (i.jira_number = src.jira_number)
+                    WHEN MATCHED THEN UPDATE SET
+                        status = ?,
+                        summary = ?,
+                        job_number = ?,
+                        criticity = ?,
+                        description = ?,
+                        creation_date = ?,
+                        comments = ?,
+                        first_comment = ?,
+                        last_comment = ?,
+                        environment = ?
+                    WHEN NOT MATCHED THEN INSERT (
+                        jira_number, status, summary, job_number, criticity, description,
+                        creation_date, comments, first_comment, last_comment, environment
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        # For MATCHED (Update)
+                        issue["jira_number"],
+                        issue["status"],
+                        issue["summary"],
+                        issue["job_number"],
+                        issue["criticity"],
+                        issue["description"],
+                        issue["creation_date"],
+                        "\n".join(issue["comments"]),
+                        issue["first_comment"],
+                        issue["last_comment"],
+                        environment,
+                        # For NOT MATCHED (Insert)
+                        issue["jira_number"],
+                        issue["status"],
+                        issue["summary"],
+                        issue["job_number"],
+                        issue["criticity"],
+                        issue["description"],
+                        issue["creation_date"],
+                        "\n".join(issue["comments"]),
+                        issue["first_comment"],
+                        issue["last_comment"],
+                        environment,
+                    ),
+                )
+
+            # Delete issues not in the current JIRA list
+            jira_numbers = [issue["jira_number"] for issue in issues]
+            cursor.execute(
+                "DELETE FROM issues_table WHERE environment = ? AND jira_number NOT IN ({})".format(
+                    ",".join(["?"] * len(jira_numbers))
+                ),
+                [environment] + jira_numbers,
+            )
+            conn.commit()
+
+routes.py
+
+This module defines the Flask routes and connects the /sync service.
+
+from flask import Flask, request, jsonify
+from .db_operations import DatabaseManager
+from .jira_api import JiraAPI
+from .settings import Config
+import re
+
+app = Flask(__name__)
+app.config.from_object(Config)
+
+
+def extract_job_number(summary):
+    """Extract job number (P01/Q01/etc.) from the summary using regex."""
+    match = re.search(r"(P\d{2}|Q\d{2})", summary)
+    return match.group(0) if match else None
+
+
+@app.route("/sync", methods=["POST"])
+def sync_issues_db():
+    """
+    Synchronize JIRA issues with the database.
+    """
+    try:
+        # Load JIRA filter ID from request
+        data = request.get_json()
+        filter_id = data.get("filter_id")
+        if not filter_id:
+            return jsonify({"error": "filter_id is required"}), 400
+
+        # Fetch JIRA issues
+        jira_api = JiraAPI(app.config["JIRA_BASE_URL"], app.config["JIRA_TOKEN"])
+        jira_issues = jira_api.get_issues(filter_id)
+
+        # Categorize issues by environment
+        prod_issues = []
+        quality_issues = []
+        for issue in jira_issues:
+            job_number = extract_job_number(issue["fields"]["summary"])
+            if job_number:
+                issue_data = {
+                    "jira_number": issue["key"],
+                    "status": issue["fields"]["status"]["name"],
+                    "summary": issue["fields"]["summary"],
+                    "job_number": job_number,
+                    "criticity": issue["fields"]["priority"]["name"],
+                    "description": issue["fields"]["description"],
+                    "creation_date": issue["fields"]["created"],
+                    "comments": [c["body"] for c in issue["fields"]["comment"]["comments"]],
+                    "first_comment": (
+                        issue["fields"]["comment"]["comments"][0]["body"]
+                        if issue["fields"]["comment"]["comments"]
+                        else None
+                    ),
+                    "last_comment": (
+                        issue["fields"]["comment"]["comments"][-1]["body"]
+                        if issue["fields"]["comment"]["comments"]
+                        else None
+                    ),
+                }
+                if job_number.startswith("P"):
+                    prod_issues.append(issue_data)
+                elif job_number.startswith("Q"):
+                    quality_issues.append(issue_data)
+
+        # Sync issues with production database
+        prod_db = DatabaseManager(
+            app.config["PROD_JDBC_URL"],
+            app.config["JDBC_DRIVER"],
+            app.config["JDBC_JAR_PATH"],
+            app.config["PROD_DB_USERNAME"],
+            app.config["PROD_DB_PASSWORD"],
+        )
+        prod_db.sync_issues(prod_issues, "PROD")
+
+        # Sync issues with quality database
+        quality_db = DatabaseManager(
+            app.config["QUALITY_JDBC_URL"],
+            app.config["JDBC_DRIVER"],
+            app.config["JDBC_JAR_PATH"],
+            app.config["QUALITY_DB_USERNAME"],
+            app.config["QUALITY_DB_PASSWORD"],
+        )
+        quality_db.sync_issues(quality_issues, "QUALITY")
+
+        return jsonify({"status": "success", "message": "Sync completed"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+settings.py
+
+This module manages environment variables for database and JIRA settings.
+
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
+
+
+class Config:
+    # JIRA Configuration
+    JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
+    JIRA_TOKEN = os.getenv("JIRA_TOKEN")
+
+    # Database Configuration
+    JDBC_DRIVER = os.getenv("JDBC_DRIVER", "oracle.jdbc.OracleDriver")
+    JDBC_JAR_PATH = os.getenv("JDBC_JAR_PATH", "/path/to/ojdbc8.jar")
+
+    # Production Database
+    PROD_JDBC_URL = os.getenv("PROD_JDBC_URL")
+    PROD_DB_USERNAME = os.getenv("PROD_DB_USERNAME")
+    PROD_DB_PASSWORD = os.getenv("PROD_DB_PASSWORD")
+
+    # Quality Database
+    QUALITY_JDBC_URL = os.getenv("QUALITY_JDBC_URL")
+    QUALITY_DB_USERNAME = os.getenv("QUALITY_DB_USERNAME")
+    QUALITY_DB_PASSWORD = os.getenv("QUALITY_DB_PASSWORD")
+
+.env
+
+Example of environment variables file:
+
+JIRA_BASE_URL=https://your-jira-instance.atlassian.net
+JIRA_TOKEN=your_jira_bearer_token
+
+JDBC_DRIVER=oracle.jdbc.OracleDriver
+JDBC_JAR_PATH=/path/to/ojdbc8.jar
+
+PROD_JDBC_URL=jdbc:oracle:thin:@prod-db-host:1521:prod_service
+PROD_DB_USERNAME=prod_user
+PROD_DB_PASSWORD=prod_password
+
+QUALITY_JDBC_URL=jdbc:oracle:thin:@quality-db-host:1521:quality_service
+QUALITY_DB_USERNAME=quality_user
+QUALITY_DB_PASSWORD=quality_password
+
+Usage
+	1.	Install dependencies:
+
+pip install Flask python-dotenv JayDeBeApi
+
+
+	2.	Start the Flask server:
+
+flask run
+
+
+	3.	Test the /sync endpoint by sending a POST request with a filter_id.
+
+Let me know if further details or adjustments are needed!
