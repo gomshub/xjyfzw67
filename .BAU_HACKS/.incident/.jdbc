@@ -1,3 +1,189 @@
+Below is the complete implementation of a database syncing service that uses jaydebeapi to connect to an Oracle database via JDBC. It handles insert, update, and delete operations in the database based on data fetched from the JIRA API filter and the Job_Number in the summary to decide the environment (Prod or Quality).
+
+db_operations.py
+
+This module handles database operations: connecting to the correct environment (Prod or Quality) and performing insert, update, and delete actions.
+
+import jaydebeapi
+import os
+from typing import List, Dict
+
+class DatabaseOperations:
+    def __init__(self):
+        self.jdbc_driver = os.getenv("JDBC_DRIVER_PATH", "/path/to/ojdbc8.jar")
+        self.prod_db_url = os.getenv("PROD_DB_URL", "jdbc:oracle:thin:@prod_host:1521/prod_service")
+        self.quality_db_url = os.getenv("QUALITY_DB_URL", "jdbc:oracle:thin:@quality_host:1521/quality_service")
+        self.username = os.getenv("DB_USERNAME", "db_user")
+        self.password = os.getenv("DB_PASSWORD", "db_password")
+        self.driver_name = "oracle.jdbc.OracleDriver"
+
+    def get_connection(self, env: str):
+        """Get a database connection for the specified environment."""
+        db_url = self.prod_db_url if env == "PROD" else self.quality_db_url
+        return jaydebeapi.connect(self.driver_name, db_url, [self.username, self.password], self.jdbc_driver)
+
+    def sync_issues(self, issues: List[Dict], env: str):
+        """Sync issues with the database (insert, update, delete)."""
+        connection = self.get_connection(env)
+        cursor = connection.cursor()
+
+        try:
+            # Get the list of existing JIRA IDs in the database
+            cursor.execute("SELECT jira_number FROM issues")
+            existing_jiras = {row[0] for row in cursor.fetchall()}
+
+            # Prepare for syncing
+            jira_ids_in_filter = {issue["jira_number"] for issue in issues}
+            issues_to_insert = [issue for issue in issues if issue["jira_number"] not in existing_jiras]
+            issues_to_update = [issue for issue in issues if issue["jira_number"] in existing_jiras]
+            issues_to_delete = existing_jiras - jira_ids_in_filter
+
+            # Insert new issues
+            for issue in issues_to_insert:
+                cursor.execute(
+                    """
+                    INSERT INTO issues (jira_number, status, summary, job_number, criticity, description,
+                                        creation_date, comments, first_comment, last_comment)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        issue["jira_number"], issue["status"], issue["summary"], issue["job_number"],
+                        issue["criticity"], issue["description"], issue["creation_date"],
+                        issue["comments"], issue["first_comment"], issue["last_comment"]
+                    ]
+                )
+
+            # Update existing issues
+            for issue in issues_to_update:
+                cursor.execute(
+                    """
+                    UPDATE issues
+                    SET status = ?, summary = ?, job_number = ?, criticity = ?, description = ?, 
+                        creation_date = ?, comments = ?, first_comment = ?, last_comment = ?
+                    WHERE jira_number = ?
+                    """,
+                    [
+                        issue["status"], issue["summary"], issue["job_number"], issue["criticity"],
+                        issue["description"], issue["creation_date"], issue["comments"],
+                        issue["first_comment"], issue["last_comment"], issue["jira_number"]
+                    ]
+                )
+
+            # Delete issues not in the current filter
+            for jira_number in issues_to_delete:
+                cursor.execute("DELETE FROM issues WHERE jira_number = ?", [jira_number])
+
+            connection.commit()
+
+            return {
+                "inserted": len(issues_to_insert),
+                "updated": len(issues_to_update),
+                "deleted": len(issues_to_delete)
+            }
+
+        except Exception as e:
+            connection.rollback()
+            raise RuntimeError(f"Error during database sync: {e}")
+
+        finally:
+            cursor.close()
+            connection.close()
+
+routes.py
+
+This module defines the /sync route, fetching issues from the JIRA API and syncing them with the database.
+
+from flask import Flask, request, jsonify
+from db_operations import DatabaseOperations
+from jira_service import get_issues_from_jira
+
+app = Flask(__name__)
+db_operations = DatabaseOperations()
+
+@app.route("/sync", methods=["POST"])
+def sync_issues():
+    try:
+        # Get JIRA issues from API
+        jira_filter_id = request.json.get("filter_id")
+        issues = get_issues_from_jira(jira_filter_id)
+
+        # Group issues by environment based on job number in summary
+        prod_issues = [issue for issue in issues if "P01" in issue["job_number"]]
+        quality_issues = [issue for issue in issues if "Q01" in issue["job_number"]]
+
+        # Sync issues with the respective environments
+        prod_result = db_operations.sync_issues(prod_issues, "PROD")
+        quality_result = db_operations.sync_issues(quality_issues, "QUALITY")
+
+        # Return results
+        return jsonify({
+            "message": "Sync completed successfully",
+            "prod": prod_result,
+            "quality": quality_result
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+settings.py
+
+This module loads environment variables.
+
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Database settings
+JDBC_DRIVER_PATH = os.getenv("JDBC_DRIVER_PATH", "/path/to/ojdbc8.jar")
+PROD_DB_URL = os.getenv("PROD_DB_URL", "jdbc:oracle:thin:@prod_host:1521/prod_service")
+QUALITY_DB_URL = os.getenv("QUALITY_DB_URL", "jdbc:oracle:thin:@quality_host:1521/quality_service")
+DB_USERNAME = os.getenv("DB_USERNAME", "db_user")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "db_password")
+
+# JIRA API settings
+JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "your_jira_api_token")
+JIRA_BASE_URL = os.getenv("JIRA_BASE_URL", "https://your-jira-instance.atlassian.net")
+
+Key Features:
+	1.	Environment Selection:
+	•	JIRA issues are grouped based on the job_number in the summary (P01 → PROD, Q01 → QUALITY).
+	2.	Sync Logic:
+	•	Insert new issues that are not in the database.
+	•	Update existing issues if they match the JIRA number.
+	•	Delete issues from the database that are not in the current JIRA filter.
+	3.	Return Results:
+	•	The /sync service returns a summary of inserted, updated, and deleted issues for each environment.
+
+Deployment:
+
+To deploy this service:
+	1.	Install dependencies:
+
+pip install flask jaydebeapi python-dotenv
+
+
+	2.	Set up your .env file:
+
+JDBC_DRIVER_PATH=/path/to/ojdbc8.jar
+PROD_DB_URL=jdbc:oracle:thin:@prod_host:1521/prod_service
+QUALITY_DB_URL=jdbc:oracle:thin:@quality_host:1521/quality_service
+DB_USERNAME=db_user
+DB_PASSWORD=db_password
+JIRA_API_TOKEN=your_jira_api_token
+JIRA_BASE_URL=https://your-jira-instance.atlassian.net
+
+
+	3.	Run the Flask app:
+
+flask run
+
+
+
+This implementation provides a robust syncing solution for Oracle databases via thin mode using jaydebeapi. Let me know if further customization is needed!
+#=#=
+
 Below are the implementations for db_operations.py, routes.py, and settings.py to handle the /sync service along with proper environment variable management.
 
 db_operations.py
