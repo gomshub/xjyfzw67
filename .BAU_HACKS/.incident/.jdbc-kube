@@ -1,0 +1,170 @@
+Here’s the Kubernetes YAML configuration to deploy the sync_issues module, including deployment, service, ConfigMap, and Secret resources.
+
+1. Deployment YAML (sync-issues-deployment.yaml)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sync-issues
+  labels:
+    app: sync-issues
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sync-issues
+  template:
+    metadata:
+      labels:
+        app: sync-issues
+    spec:
+      containers:
+        - name: sync-issues
+          image: <your-docker-repo>/sync-issues:latest  # Replace with your image
+          ports:
+            - containerPort: 5000
+          env:
+            - name: DB_CONFIG
+              valueFrom:
+                configMapKeyRef:
+                  name: sync-issues-config
+                  key: db_config
+            - name: JIRA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sync-issues-secret
+                  key: jira_token
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sync-issues-secret
+                  key: db_password
+          resources:
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+
+2. Service YAML (sync-issues-service.yaml)
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: sync-issues-service
+  labels:
+    app: sync-issues
+spec:
+  selector:
+    app: sync-issues
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: ClusterIP
+
+3. ConfigMap YAML (sync-issues-configmap.yaml)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sync-issues-config
+data:
+  db_config: |
+    {
+      "PROD": {
+        "driver": "oracle.jdbc.OracleDriver",
+        "url": "jdbc:oracle:thin:@prod-db-host:1521/prod-db",
+        "user": "prod-user",
+        "jar_path": "/path/to/ojdbc8.jar"
+      },
+      "QUALITY": {
+        "driver": "oracle.jdbc.OracleDriver",
+        "url": "jdbc:oracle:thin:@quality-db-host:1521/quality-db",
+        "user": "quality-user",
+        "jar_path": "/path/to/ojdbc8.jar"
+      }
+    }
+
+4. Secret YAML (sync-issues-secret.yaml)
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sync-issues-secret
+type: Opaque
+data:
+  jira_token: <base64-encoded-jira-token>      # Use `echo -n 'your-token' | base64`
+  db_password: <base64-encoded-db-password>   # Use `echo -n 'your-password' | base64`
+
+5. Ingress YAML (Optional)
+
+If you want to expose the service externally, you can use an Ingress resource.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sync-issues-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: sync-issues.your-domain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sync-issues-service
+                port:
+                  number: 80
+
+6. Namespace YAML (Optional)
+
+If you prefer to deploy the application in its own namespace:
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sync-issues
+
+Update all resources to include the namespace: sync-issues field.
+
+Deployment Instructions:
+	1.	Create Namespace (Optional):
+
+kubectl apply -f namespace.yaml
+
+
+	2.	Create ConfigMap:
+
+kubectl apply -f sync-issues-configmap.yaml
+
+
+	3.	Create Secret:
+
+kubectl apply -f sync-issues-secret.yaml
+
+
+	4.	Deploy the Application:
+
+kubectl apply -f sync-issues-deployment.yaml
+
+
+	5.	Create the Service:
+
+kubectl apply -f sync-issues-service.yaml
+
+
+	6.	Optional: Expose via Ingress:
+
+kubectl apply -f sync-issues-ingress.yaml
+
+Notes:
+	•	Replace <your-docker-repo> with your container registry (e.g., Docker Hub, AWS ECR, etc.).
+	•	Ensure the ojdbc8.jar file is included in the container or mounted as a volume.
+	•	Encode sensitive data (e.g., tokens, passwords) into base64 format for the secret.
+
+Let me know if you need further assistance!
