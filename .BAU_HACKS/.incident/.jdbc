@@ -1,3 +1,193 @@
+
+Here’s the implementation of the sync_issues function in db_operations.py that handles insert, update, and delete operations in the database based on the issues fetched from the JIRA API.
+
+This implementation ensures:
+	•	Insertion of new issues.
+	•	Updating existing issues based on the JIRA number.
+	•	Deletion of issues in the database that are no longer present in the JIRA API response.
+	•	Connects to the correct environment (PROD or QUALITY) based on the job_number in the issue’s summary.
+
+sync_issues in db_operations.py
+
+import jaydebeapi
+import logging
+
+class DatabaseOperations:
+    def __init__(self, db_config):
+        """
+        Initialize the DatabaseOperations with DB config.
+        """
+        self.db_config = db_config
+
+    def get_connection(self, environment):
+        """
+        Establish and return a JDBC connection to the database based on the environment.
+        """
+        if environment == "PROD":
+            conn_details = self.db_config["PROD"]
+        elif environment == "QUALITY":
+            conn_details = self.db_config["QUALITY"]
+        else:
+            raise ValueError("Invalid environment specified")
+
+        connection = jaydebeapi.connect(
+            conn_details["driver"],
+            conn_details["url"],
+            [conn_details["user"], conn_details["password"]],
+            conn_details["jar_path"],
+        )
+        return connection
+
+    def sync_issues(self, issues, environment):
+        """
+        Synchronize issues to the database: insert new, update existing, and delete stale records.
+
+        :param issues: List of issues fetched from the JIRA API.
+        :param environment: The target environment ("PROD" or "QUALITY").
+        :return: A dictionary with inserted, updated, and deleted JIRA numbers.
+        """
+        try:
+            connection = self.get_connection(environment)
+            cursor = connection.cursor()
+
+            # Fetch existing issues from the database
+            cursor.execute("SELECT jira_number FROM issues")
+            db_jira_numbers = {row[0] for row in cursor.fetchall()}
+
+            # Prepare sets for comparison
+            api_jira_numbers = {issue["jira_number"] for issue in issues}
+            issues_to_insert = [issue for issue in issues if issue["jira_number"] not in db_jira_numbers]
+            issues_to_update = [issue for issue in issues if issue["jira_number"] in db_jira_numbers]
+            issues_to_delete = db_jira_numbers - api_jira_numbers
+
+            inserted = []
+            updated = []
+            deleted = []
+
+            # Insert new issues
+            for issue in issues_to_insert:
+                query = """
+                    INSERT INTO issues (jira_number, status, summary, job_number, criticity, description, creation_date, comments, first_comment, last_comment, update_comment, update_status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '')
+                """
+                cursor.execute(
+                    query,
+                    (
+                        issue["jira_number"],
+                        issue["status"],
+                        issue["summary"],
+                        issue["job_number"],
+                        issue["criticity"],
+                        issue["description"],
+                        issue["creation_date"],
+                        issue["comments"],
+                        issue["first_comment"],
+                        issue["last_comment"],
+                    ),
+                )
+                inserted.append(issue["jira_number"])
+
+            # Update existing issues
+            for issue in issues_to_update:
+                query = """
+                    UPDATE issues
+                    SET status = ?, summary = ?, job_number = ?, criticity = ?, description = ?, creation_date = ?, comments = ?, first_comment = ?, last_comment = ?
+                    WHERE jira_number = ?
+                """
+                cursor.execute(
+                    query,
+                    (
+                        issue["status"],
+                        issue["summary"],
+                        issue["job_number"],
+                        issue["criticity"],
+                        issue["description"],
+                        issue["creation_date"],
+                        issue["comments"],
+                        issue["first_comment"],
+                        issue["last_comment"],
+                        issue["jira_number"],
+                    ),
+                )
+                updated.append(issue["jira_number"])
+
+            # Delete stale issues
+            for jira_number in issues_to_delete:
+                query = "DELETE FROM issues WHERE jira_number = ?"
+                cursor.execute(query, (jira_number,))
+                deleted.append(jira_number)
+
+            # Commit the transaction
+            connection.commit()
+
+            logging.info(f"Sync completed for {environment}: {len(inserted)} inserted, {len(updated)} updated, {len(deleted)} deleted.")
+            return {
+                "inserted_jira_numbers": inserted,
+                "updated_jira_numbers": updated,
+                "deleted_jira_numbers": deleted,
+            }
+
+        except Exception as e:
+            logging.error(f"Error during sync operation: {e}")
+            raise
+
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if 'connection' in locals():
+                connection.close()
+
+Explanation of the Code:
+
+Database Connection:
+	•	get_connection establishes a JDBC connection using jaydebeapi for the specified environment (PROD or QUALITY).
+
+Fetch Existing Issues:
+	•	The query "SELECT jira_number FROM issues" retrieves all existing JIRA numbers from the database.
+
+Comparison Logic:
+	•	issues_to_insert: Issues in the API response but not in the database.
+	•	issues_to_update: Issues in both the API response and the database.
+	•	issues_to_delete: Issues in the database but not in the API response.
+
+Insert, Update, Delete:
+	•	Insert:
+	•	For new issues, an INSERT query is executed with all issue details.
+	•	Update:
+	•	For existing issues, an UPDATE query updates the details for matching JIRA numbers.
+	•	Delete:
+	•	For stale issues, a DELETE query removes them from the database.
+
+Transaction Handling:
+	•	connection.commit() ensures that all changes are committed to the database.
+
+Error Handling:
+	•	Logs errors and raises exceptions if any part of the sync process fails.
+
+Return Value:
+	•	Returns a dictionary with lists of JIRA numbers for inserted, updated, and deleted issues, which can be used to generate the HTML report.
+
+Sample Output:
+
+If the following operations occurred:
+	•	Inserted: JIRA-001, JIRA-003
+	•	Updated: JIRA-002
+	•	Deleted: JIRA-004
+
+The returned dictionary would be:
+
+{
+    "inserted_jira_numbers": ["JIRA-001", "JIRA-003"],
+    "updated_jira_numbers": ["JIRA-002"],
+    "deleted_jira_numbers": ["JIRA-004"],
+}
+
+This result can be passed to the HTML generation logic to create the sync report.
+
+Let me know if further refinements are needed!
+
+
+=#=#=
 To include the JIRA numbers in the HTML report for each operation (Insert, Update, Delete), we can enhance the HTML template to display the specific JIRA numbers in separate sections.
 
 Here’s the updated implementation:
