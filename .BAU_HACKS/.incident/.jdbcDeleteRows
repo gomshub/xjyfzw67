@@ -1,0 +1,93 @@
+Here’s how you can implement a function to delete all rows from the database when the JIRA API filter returns no results. This function can be integrated into the db_operations.py file. It ensures that if no JIRA issues are retrieved, all entries in the relevant database table are removed.
+
+Function to Delete All Rows
+
+def delete_all_rows_from_db(env, table_name="jira_issues"):
+    """
+    Deletes all rows from the database table when the JIRA API filter returns no results.
+    
+    Args:
+        env (str): The environment to connect to, either "PROD" or "QUALITY".
+        table_name (str): The name of the database table to delete rows from (default: 'jira_issues').
+    
+    Returns:
+        int: Number of rows deleted.
+    """
+    try:
+        # Get database configuration for the environment
+        db_config = get_db_config(env)
+        conn = connect_to_database(db_config)
+
+        with conn.cursor() as cursor:
+            # Execute delete query
+            delete_query = f"DELETE FROM {table_name}"
+            cursor.execute(delete_query)
+            rows_deleted = cursor.rowcount
+
+            # Commit the transaction
+            conn.commit()
+            print(f"Deleted {rows_deleted} rows from the {env} database.")
+
+        return rows_deleted
+
+    except Exception as e:
+        print(f"Error deleting rows from {env} database: {e}")
+        raise
+
+    finally:
+        if conn:
+            conn.close()
+
+Integration with sync_issues_db
+
+In your sync_issues_db function, check if the JIRA API filter returns an empty list and call the delete_all_rows_from_db function.
+
+def sync_issues_db(env, jira_issues):
+    """
+    Synchronizes the JIRA issues with the database, including insert, update, and delete operations.
+
+    Args:
+        env (str): The environment to connect to, either "PROD" or "QUALITY".
+        jira_issues (list): The list of JIRA issues retrieved from the API.
+    """
+    try:
+        if not jira_issues:
+            print(f"No JIRA issues found for {env}. Deleting all rows from the database.")
+            rows_deleted = delete_all_rows_from_db(env)
+            print(f"{rows_deleted} rows deleted from the {env} database.")
+            return
+
+        # Normal sync logic (insert/update/delete) for non-empty results goes here
+        print(f"Synchronizing {len(jira_issues)} JIRA issues to {env} database.")
+        # Example: insert/update logic
+        sync_logic(jira_issues, env)  # Replace with your existing sync logic function
+
+    except Exception as e:
+        print(f"Error syncing JIRA issues to {env} database: {e}")
+        raise
+
+Explanation
+	1.	delete_all_rows_from_db Function:
+	•	Fetches the database connection for the specified environment (PROD or QUALITY).
+	•	Executes a DELETE query to remove all rows from the specified table.
+	•	Commits the transaction and returns the number of rows deleted.
+	2.	Integration in sync_issues_db:
+	•	If jira_issues is empty, it calls delete_all_rows_from_db.
+	•	Logs the number of rows deleted for better traceability.
+
+Example Usage
+
+If the JIRA API filter returns no results:
+
+jira_issues = []  # Empty list simulating no results from JIRA API
+sync_issues_db("PROD", jira_issues)
+
+Output:
+
+No JIRA issues found for PROD. Deleting all rows from the database.
+Deleted 15 rows from the PROD database.
+
+Notes:
+	•	Replace get_db_config and connect_to_database with your database connection logic.
+	•	Adjust the table_name if your database table name is different.
+	•	Ensure appropriate error handling and logging mechanisms in production environments.
