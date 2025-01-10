@@ -1,4 +1,196 @@
 
+Here is the organized implementation of the sync service with proper logic to handle update, insert, and delete operations in the database based on the JIRA API filter results. It ensures the synchronization is performed on the correct database (PROD or QUALITY) based on the Job Number extracted from the JIRA summary.
+
+db_operations.py
+
+This file contains the functions to manage the database synchronization logic.
+
+import jaydebeapi
+
+# Function to connect to the database
+def connect_to_database(env):
+    """
+    Connects to the database based on the given environment.
+
+    Args:
+        env (str): The environment, either 'PROD' or 'QUALITY'.
+
+    Returns:
+        jaydebeapi.Connection: Database connection object.
+    """
+    db_configs = {
+        "PROD": {"url": "jdbc:oracle:thin:@prod-db-url", "user": "prod_user", "password": "prod_password"},
+        "QUALITY": {"url": "jdbc:oracle:thin:@quality-db-url", "user": "quality_user", "password": "quality_password"}
+    }
+
+    config = db_configs.get(env)
+    if not config:
+        raise ValueError(f"Invalid environment: {env}")
+
+    return jaydebeapi.connect(
+        "oracle.jdbc.OracleDriver",
+        config["url"],
+        [config["user"], config["password"]],
+        "ojdbc8.jar"
+    )
+
+
+# Function to synchronize the database
+def sync_issues_to_db(env, jira_issues):
+    """
+    Synchronizes the database with the given JIRA issues.
+    
+    Args:
+        env (str): The environment to sync with, either 'PROD' or 'QUALITY'.
+        jira_issues (list): List of JIRA issues returned by the API.
+    """
+    try:
+        conn = connect_to_database(env)
+
+        with conn.cursor() as cursor:
+            # Step 1: If no issues from JIRA API, delete all rows
+            if not jira_issues:
+                cursor.execute("DELETE FROM jira_issues")
+                conn.commit()
+                print(f"Deleted all rows from the {env} database as no JIRA issues were returned.")
+                return
+
+            # Step 2: Fetch all existing JIRA numbers from the database
+            cursor.execute("SELECT jira_number FROM jira_issues")
+            db_issues = {row[0] for row in cursor.fetchall()}
+
+            # Step 3: Determine insert, update, and delete operations
+            jira_numbers = {issue["jira_number"] for issue in jira_issues}
+
+            issues_to_insert = [issue for issue in jira_issues if issue["jira_number"] not in db_issues]
+            issues_to_update = [issue for issue in jira_issues if issue["jira_number"] in db_issues]
+            issues_to_delete = db_issues - jira_numbers
+
+            # Step 4: Perform insert operations
+            for issue in issues_to_insert:
+                cursor.execute("""
+                    INSERT INTO jira_issues (jira_number, status, summary, job_number, criticity, description,
+                                             creation_date, comments, first_comment, last_comment)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    issue["jira_number"], issue["status"], issue["summary"], issue["job_number"],
+                    issue["criticity"], issue["description"], issue["creation_date"],
+                    issue["comments"], issue["first_comment"], issue["last_comment"]
+                ))
+
+            # Step 5: Perform update operations
+            for issue in issues_to_update:
+                cursor.execute("""
+                    UPDATE jira_issues
+                    SET status = ?, summary = ?, job_number = ?, criticity = ?, description = ?, 
+                        creation_date = ?, comments = ?, first_comment = ?, last_comment = ?
+                    WHERE jira_number = ?
+                """, (
+                    issue["status"], issue["summary"], issue["job_number"],
+                    issue["criticity"], issue["description"], issue["creation_date"],
+                    issue["comments"], issue["first_comment"], issue["last_comment"],
+                    issue["jira_number"]
+                ))
+
+            # Step 6: Perform delete operations
+            for jira_number in issues_to_delete:
+                cursor.execute("DELETE FROM jira_issues WHERE jira_number = ?", (jira_number,))
+
+            # Commit the changes
+            conn.commit()
+
+            print(f"Sync completed for {env} database. Inserted: {len(issues_to_insert)}, "
+                  f"Updated: {len(issues_to_update)}, Deleted: {len(issues_to_delete)}")
+
+    except Exception as e:
+        print(f"Error syncing issues to the {env} database: {e}")
+        raise
+
+    finally:
+        if conn:
+            conn.close()
+
+routes.py
+
+This file defines the /sync route to handle synchronization.
+
+from flask import Blueprint, request, jsonify
+from db_operations import sync_issues_to_db
+
+routes = Blueprint("routes", __name__)
+
+# Mock function to fetch JIRA issues (replace with actual API call logic)
+def fetch_jira_issues():
+    return [
+        {
+            "jira_number": "JIRA-001",
+            "status": "Open",
+            "summary": "Fix bug P01",
+            "job_number": "P01",
+            "criticity": "High",
+            "description": "Description 1",
+            "creation_date": "2025-01-01",
+            "comments": "Comment 1",
+            "first_comment": "First comment",
+            "last_comment": "Last comment"
+        },
+        {
+            "jira_number": "JIRA-002",
+            "status": "In Progress",
+            "summary": "Feature Q01",
+            "job_number": "Q01",
+            "criticity": "Medium",
+            "description": "Description 2",
+            "creation_date": "2025-01-02",
+            "comments": "Comment 2",
+            "first_comment": "First comment",
+            "last_comment": "Last comment"
+        }
+    ]
+
+
+@routes.route("/sync", methods=["POST"])
+def sync_service():
+    """
+    Synchronizes JIRA issues with the database.
+    """
+    try:
+        jira_issues = fetch_jira_issues()  # Replace with the actual JIRA API call
+        prod_issues = [issue for issue in jira_issues if issue["job_number"] == "P01"]
+        quality_issues = [issue for issue in jira_issues if issue["job_number"] == "Q01"]
+
+        if prod_issues:
+            sync_issues_to_db("PROD", prod_issues)
+
+        if quality_issues:
+            sync_issues_to_db("QUALITY", quality_issues)
+
+        return jsonify({"message": "Synchronization completed"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+Key Features
+	1.	Dynamic Environment Selection:
+	•	Synchronization happens to PROD or QUALITY based on the job_number in the JIRA summary.
+	2.	CRUD Operations:
+	•	Insert new issues from the JIRA API.
+	•	Update existing issues.
+	•	Delete issues that are no longer in the JIRA API results.
+	3.	Empty JIRA API Results:
+	•	Deletes all rows from the database when no JIRA issues are returned.
+	4.	Error Handling:
+	•	Proper error handling ensures stability and logs errors for debugging.
+
+Usage
+	•	Deploy the app using Kubernetes or locally.
+	•	Use /sync endpoint to trigger synchronization.
+
+Example Request:
+
+curl -X POST http://localhost:5000/sync
+
+=#=
 Here’s the implementation of the sync_issues function in db_operations.py that handles insert, update, and delete operations in the database based on the issues fetched from the JIRA API.
 
 This implementation ensures:
