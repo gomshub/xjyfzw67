@@ -1,0 +1,230 @@
+Here are two HTML templates and corresponding Python code to fetch JIRA issues from the API filter and return two elegantly styled HTML files:
+
+Template 1: Detailed HTML File (detailed_results.html)
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JIRA Detailed Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f7f7f7;
+            color: #333;
+        }
+        header {
+            background-color: #003366;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px auto;
+            max-width: 1200px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #003366;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        td a {
+            color: #003366;
+            text-decoration: none;
+        }
+        td a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>JIRA Detailed Report</h1>
+    </header>
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Job Number</th>
+                <th>Criticity</th>
+                <th>Summary</th>
+                <th>Description</th>
+                <th>Comments</th>
+                <th>First Comment</th>
+                <th>Recent Comment</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in issues %}
+            <tr>
+                <td><a href="https://jira.example.com/browse/{{ issue['jira_number'] }}" target="_blank">{{ issue['jira_number'] }}</a></td>
+                <td><a href="#">{{ issue['job_number'] }}</a></td>
+                <td>{{ issue['criticity'] }}</td>
+                <td>{{ issue['summary'] }}</td>
+                <td>{{ issue['description'] }}</td>
+                <td>{{ issue['comments'] }}</td>
+                <td>{{ issue['first_comment'] }}</td>
+                <td>{{ issue['recent_comment'] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
+
+Template 2: Summary HTML File (summary_results.html)
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JIRA Summary Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        header {
+            background-color: #333;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+        }
+        table {
+            width: 80%;
+            margin: 30px auto;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: center;
+        }
+        th {
+            background-color: #444;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        td a {
+            color: #003366;
+            text-decoration: none;
+        }
+        td a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>JIRA Summary Report</h1>
+    </header>
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Job Number</th>
+                <th>Summary</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in issues %}
+            <tr>
+                <td><a href="https://jira.example.com/browse/{{ issue['jira_number'] }}" target="_blank">{{ issue['jira_number'] }}</a></td>
+                <td><a href="#">{{ issue['job_number'] }}</a></td>
+                <td>{{ issue['summary'] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
+
+Python Function to Generate HTML
+
+Use Jinja2 for rendering these templates. Below is an example Flask function to handle the rendering:
+
+from flask import render_template, jsonify
+import requests
+
+JIRA_API_URL = "https://jira.example.com/rest/api/2/search"
+JIRA_HEADERS = {"Authorization": "Bearer <your_token>"}
+
+def fetch_jira_issues():
+    # Call JIRA API and parse the response
+    response = requests.get(JIRA_API_URL, headers=JIRA_HEADERS)
+    if response.status_code != 200:
+        return []
+
+    data = response.json()
+    issues = []
+    for issue in data['issues']:
+        jira_number = issue['key']
+        fields = issue['fields']
+        summary = fields['summary']
+        description = fields.get('description', '')
+        comments = fields.get('comment', {}).get('comments', [])
+        first_comment = comments[0]['body'] if comments else ''
+        recent_comment = comments[-1]['body'] if comments else ''
+        criticity = fields.get('priority', {}).get('name', '')
+        job_number = extract_job_number(summary)
+
+        issues.append({
+            "jira_number": jira_number,
+            "job_number": job_number,
+            "criticity": criticity,
+            "summary": summary,
+            "description": description,
+            "comments": len(comments),
+            "first_comment": first_comment,
+            "recent_comment": recent_comment,
+        })
+    return issues
+
+def extract_job_number(summary):
+    # Extract Job Number from summary using regex
+    import re
+    match = re.search(r'(P01|Q01)', summary)
+    return match.group(0) if match else "N/A"
+
+@app.route("/fetch/detailed")
+def detailed_report():
+    issues = fetch_jira_issues()
+    return render_template("detailed_results.html", issues=issues)
+
+@app.route("/fetch/summary")
+def summary_report():
+    issues = fetch_jira_issues()
+    return render_template("summary_results.html", issues=issues)
+
+Steps to Use:
+	1.	Save the templates as templates/detailed_results.html and templates/summary_results.html.
+	2.	Update the API URL and Bearer token in the Python code.
+	3.	Run the Flask app and visit:
+	•	/fetch/detailed for the detailed report.
+	•	/fetch/summary for the summary report.
+
+The CSS styling ensures the tables are readable, elegantly styled, and mobile-responsive.
