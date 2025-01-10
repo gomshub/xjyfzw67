@@ -1,3 +1,63 @@
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+
+
+def sync_issues_to_db(environment, jira_issues):
+    """
+    Sync JIRA issues with the database based on the environment.
+    Returns a dictionary with lists of inserted, updated, and deleted issues.
+    Each list contains dictionaries with 'jira_number' and 'job_number'.
+    """
+    results = {"inserted": [], "updated": [], "deleted": []}
+    db_session = get_db_session(environment)
+
+    try:
+        # Fetch existing issues from the database
+        existing_issues = {
+            issue["jira_number"]: issue
+            for issue in fetch_existing_issues(db_session)
+        }
+
+        # Prepare sets of JIRA numbers for comparison
+        jira_numbers = {issue["jira_number"] for issue in jira_issues}
+
+        # Insert new issues
+        for issue in jira_issues:
+            if issue["jira_number"] not in existing_issues:
+                insert_issue(db_session, issue)
+                results["inserted"].append({
+                    "jira_number": issue["jira_number"],
+                    "job_number": issue.get("job_number"),
+                })
+
+        # Update existing issues
+        for issue in jira_issues:
+            if issue["jira_number"] in existing_issues:
+                update_issue(db_session, issue)
+                results["updated"].append({
+                    "jira_number": issue["jira_number"],
+                    "job_number": issue.get("job_number"),
+                })
+
+        # Delete issues not present in JIRA API results
+        for existing_issue in existing_issues.values():
+            if existing_issue["jira_number"] not in jira_numbers:
+                delete_issue(db_session, existing_issue)
+                results["deleted"].append({
+                    "jira_number": existing_issue["jira_number"],
+                    "job_number": existing_issue.get("job_number"),
+                })
+
+        db_session.commit()
+    except SQLAlchemyError as e:
+        db_session.rollback()
+        raise e
+    finally:
+        db_session.close()
+
+    return results
+=#
+
 Below is a complete HTML template to classify inserted, updated, and deleted JIRAs for PROD and QUALITY environments, styled with CSS:
 
 sync_results.html
