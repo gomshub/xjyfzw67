@@ -1,0 +1,176 @@
+Below is a complete HTML template to classify inserted, updated, and deleted JIRAs for PROD and QUALITY environments, styled with CSS:
+
+sync_results.html
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JIRA Sync Results</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f7f7f7;
+            color: #333;
+        }
+        header {
+            background-color: #003366;
+            color: #fff;
+            padding: 20px;
+            text-align: center;
+        }
+        h1, h2 {
+            margin: 0;
+        }
+        section {
+            margin: 20px auto;
+            width: 90%;
+            max-width: 1200px;
+        }
+        .environment {
+            margin-bottom: 40px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #003366;
+            color: #fff;
+        }
+        .inserted {
+            background-color: #d4edda;
+        }
+        .updated {
+            background-color: #ffeeba;
+        }
+        .deleted {
+            background-color: #f8d7da;
+        }
+        caption {
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-bottom: 10px;
+            text-align: left;
+            color: #333;
+        }
+        a {
+            color: #003366;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>JIRA Sync Results</h1>
+    </header>
+
+    <section class="environment">
+        <h2>PROD Environment</h2>
+        {% for action, issues in prod_results.items() %}
+        <table>
+            <caption>{{ action.capitalize() }} Issues</caption>
+            <thead>
+                <tr>
+                    <th>JIRA Number</th>
+                    <th>Job Number</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for issue in issues %}
+                <tr class="{{ action }}">
+                    <td>
+                        <a href="https://jira.example.com/browse/{{ issue['jira_number'] }}" target="_blank">
+                            {{ issue['jira_number'] }}
+                        </a>
+                    </td>
+                    <td>{{ issue['job_number'] }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endfor %}
+    </section>
+
+    <section class="environment">
+        <h2>QUALITY Environment</h2>
+        {% for action, issues in quality_results.items() %}
+        <table>
+            <caption>{{ action.capitalize() }} Issues</caption>
+            <thead>
+                <tr>
+                    <th>JIRA Number</th>
+                    <th>Job Number</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for issue in issues %}
+                <tr class="{{ action }}">
+                    <td>
+                        <a href="https://jira.example.com/browse/{{ issue['jira_number'] }}" target="_blank">
+                            {{ issue['jira_number'] }}
+                        </a>
+                    </td>
+                    <td>{{ issue['job_number'] }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endfor %}
+    </section>
+</body>
+</html>
+
+Template Details:
+	1.	CSS Classes for Classification:
+	•	.inserted: Green background for newly inserted rows.
+	•	.updated: Yellow background for updated rows.
+	•	.deleted: Red background for deleted rows.
+	2.	Dynamic Data Population:
+	•	Use Python’s Jinja2 template rendering to populate:
+	•	prod_results: Dictionary with actions (inserted, updated, deleted) as keys and corresponding issue lists.
+	•	quality_results: Same as above for the QUALITY environment.
+	3.	JIRA and Job Links:
+	•	JIRA numbers are hyperlinks to their respective JIRA pages.
+	•	Job numbers are displayed as plain text.
+	4.	PROD and QUALITY Classification:
+	•	Separate tables for PROD and QUALITY environments, dynamically generated.
+
+Rendering Template in Flask:
+
+from flask import render_template
+
+@app.route("/sync/results")
+def sync_results():
+    prod_results = {
+        "inserted": [{"jira_number": "PROD-001", "job_number": "P01"}],
+        "updated": [{"jira_number": "PROD-002", "job_number": "P01"}],
+        "deleted": [{"jira_number": "PROD-003", "job_number": "P01"}],
+    }
+    quality_results = {
+        "inserted": [{"jira_number": "QUAL-001", "job_number": "Q01"}],
+        "updated": [{"jira_number": "QUAL-002", "job_number": "Q01"}],
+        "deleted": [{"jira_number": "QUAL-003", "job_number": "Q01"}],
+    }
+    return render_template("sync_results.html", prod_results=prod_results, quality_results=quality_results)
+
+Output:
+
+The HTML page will have:
+	1.	Two sections: one for PROD Environment and one for QUALITY Environment.
+	2.	Each section will have tables classified by inserted, updated, and deleted issues.
+	3.	Styled and organized data with clear color-coding.
