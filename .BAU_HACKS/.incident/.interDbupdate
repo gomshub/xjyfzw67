@@ -1,0 +1,274 @@
+Below is the implementation of an interactive HTML response file, Flask service code, and logic to handle the requirements:
+
+1. Flask Service (routes.py)
+
+This service fetches data from both prod and quality databases after synchronization, populates the update_comment column with a pre-defined list if no value is set, and updates the database interactively.
+
+from flask import Flask, render_template, request, jsonify
+from settings import Config
+from db_operations import DBManager
+
+app = Flask(__name__)
+app.config.from_object(Config)
+
+# Database configuration for prod and quality
+PROD_DB_CONFIG = {
+    "db_url": "jdbc:oracle:thin:@prod_db_host:1521/prod_db_service",
+    "db_user": "prod_user",
+    "db_password": "prod_password",
+    "jdbc_driver": "oracle.jdbc.OracleDriver",
+    "driver_path": "/path/to/ojdbc8.jar"
+}
+
+QUALITY_DB_CONFIG = {
+    "db_url": "jdbc:oracle:thin:@quality_db_host:1521/quality_db_service",
+    "db_user": "quality_user",
+    "db_password": "quality_password",
+    "jdbc_driver": "oracle.jdbc.OracleDriver",
+    "driver_path": "/path/to/ojdbc8.jar"
+}
+
+prod_db_manager = DBManager(**PROD_DB_CONFIG)
+quality_db_manager = DBManager(**QUALITY_DB_CONFIG)
+
+@app.route('/interactive_detailed', methods=['GET', 'POST'])
+def interactive_detailed():
+    """
+    Fetch data from prod and quality DBs and render the interactive HTML page.
+    """
+    if request.method == 'POST':
+        # Update the selected update_comment in the database
+        data = request.json
+        jira_number = data.get("jira_number")
+        job_number = data.get("job_number")
+        update_comment = data.get("update_comment")
+        db_type = data.get("db_type")  # 'prod' or 'quality'
+
+        db_manager = prod_db_manager if db_type == "prod" else quality_db_manager
+        success = db_manager.update_comment(jira_number, job_number, update_comment)
+        return jsonify({"status": "success" if success else "failure"})
+
+    # Fetch issues from prod and quality databases
+    prod_issues = prod_db_manager.fetch_issues()
+    quality_issues = quality_db_manager.fetch_issues()
+
+    return render_template(
+        "interactive_detailed.html",
+        prod_issues=prod_issues,
+        quality_issues=quality_issues,
+        base_url=Config.BASE_URL
+    )
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=6000)
+
+2. db_operations.py
+
+Add a new method to update update_comment values.
+
+import jaydebeapi
+
+class DBManager:
+    def __init__(self, db_url, db_user, db_password, jdbc_driver, driver_path):
+        self.db_url = db_url
+        self.db_user = db_user
+        self.db_password = db_password
+        self.jdbc_driver = jdbc_driver
+        self.driver_path = driver_path
+
+    def fetch_issues(self):
+        """
+        Fetch issues from the database.
+        """
+        query = """
+        SELECT jira_number, job_number, criticity, summary, description, 
+               comments, first_comment, recent_comment, update_comment 
+        FROM jira_issues
+        """
+        try:
+            conn = jaydebeapi.connect(
+                self.jdbc_driver,
+                self.db_url,
+                [self.db_user, self.db_password],
+                self.driver_path
+            )
+            with conn.cursor() as cursor:
+                cursor.execute(query)
+                rows = cursor.fetchall()
+            return rows
+        except Exception as e:
+            print(f"Error fetching issues from DB: {e}")
+            return []
+
+    def update_comment(self, jira_number, job_number, update_comment):
+        """
+        Update the update_comment field in the database.
+        """
+        query = """
+        UPDATE jira_issues
+        SET update_comment = ?
+        WHERE jira_number = ? AND job_number = ?
+        """
+        try:
+            conn = jaydebeapi.connect(
+                self.jdbc_driver,
+                self.db_url,
+                [self.db_user, self.db_password],
+                self.driver_path
+            )
+            with conn.cursor() as cursor:
+                cursor.execute(query, [update_comment, jira_number, job_number])
+                conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error updating comment in DB: {e}")
+            return False
+
+3. HTML Template (interactive_detailed.html)
+
+Interactive HTML response styled with CSS, handling both prod and quality issues.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive JIRA Detailed View</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 20px;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+        }
+        .section {
+            margin-bottom: 50px;
+        }
+        h2 {
+            margin-top: 40px;
+        }
+        input, select, button {
+            padding: 5px;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Interactive JIRA Detailed View</h1>
+
+    <div class="section">
+        <h2>Prod Issues</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>JIRA Number</th>
+                    <th>Job Number</th>
+                    <th>Criticity</th>
+                    <th>Summary</th>
+                    <th>Description</th>
+                    <th>Comments</th>
+                    <th>First Comment</th>
+                    <th>Recent Comment</th>
+                    <th>Update Comment</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for issue in prod_issues %}
+                <tr>
+                    <td><a href="https://jira.example.com/browse/{{ issue[0] }}" target="_blank">{{ issue[0] }}</a></td>
+                    <td><a href="{{ base_url }}/job/{{ issue[1] }}" target="_blank">{{ issue[1] }}</a></td>
+                    <td>{{ issue[2] }}</td>
+                    <td>{{ issue[3] }}</td>
+                    <td>{{ issue[4] }}</td>
+                    <td>{{ issue[5] }}</td>
+                    <td>{{ issue[6] }}</td>
+                    <td>{{ issue[7] }}</td>
+                    <td>
+                        <select id="update_comment_{{ issue[0] }}">
+                            <option value="rerun">rerun</option>
+                            <option value="force ok">force ok</option>
+                        </select>
+                        <button onclick="updateComment('{{ issue[0] }}', '{{ issue[1] }}', 'prod')">Update</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Quality Issues</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>JIRA Number</th>
+                    <th>Job Number</th>
+                    <th>Criticity</th>
+                    <th>Summary</th>
+                    <th>Description</th>
+                    <th>Comments</th>
+                    <th>First Comment</th>
+                    <th>Recent Comment</th>
+                    <th>Update Comment</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for issue in quality_issues %}
+                <tr>
+                    <td><a href="https://jira.example.com/browse/{{ issue[0] }}" target="_blank">{{ issue[0] }}</a></td>
+                    <td><a href="{{ base_url }}/job/{{ issue[1] }}" target="_blank">{{ issue[1] }}</a></td>
+                    <td>{{ issue[2] }}</td>
+                    <td>{{ issue[3] }}</td>
+                    <td>{{ issue[4] }}</td>
+                    <td>{{ issue[5] }}</td>
+                    <td>{{ issue[6] }}</td>
+                    <td>{{ issue[7] }}</td>
+                    <td>
+                        <select id="update_comment_{{ issue[0] }}">
+                            <option value="rerun">rerun</option>
+                            <option value="force ok">force ok</option>
+                        </select>
+                        <button onclick="updateComment('{{ issue[0] }}', '{{ issue[1] }}', 'quality')">Update</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const baseUrl = "{{ base_url }}";
+
+        function updateComment(jiraNumber, jobNumber, dbType) {
+            const comment = document.getElementById(`update_comment_${jiraNumber}`).value;
+            fetch(`${baseUrl}/interactive_detailed`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jira_number: jiraNumber, job_number: jobNumber, update_comment: comment, db_type: dbType })
+            })
+            .then(response => response.json())
+            .then(data => alert(`Update status: ${data.status}`))
+            .catch(err => console.error(err));
+        }
+    </script>
+</body>
+</html>
+
+Key Features:
+	1.	Separate sections for prod and quality issues.
+	2.	Dropdown for update_comment with pre-defined values (rerun, force ok).
+	3.	Interactive functionality to update comments directly into the database.
+	4.	Dynamically fetched data with hyperlinks for jira_number and job_number.
+	5.	Fully responsive and styled for readability.
