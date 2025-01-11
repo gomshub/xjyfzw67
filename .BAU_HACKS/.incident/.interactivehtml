@@ -1,3 +1,111 @@
+include base url in html interactive response
+
+If the HTML response is a file that can be opened in different environments (where the service URL may vary), you need a way to dynamically determine the full API URL when interacting with the service. Here’s how you can handle this:
+
+1. Dynamic API URL Configuration in HTML
+
+Embed the API URL dynamically into the HTML response using a placeholder or an environment variable.
+
+Example for Flask:
+
+from flask import request, render_template
+
+@app.route("/interactive", methods=["GET"])
+def interactive_service():
+    # Get the base URL dynamically
+    base_url = request.host_url  # e.g., "http://localhost:6000/"
+    issues = get_issues_from_db()  # Fetch issues from the database
+    return render_template("interactive.html", issues=issues, base_url=base_url)
+
+In your interactive.html template:
+
+<script>
+    function updateComment(jiraNumber) {
+        const apiUrl = "{{ base_url }}update"; // Dynamically injected full URL
+        const payload = {
+            jira_number: jiraNumber,
+            api_token: prompt("Enter your JIRA API token"),
+            comment: prompt("Enter your comment"),
+        };
+
+        fetch(apiUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(`Update result: ${data.message}`);
+        });
+    }
+</script>
+
+2. Using JavaScript to Detect the Current Base URL
+
+If the API URL is not passed dynamically but the file is opened in a browser, JavaScript can derive the base URL from the page’s location.
+
+Example:
+
+function updateComment(jiraNumber) {
+    const baseUrl = window.location.origin; // Detect current environment
+    const apiUrl = `${baseUrl}/update`;
+    const payload = {
+        jira_number: jiraNumber,
+        api_token: prompt("Enter your JIRA API token"),
+        comment: prompt("Enter your comment"),
+    };
+
+    fetch(apiUrl, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert(`Update result: ${data.message}`);
+    });
+}
+
+3. Environment-Agnostic HTML File
+
+If the HTML file is distributed across multiple environments, ensure the script works dynamically in all cases. Combine both the dynamic Flask injection and JavaScript detection for flexibility.
+
+Final Example for the Interactive HTML Template:
+
+<script>
+    function updateComment(jiraNumber) {
+        // Use either the dynamic base_url from Flask or the current location
+        const apiUrl = "{{ base_url | default: '' }}/update" || `${window.location.origin}/update`;
+        const payload = {
+            jira_number: jiraNumber,
+            api_token: prompt("Enter your JIRA API token"),
+            comment: prompt("Enter your comment"),
+        };
+
+        fetch(apiUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(`Update result: ${data.message}`);
+        });
+    }
+</script>
+
+Key Considerations:
+	1.	Cross-Origin Requests: If the API is hosted on a different domain, ensure proper CORS configuration in your Flask app to allow requests from the HTML file.
+	2.	Security: Avoid exposing sensitive data like API tokens directly in the HTML. Always prompt for tokens or securely manage them in the backend.
+	3.	Environment Handling: For production, consider embedding the correct environment URLs into the HTML response during deployment.
+
+=#=
 Here is the updated implementation for the update_comment service to fetch a detailed list from the database and allow interactive updates for update_comment and marking the JIRA as resolved. It will also handle predefined mandatory fields for marking resolved.
 
 HTML Template (interactive_update.html)
