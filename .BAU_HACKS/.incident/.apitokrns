@@ -1,0 +1,216 @@
+Below is the adapted structure for .env, settings.py, routes.py, and fetching API tokens based on the user passed to the interactive service request. It ensures that the API tokens for each user are stored securely in Kubernetes secrets and fetched dynamically based on the provided username.
+
+1. .env File
+
+Include common environment variables that will be used across the application.
+
+FLASK_ENV=development
+SECRET_KEY=your_secret_key
+BASE_URL=http://localhost:6000
+KUBE_SECRET_PATH=/var/run/secrets/kubernetes.io/serviceaccount
+
+2. settings.py
+
+This file loads environment variables, handles the logic to fetch secrets from Kubernetes, and provides global settings.
+
+import os
+import json
+
+class Config:
+    FLASK_ENV = os.getenv("FLASK_ENV", "production")
+    SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key")
+    BASE_URL = os.getenv("BASE_URL", "http://localhost:6000")
+    KUBE_SECRET_PATH = os.getenv("KUBE_SECRET_PATH", "/var/run/secrets/kubernetes.io/serviceaccount")
+    USER_TOKENS_FILE = f"{KUBE_SECRET_PATH}/user_tokens.json"
+
+    @staticmethod
+    def get_user_api_token(username):
+        """
+        Fetch API token for the given username from Kubernetes secrets or a local fallback.
+        """
+        try:
+            if os.path.exists(Config.USER_TOKENS_FILE):
+                with open(Config.USER_TOKENS_FILE, "r") as f:
+                    tokens = json.load(f)
+                return tokens.get(username)
+            else:
+                raise FileNotFoundError(f"{Config.USER_TOKENS_FILE} not found")
+        except Exception as e:
+            print(f"Error fetching API token for user {username}: {e}")
+            return None
+
+3. routes.py
+
+This file includes the interactive service logic, fetching API tokens dynamically, and handling requests.
+
+from flask import Flask, request, jsonify, render_template
+from settings import Config
+
+app = Flask(__name__)
+app.config.from_object(Config)
+
+@app.route('/interactive', methods=['POST'])
+def interactive_service():
+    """
+    Handles interactive requests for updating comments or resolving status.
+    Fetches API token dynamically based on the provided username.
+    """
+    data = request.json
+    username = data.get("username")
+    action = data.get("action")  # e.g., "update_comment" or "resolve_status"
+    
+    if not username:
+        return jsonify({"error": "Username not provided"}), 400
+
+    # Fetch API token based on the username
+    api_token = Config.get_user_api_token(username)
+    if not api_token:
+        return jsonify({"error": f"API token not found for user {username}"}), 404
+
+    # Perform the requested action
+    if action == "update_comment":
+        # Call a function to handle comment update
+        result = update_comment(data.get("jira_number"), data.get("update_comment"), api_token)
+        return jsonify(result)
+    elif action == "resolve_status":
+        # Call a function to handle resolve status
+        result = resolve_status(data.get("jira_number"), api_token)
+        return jsonify(result)
+    else:
+        return jsonify({"error": "Invalid action provided"}), 400
+
+def update_comment(jira_number, update_comment, api_token):
+    """
+    Updates the comment on JIRA.
+    """
+    # Placeholder for actual API call logic
+    return {
+        "jira_number": jira_number,
+        "status": "Comment updated successfully",
+        "update_comment": update_comment
+    }
+
+def resolve_status(jira_number, api_token):
+    """
+    Marks a JIRA issue as resolved.
+    """
+    # Placeholder for actual API call logic
+    return {
+        "jira_number": jira_number,
+        "status": "Resolved successfully"
+    }
+
+@app.route('/')
+def index():
+    """
+    Test route for interactive HTML.
+    """
+    return render_template('interactive.html', base_url=app.config['BASE_URL'])
+
+if __name__ == '__main__':
+    app.run(debug=True, host="0.0.0.0", port=6000)
+
+4. Kubernetes Secret YAML
+
+Store the API tokens for each user in a Kubernetes secret.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: user-api-tokens
+  namespace: your-namespace
+type: Opaque
+data:
+  user_tokens.json: |
+    eyJhZG1pbiI6ICJ0b2tlbl9mb3JfYWRtaW4iLCAidXNlcm5hbWUxIjogInRva2VuX2Zvcl91c2VyMSIsICJ1c2VybmFtZTIiOiAidG9rZW5fZm9yX3VzZXIyIn0=
+
+	•	The user_tokens.json contains the mapping of usernames to their API tokens. You can encode the JSON as a base64 string.
+
+Example user_tokens.json:
+
+{
+    "admin": "token_for_admin",
+    "username1": "token_for_user1",
+    "username2": "token_for_user2"
+}
+
+5. HTML Template for Interactive Service
+
+This is the interactive HTML file that calls the /interactive service.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Service</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 20px;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>Interactive Service</h1>
+    <table>
+        <tr>
+            <th>JIRA Number</th>
+            <th>Job Number</th>
+            <th>Action</th>
+        </tr>
+        <tr>
+            <td>JIRA-001</td>
+            <td>P01</td>
+            <td>
+                <button onclick="performAction('JIRA-001', 'update_comment')">Update Comment</button>
+                <button onclick="performAction('JIRA-001', 'resolve_status')">Resolve Status</button>
+            </td>
+        </tr>
+        <tr>
+            <td>JIRA-002</td>
+            <td>Q01</td>
+            <td>
+                <button onclick="performAction('JIRA-002', 'update_comment')">Update Comment</button>
+                <button onclick="performAction('JIRA-002', 'resolve_status')">Resolve Status</button>
+            </td>
+        </tr>
+    </table>
+
+    <script>
+        const baseUrl = "{{ base_url }}";
+
+        function performAction(jiraNumber, action) {
+            const username = prompt("Enter your username:");
+            const apiToken = prompt("Enter your API token:");
+
+            if (username && apiToken) {
+                fetch(`${baseUrl}/interactive`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, jira_number: jiraNumber, action })
+                })
+                .then(response => response.json())
+                .then(data => alert(`Action Result: ${JSON.stringify(data)}`))
+                .catch(err => console.error(err));
+            } else {
+                alert("Username or API token is missing!");
+            }
+        }
+    </script>
+</body>
+</html>
+
+This structure ensures secure handling of API tokens using Kubernetes secrets, supports interactive updates for comments or resolve status, and works seamlessly in different environments.
