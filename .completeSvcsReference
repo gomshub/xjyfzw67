@@ -49,6 +49,15 @@ def summary_results():
     jira_issues = prod_db.fetch_jira_issues()
     return render_template("summary.html", issues=jira_issues, base_url=Config.BASE_URL)
 
+def get_kube_base_url():
+    """
+    Dynamically extract the base URL from the incoming request.
+    """
+    # Extract the base URL from the request
+    scheme = request.scheme  # http or https
+    host = request.host      # Includes hostname and port (e.g., intg:8008)
+    base_url = f"{scheme}://{host}"
+    return base_url
 
 @app.route("/interactive", methods=["GET", "POST"])
 def interactive():
@@ -62,6 +71,13 @@ def interactive():
         update_comment = data.get("update_comment")
         resolve_status = data.get("resolve_status")
         system_user = data.get("system_user")
+
+        if not system_user:
+          # Return an error message and status code
+          return jsonify({"error": "No user defined to interact with jira_api"}), 400
+        
+        # Dynamically fetch the kube_base_url from the request
+        kube_base_url = get_kube_base_url()
 
         # Select the appropriate DB
         db = prod_db if job_number.startswith("P") else quality_db
@@ -81,7 +97,7 @@ def interactive():
 
     # Fetch issues for rendering
     issues = prod_db.fetch_all_issues() + quality_db.fetch_all_issues()
-    return render_template("interactive.html", issues=issues, base_url=Config.BASE_URL)
+    return render_template("interactive.html", issues=issues, base_url=kube_base_url)
 
 
 @app.route("/interactive_detailed", methods=["GET", "POST"])
