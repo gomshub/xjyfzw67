@@ -1,4 +1,111 @@
 
+In the code snippet you provided, the filtering for prod_issues and quality_issues relies on the presence of a job_number equal to "P01" or "Q01". If there are no valid job_number values in the jira_issues, the result will be empty lists, which is the issue you’re observing.
+
+To handle this, you can do the following:
+	1.	Log or report issues with invalid job_number values.
+	2.	Return or display these invalid issues in the HTML response for further analysis.
+
+Updated sync_service Code
+
+def sync_service():
+    """
+    Synchronizes JIRA issues with the database.
+    Handles cases where job_number is invalid or missing.
+    """
+    try:
+        jira_issues = fetch_jira_issues()  # Replace with the actual JIRA API call
+
+        # Classify issues by job_number
+        prod_issues = [issue for issue in jira_issues if issue.get("job_number") == "P01"]
+        quality_issues = [issue for issue in jira_issues if issue.get("job_number") == "Q01"]
+
+        # Collect issues with invalid or missing job_number
+        invalid_issues = [
+            issue for issue in jira_issues if issue.get("job_number") not in ["P01", "Q01"]
+        ]
+
+        # Handle invalid issues (Log or return to UI)
+        if invalid_issues:
+            print("Invalid Issues Found:")
+            for issue in invalid_issues:
+                print(f"JIRA Number: {issue['jira_number']}, Summary: {issue['summary']}")
+
+        # Synchronize prod and quality issues
+        if prod_issues:
+            sync_to_db(prod_issues, "prod")
+        else:
+            print("No valid Prod issues found.")
+
+        if quality_issues:
+            sync_to_db(quality_issues, "quality")
+        else:
+            print("No valid Quality issues found.")
+
+        return {
+            "prod_issues": prod_issues,
+            "quality_issues": quality_issues,
+            "invalid_issues": invalid_issues,
+        }
+
+    except Exception as e:
+        print(f"Error during synchronization: {str(e)}")
+        return {"error": str(e)}
+
+Key Updates
+	1.	Handling Invalid Issues:
+	•	Issues with missing or invalid job_number are filtered into the invalid_issues list.
+	•	These can be logged or displayed in the HTML response.
+	2.	Log or Notify:
+	•	The function logs invalid issues for debugging and tracking.
+	3.	Empty Prod/Quality Issues:
+	•	When there are no valid prod_issues or quality_issues, a message is printed to indicate this.
+
+HTML Response Update
+
+You can include the invalid_issues in the HTML response, so they are visible to the user for manual review.
+
+For example, in the HTML template:
+
+<h2>Invalid Issues</h2>
+{% if invalid_issues %}
+    <table>
+        <tr>
+            <th>JIRA Number</th>
+            <th>Summary</th>
+            <th>Reason</th>
+        </tr>
+        {% for issue in invalid_issues %}
+        <tr>
+            <td>{{ issue.jira_number }}</td>
+            <td>{{ issue.summary }}</td>
+            <td>No valid job_number found (P01/Q01 missing)</td>
+        </tr>
+        {% endfor %}
+    </table>
+{% else %}
+    <p>No invalid issues found.</p>
+{% endif %}
+
+Example Output
+
+If the jira_issues contains the following data:
+
+[
+    {"jira_number": "JIRA-1", "summary": "Feature 1", "job_number": "P01"},
+    {"jira_number": "JIRA-2", "summary": "Feature 2", "job_number": "Q01"},
+    {"jira_number": "JIRA-3", "summary": "Invalid job number", "job_number": "X01"},
+    {"jira_number": "JIRA-4", "summary": "Missing job number"}
+]
+
+	•	Prod Issues: ["JIRA-1"]
+	•	Quality Issues: ["JIRA-2"]
+	•	Invalid Issues:
+	•	["JIRA-3", "JIRA-4"]
+
+These results will be logged or displayed in the HTML.
+
+
+=#=
 Here is the organized implementation of the sync service with proper logic to handle update, insert, and delete operations in the database based on the JIRA API filter results. It ensures the synchronization is performed on the correct database (PROD or QUALITY) based on the Job Number extracted from the JIRA summary.
 
 db_operations.py
