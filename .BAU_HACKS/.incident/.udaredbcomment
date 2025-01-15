@@ -1,3 +1,111 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database Summary</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            color: #0056b3;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: #ffffff;
+        }
+        table th, table td {
+            border: 1px solid #ddd;
+            text-align: left;
+            padding: 8px;
+        }
+        table th {
+            background-color: #0056b3;
+            color: white;
+        }
+        table tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        table tr:hover {
+            background-color: #ddd;
+        }
+        a {
+            color: #0056b3;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .no-results {
+            text-align: center;
+            margin: 20px 0;
+            font-size: 18px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <h1>Database Summary</h1>
+
+    {% if prod_issues or quality_issues %}
+        <h2>Production Issues</h2>
+        {% if prod_issues %}
+        <table>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Job Number</th>
+                <th>Summary</th>
+                <th>Update Incident Comment</th>
+            </tr>
+            {% for issue in prod_issues %}
+            <tr>
+                <td><a href="{{ jira_url }}/browse/{{ issue.jira_number }}" target="_blank">{{ issue.jira_number }}</a></td>
+                <td>{{ issue.job_number }}</td>
+                <td>{{ issue.summary }}</td>
+                <td>{{ issue.update_incident_comment or 'N/A' }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p class="no-results">No production issues found.</p>
+        {% endif %}
+
+        <h2>Quality Issues</h2>
+        {% if quality_issues %}
+        <table>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Job Number</th>
+                <th>Summary</th>
+                <th>Update Incident Comment</th>
+            </tr>
+            {% for issue in quality_issues %}
+            <tr>
+                <td><a href="{{ jira_url }}/browse/{{ issue.jira_number }}" target="_blank">{{ issue.jira_number }}</a></td>
+                <td>{{ issue.job_number }}</td>
+                <td>{{ issue.summary }}</td>
+                <td>{{ issue.update_incident_comment or 'N/A' }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p class="no-results">No quality issues found.</p>
+        {% endif %}
+    {% else %}
+        <p class="no-results">No issues found in either production or quality databases.</p>
+    {% endif %}
+</body>
+</html>
+#==
+
 Below is the db_ops.py file containing functions to fetch data from production and quality databases for the DbSummary.html functionality:
 
 db_ops.py
