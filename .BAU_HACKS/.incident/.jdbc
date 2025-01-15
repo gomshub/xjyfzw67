@@ -1,4 +1,129 @@
 
+To handle the situation where job_number might not be present or needs to be categorized into prod_issues, quality_issues, or other_issues, and to determine the type based on a regular expression, the updated code should:
+	1.	Use regular expressions to check for P01 (prod) or Q01 (quality).
+	2.	Add issues without job_number or non-matching ones to an other_issues list.
+	3.	Handle cases where job_number needs to be extracted dynamically from summary.
+
+Here’s the updated code:
+
+Updated sync_service
+
+import re
+
+def extract_job_number(summary):
+    """
+    Extracts the job number (P01, Q01) from the issue summary using a regex.
+    
+    Args:
+        summary (str): The summary string of the issue.
+
+    Returns:
+        str: The extracted job number or None if not found.
+    """
+    match = re.search(r'\b(P\d{2}|Q\d{2})\b', summary)
+    return match.group(0) if match else None
+
+def sync_service():
+    """
+    Synchronizes JIRA issues with the database, categorizing them as prod, quality, or other issues.
+    """
+    try:
+        jira_issues = fetch_jira_issues()  # Replace with the actual JIRA API call
+        
+        # Lists for categorized issues
+        prod_issues = []
+        quality_issues = []
+        other_issues = []
+
+        for issue in jira_issues:
+            job_number = issue.get("job_number")
+
+            # Extract job_number from summary if it's not present
+            if not job_number and "summary" in issue:
+                job_number = extract_job_number(issue["summary"])
+                issue["job_number"] = job_number  # Update the issue with the extracted job_number
+
+            # Categorize issues
+            if job_number == "P01":
+                prod_issues.append(issue)
+            elif job_number == "Q01":
+                quality_issues.append(issue)
+            else:
+                other_issues.append(issue)
+
+        # Logging or processing the categorized issues
+        print(f"Prod Issues: {len(prod_issues)}")
+        print(f"Quality Issues: {len(quality_issues)}")
+        print(f"Other Issues: {len(other_issues)}")
+
+        # Sync categorized issues to respective databases
+        sync_to_db(prod_issues, "prod")
+        sync_to_db(quality_issues, "quality")
+        sync_to_db(other_issues, "other")
+
+    except Exception as e:
+        print(f"Error in sync_service: {str(e)}")
+
+def sync_to_db(issues, db_type):
+    """
+    Syncs a list of issues to the specified database.
+
+    Args:
+        issues (list): List of issues to sync.
+        db_type (str): The database type ('prod', 'quality', 'other').
+    """
+    # Logic to handle database syncing
+    print(f"Syncing {len(issues)} issues to {db_type} database.")
+    # Add database syncing logic here
+
+Key Changes and Features
+	1.	extract_job_number Function:
+	•	Uses a regular expression to extract P01, Q01, or similar patterns (Pxx, Qxx) from the issue’s summary.
+	2.	Dynamic Categorization:
+	•	Issues with job_number explicitly as P01 are added to prod_issues.
+	•	Issues with job_number explicitly as Q01 are added to quality_issues.
+	•	All other issues (e.g., missing or non-matching job_number) are added to other_issues.
+	3.	Updated Issues:
+	•	If job_number is extracted dynamically from the summary, it is updated in the issue dictionary.
+	4.	Database Sync:
+	•	Issues are synced to databases using the sync_to_db function, which logs the operation for now and can be customized for actual database interactions.
+
+Example Behavior
+
+Input
+
+jira_issues = [
+    {"jira_number": "JIRA-1", "summary": "Critical issue for P01 environment", "job_number": None},
+    {"jira_number": "JIRA-2", "summary": "Bug fix for Q01 system", "job_number": None},
+    {"jira_number": "JIRA-3", "summary": "General update without job number", "job_number": None},
+    {"jira_number": "JIRA-4", "summary": "Another task for P02 system", "job_number": None},
+]
+
+Output
+	•	Prod Issues:
+
+[{"jira_number": "JIRA-1", "summary": "Critical issue for P01 environment", "job_number": "P01"}]
+
+
+	•	Quality Issues:
+
+[{"jira_number": "JIRA-2", "summary": "Bug fix for Q01 system", "job_number": "Q01"}]
+
+
+	•	Other Issues:
+
+[
+  {"jira_number": "JIRA-3", "summary": "General update without job number", "job_number": None},
+  {"jira_number": "JIRA-4", "summary": "Another task for P02 system", "job_number": "P02"}
+]
+
+Integration with fetch_jira_issues
+
+Replace the placeholder fetch_jira_issues() function with the actual JIRA API integration to retrieve issues dynamically.
+
+This structure ensures all issues, even without job_number or with unrecognized patterns, are appropriately handled.
+
+=#=#=
 In the code snippet you provided, the filtering for prod_issues and quality_issues relies on the presence of a job_number equal to "P01" or "Q01". If there are no valid job_number values in the jira_issues, the result will be empty lists, which is the issue you’re observing.
 
 To handle this, you can do the following:
