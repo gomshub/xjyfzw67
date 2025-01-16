@@ -1,0 +1,178 @@
+Here is the complete implementation to achieve the requested functionality:
+
+Steps
+	1.	Fetch Issues from JIRA API: Fetch issues including jira_number and recent_comment.
+	2.	Query the Database: Check if jira_number exists in the database and retrieve the update_comment column.
+	3.	Combine Results: Merge the data from the JIRA API and database.
+	4.	Return as HTML File: Generate an HTML file displaying jira_number, job_number, recent_comment (from JIRA API), and update_comment (from the database).
+
+Code
+
+jira_ops.py: Fetch JIRA Issues
+
+def fetch_jira_issues():
+    """
+    Fetch issues from the JIRA API.
+
+    Returns:
+        list[dict]: List of issues with `jira_number`, `job_number`, and `recent_comment`.
+    """
+    # Mock JIRA API data
+    return [
+        {"jira_number": "JIRA-1", "job_number": "P01", "recent_comment": "Issue resolved."},
+        {"jira_number": "JIRA-2", "job_number": "Q01", "recent_comment": "Bug fix in progress."},
+        {"jira_number": "JIRA-3", "job_number": "P02", "recent_comment": "Awaiting testing."},
+    ]
+
+db_ops.py: Fetch update_comment for JIRA Numbers
+
+import sqlite3
+
+def get_update_comment_from_db(jira_numbers):
+    """
+    Fetch `update_comment` for the given JIRA numbers from the database.
+
+    Args:
+        jira_numbers (list[str]): List of JIRA numbers.
+
+    Returns:
+        dict: A dictionary where the key is `jira_number` and the value is `update_comment`.
+    """
+    # Database connection
+    conn = sqlite3.connect("issues.db")
+    cursor = conn.cursor()
+
+    # Query update_comment for given jira_numbers
+    placeholders = ",".join(["?"] * len(jira_numbers))
+    query = f"SELECT jira_number, update_comment FROM issues WHERE jira_number IN ({placeholders})"
+    cursor.execute(query, jira_numbers)
+
+    # Fetch and map results
+    results = {row[0]: row[1] for row in cursor.fetchall()}
+
+    conn.close()
+    return results
+
+routes.py: Combine Data and Generate HTML
+
+from flask import Flask, render_template
+from jira_ops import fetch_jira_issues
+from db_ops import get_update_comment_from_db
+
+app = Flask(__name__)
+
+@app.route("/issues")
+def generate_issues_report():
+    """
+    Fetch JIRA issues, combine with database comments, and return HTML.
+
+    Returns:
+        str: Rendered HTML file.
+    """
+    # Fetch JIRA issues
+    jira_issues = fetch_jira_issues()
+
+    # Extract JIRA numbers
+    jira_numbers = [issue["jira_number"] for issue in jira_issues]
+
+    # Fetch update_comment from the database
+    update_comments = get_update_comment_from_db(jira_numbers)
+
+    # Merge results
+    for issue in jira_issues:
+        issue["update_comment"] = update_comments.get(issue["jira_number"], "No comment")
+
+    # Render HTML
+    return render_template("issues_report.html", issues=jira_issues)
+
+if __name__ == "__main__":
+    app.run(port=6000)
+
+HTML Template: templates/issues_report.html
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Issues Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        tr:hover {
+            background-color: #ddd;
+        }
+        a {
+            color: #4CAF50;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>Issues Report</h1>
+    {% if issues %}
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Job Number</th>
+                <th>Recent Comment</th>
+                <th>Update Comment</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in issues %}
+            <tr>
+                <td><a href="{{ jira_url }}/browse/{{ issue.jira_number }}" target="_blank">{{ issue.jira_number }}</a></td>
+                <td>{{ issue.job_number }}</td>
+                <td>{{ issue.recent_comment }}</td>
+                <td>{{ issue.update_comment }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No issues found.</p>
+    {% endif %}
+</body>
+</html>
+
+Environment Variables (.env)
+
+JIRA_URL=https://your-jira-instance.com
+PROD_DB_URL=prod_db_url
+PROD_DB_PASSWORD=prod_db_password
+QUALITY_DB_URL=quality_db_url
+QUALITY_DB_PASSWORD=quality_db_password
+
+Testing the Service
+	1.	Start the Flask App: Run routes.py.
+	2.	Access the Report: Open http://localhost:6000/issues in your browser.
+	3.	Verify the Results:
+	•	Displays all jira_number, job_number, recent_comment, and update_comment.
+	•	Hyperlinks to jira_number link to the respective JIRA issue.
+
+This implementation dynamically fetches data from both JIRA and the database, merges them, and displays them in a styled, interactive HTML table.
