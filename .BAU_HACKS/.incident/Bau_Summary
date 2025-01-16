@@ -1,4 +1,48 @@
-Here is the complete implementation to achieve the requested functionality:
+from flask import Flask, render_template
+from jira_ops import fetch_jira_issues
+from db_ops import get_update_comment
+
+app = Flask(__name__)
+
+def determine_db_env(job_number):
+    """
+    Determine the database environment based on the job_number.
+
+    Args:
+        job_number (str): Job number extracted from summary.
+
+    Returns:
+        str: "prod" for Production DB, "quality" for Quality DB, or "unknown".
+    """
+    if job_number and job_number.startswith("P"):
+        return "prod"
+    elif job_number and job_number.startswith("Q"):
+        return "quality"
+    return "unknown"
+
+@app.route("/issues")
+def generate_issues_report():
+    """
+    Fetch JIRA issues, determine DB environment, fetch comments, and render HTML.
+
+    Returns:
+        str: Rendered HTML file.
+    """
+    # Fetch issues from JIRA
+    jira_issues = fetch_jira_issues()
+
+    # Add update_comment for each issue
+    for issue in jira_issues:
+        db_env = determine_db_env(issue["job_number"])
+        issue["update_comment"] = get_update_comment(issue["jira_number"], db_env)
+
+    # Render the HTML
+    return render_template("issues_with_env.html", issues=jira_issues)
+
+if __name__ == "__main__":
+    app.run(port=6000)
+
+#Here is the complete implementation to achieve the requested functionality:
 
 Steps
 	1.	Fetch Issues from JIRA API: Fetch issues including jira_number and recent_comment.
