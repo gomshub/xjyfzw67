@@ -1,3 +1,107 @@
+To ensure that the recent_comment and update_comment fields are displayed legibly in the HTML table, you can use CSS to:
+	1.	Set a maximum width for the columns: Prevents the comments from stretching the table excessively.
+	2.	Enable word wrapping: Ensures that long comments wrap to the next line instead of extending horizontally.
+	3.	Add vertical scrolling for very large comments: Limits the displayed height and makes it scrollable within the cell if necessary.
+
+Here’s an updated HTML and CSS approach to make these columns legible:
+
+Updated HTML Template (issues_with_env.html)
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Issues Report with Comments</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+            vertical-align: top; /* Align text at the top of cells */
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        tr:hover {
+            background-color: #ddd;
+        }
+        a {
+            color: #4CAF50;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .comment-cell {
+            max-width: 300px; /* Limit the width of the comments */
+            word-wrap: break-word; /* Allow breaking long words */
+            white-space: pre-wrap; /* Preserve line breaks in comments */
+            overflow-y: auto; /* Add scrolling for very large comments */
+            height: auto; /* Auto height unless it exceeds max-height */
+            max-height: 150px; /* Limit the maximum height of comments */
+        }
+    </style>
+</head>
+<body>
+    <h1>Issues Report with Comments</h1>
+    {% if issues %}
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Job Number</th>
+                <th>Recent Comment</th>
+                <th>Update Comment</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in issues %}
+            <tr>
+                <td><a href="{{ jira_url }}/browse/{{ issue.jira_number }}" target="_blank">{{ issue.jira_number }}</a></td>
+                <td>{{ issue.job_number or "N/A" }}</td>
+                <td class="comment-cell">{{ issue.recent_comment or "No recent comment" }}</td>
+                <td class="comment-cell">{{ issue.update_comment or "No update comment" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No issues found.</p>
+    {% endif %}
+</body>
+</html>
+
+Key Adjustments for Legibility
+	1.	.comment-cell CSS Class:
+	•	max-width: 300px;: Ensures the comments do not stretch horizontally beyond 300px.
+	•	word-wrap: break-word;: Allows breaking of long words to fit within the cell.
+	•	white-space: pre-wrap;: Preserves line breaks in the comments and allows wrapping.
+	•	overflow-y: auto; and max-height: 150px;: Adds vertical scrolling for long comments, limiting the visible height to 150px.
+	2.	Table Styling:
+	•	Alignment (vertical-align: top): Aligns the text to the top for readability, especially for multi-line comments.
+	3.	Fallback Text:
+	•	If no comment exists, the cell displays “No recent comment” or “No update comment” for clarity.
+
+Result
+	•	Readable Layout: Both recent_comment and update_comment will fit neatly into their cells, even if the comments are lengthy.
+	•	Scrollability: Very long comments can be scrolled vertically within their cells without breaking the table layout.
+	•	Preserved Formatting: Line breaks in comments (e.g., paragraphs
+
 
 import sqlite3
 
