@@ -1,3 +1,36 @@
+
+import sqlite3
+
+def get_update_comment(jira_number, db_env):
+    """
+    Fetch the `update_comment` for a given JIRA number from the specified database.
+
+    Args:
+        jira_number (str): JIRA number.
+        db_env (str): Database environment ("prod" or "quality").
+
+    Returns:
+        str: The `update_comment` for the JIRA number, or "No comment" if not found.
+    """
+    if db_env == "prod":
+        db_url = "prod_db_url"  # Replace with actual database connection string
+    elif db_env == "quality":
+        db_url = "quality_db_url"  # Replace with actual database connection string
+    else:
+        return "Invalid DB Environment"
+
+    conn = sqlite3.connect(db_url)
+    cursor = conn.cursor()
+
+    # Query the update_comment
+    query = "SELECT update_comment FROM issues WHERE jira_number = ?"
+    cursor.execute(query, (jira_number,))
+    result = cursor.fetchone()
+
+    conn.close()
+
+    return result[0] if result else "No comment"
+
 from flask import Flask, render_template
 from jira_ops import fetch_jira_issues
 from db_ops import get_update_comment
