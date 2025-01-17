@@ -1,3 +1,181 @@
+To implement system-user-based API token handling in the interactive page, the API token will need to be dynamically fetched for the current system user and passed securely to the backend for update_comment or resolve_status operations.
+
+Here’s how to modify the workflow and the code:
+
+Workflow:
+	1.	System User Identification:
+	•	The system user is passed to the Flask backend when generating the interactive HTML page.
+	•	The backend fetches the corresponding API token for the system user from a secure store (e.g., Kubernetes secrets or .env file).
+	2.	Token Use in Backend:
+	•	The API token for the current user is securely retrieved during each interactive operation (update_comment or resolve_status).
+	3.	Frontend Code:
+	•	No API token is exposed in the frontend. Instead, the fetch requests only include necessary data (like jira_number and comment), and the backend uses the appropriate token based on the user context.
+
+Updated Code Implementation:
+
+1. Backend: routes.py
+
+from flask import Flask, render_template, request, jsonify
+import os
+import json
+
+app = Flask(__name__)
+
+# Load API tokens from a secure source (e.g., Kubernetes secret or .env file)
+def load_user_tokens():
+    user_tokens_path = os.getenv("USER_TOKENS_FILE", "user_tokens.json")
+    with open(user_tokens_path, "r") as file:
+        return json.load(file)
+
+USER_TOKENS = load_user_tokens()
+
+# Get API token for the current user
+def get_api_token_for_user(system_user):
+    return USER_TOKENS.get(system_user)
+
+@app.route('/interactive', methods=['GET', 'POST'])
+def interactive_page():
+    system_user = request.form.get("username") or request.args.get("username")
+    if not system_user:
+        return "System user not provided.", 400
+
+    api_token = get_api_token_for_user(system_user)
+    if not api_token:
+        return f"No API token found for user: {system_user}", 403
+
+    return render_template('interactive.html', base_url=request.url_root, system_user=system_user)
+
+@app.route('/update_comment', methods=['POST'])
+def update_comment():
+    data = request.json
+    jira_number = data.get("jira_number")
+    comment = data.get("comment")
+    system_user = data.get("system_user")
+
+    if not system_user:
+        return jsonify({"status": "error", "message": "System user not provided."}), 400
+
+    api_token = get_api_token_for_user(system_user)
+    if not api_token:
+        return jsonify({"status": "error", "message": f"No API token found for user: {system_user}"}), 403
+
+    # Perform update_comment logic with the user's API token
+    # Example: Call JIRA API with the token to update the comment
+    # jira_api_update_comment(jira_number, comment, api_token)
+
+    return jsonify({"status": "success", "jira_number": jira_number, "comment": comment})
+
+@app.route('/resolve_status', methods=['POST'])
+def resolve_status():
+    data = request.json
+    jira_number = data.get("jira_number")
+    system_user = data.get("system_user")
+
+    if not system_user:
+        return jsonify({"status": "error", "message": "System user not provided."}), 400
+
+    api_token = get_api_token_for_user(system_user)
+    if not api_token:
+        return jsonify({"status": "error", "message": f"No API token found for user: {system_user}"}), 403
+
+    # Perform resolve_status logic with the user's API token
+    # Example: Call JIRA API with the token to resolve the issue
+    # jira_api_resolve_status(jira_number, api_token)
+
+    return jsonify({"status": "success", "jira_number": jira_number})
+
+2. Frontend: interactive.html
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Interactive JIRA Management</title>
+    <script>
+        const baseUrl = "{{ base_url }}";
+        const systemUser = "{{ system_user }}";  // Injected from the backend
+
+        function updateComment(jiraNumber) {
+            const comment = document.getElementById(`comment_${jiraNumber}`).value;
+            fetch(`${baseUrl}/update_comment`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jira_number: jiraNumber, comment, system_user: systemUser })
+            })
+            .then(response => response.json())
+            .then(data => alert(`Comment updated: ${data.status}`))
+            .catch(err => console.error(err));
+        }
+
+        function resolveStatus(jiraNumber) {
+            fetch(`${baseUrl}/resolve_status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jira_number: jiraNumber, system_user: systemUser })
+            })
+            .then(response => response.json())
+            .then(data => alert(`Issue resolved: ${data.status}`))
+            .catch(err => console.error(err));
+        }
+    </script>
+</head>
+<body>
+    <h1>Interactive JIRA Management for {{ system_user }}</h1>
+    <table>
+        <tr>
+            <th>JIRA Number</th>
+            <th>Job Number</th>
+            <th>Comment</th>
+            <th>Actions</th>
+        </tr>
+        <tr>
+            <td>JIRA-123</td>
+            <td>P01</td>
+            <td><input type="text" id="comment_JIRA-123" value="Initial comment"></td>
+            <td>
+                <button onclick="updateComment('JIRA-123')">Update Comment</button>
+                <button onclick="resolveStatus('JIRA-123')">Resolve Status</button>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+
+Steps for Local Development and Testing:
+	1.	Prepare user_tokens.json in Local:
+	•	Example user_tokens.json:
+
+{
+    "user1": "api_token_for_user1",
+    "user2": "api_token_for_user2"
+}
+
+
+	•	Place this file in the root directory or set the USER_TOKENS_FILE environment variable.
+
+	2.	Run Flask Locally:
+
+export FLASK_ENV=development
+export USER_TOKENS_FILE=user_tokens.json
+flask run --port 6000
+
+
+	3.	Test with Curl:
+
+curl -X POST http://localhost:6000/interactive -d "username=user1"
+curl -X POST http://localhost:6000/update_comment \
+    -H "Content-Type: application/json" \
+    -d '{"jira_number": "JIRA-123", "comment": "New Comment", "system_user": "user1"}'
+
+
+	4.	Access the App in a Browser:
+	•	Navigate to http://localhost:6000/interactive?username=user1.
+
+Security Notes:
+	•	Ensure user_tokens.json is excluded from version control (.gitignore).
+	•	Use secrets management solutions (like Kubernetes secrets) in production instead of a plain JSON file.
+
+==
+
 Here is the complete updated code that implements the described requirements. It includes an interactive update_comment service that:
 	1.	Fetches detailed information from the database.
 	2.	Populates the update_comment field in an editable manner in the HTML response.
