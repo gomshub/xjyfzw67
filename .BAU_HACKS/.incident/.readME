@@ -1,0 +1,184 @@
+Here is a comprehensive README.md for your project:
+
+Flask JIRA Sync Service
+
+This project provides a Flask-based API to synchronize JIRA issues with a database. It also includes interactive HTML templates for updating and resolving issues, fetching data from multiple environments, and visualizing data in a user-friendly format.
+
+Features
+	•	Synchronizes JIRA issues with prod and quality databases.
+	•	Provides HTML reports (detailed_results.html, interactive.html) with styled tables and editable fields.
+	•	Supports updating comments and resolving issues interactively.
+	•	Environment-aware setup with local .env support for development and Kubernetes secrets for production.
+
+Setup Instructions
+
+1. Clone the Repository
+
+git clone https://github.com/your-repo/flask-jira-sync.git
+cd flask-jira-sync
+
+2. Local Environment Setup
+
+Step 1: Create a Virtual Environment
+	•	Linux/Mac:
+
+python3 -m venv venv
+source venv/bin/activate
+
+
+	•	Windows:
+
+python -m venv venv
+venv\Scripts\activate
+
+
+
+Step 2: Install Dependencies
+
+pip install -r requirements.txt
+
+Step 3: Create the .env File
+
+Create a .env file in the project root:
+
+FLASK_ENV=development
+SECRET_KEY=your_secret_key
+BASE_URL=http://localhost:6000
+LOCAL_SECRET_PATH=./secrets
+
+Step 4: Create the secrets/user_tokens.json File
+
+Create a secrets/ directory and a user_tokens.json file:
+
+mkdir secrets
+echo '{"user1": "token_for_user1", "user2": "token_for_user2"}' > secrets/user_tokens.json
+
+3. Running the Application
+
+Run Flask
+	1.	Set Flask environment variables:
+
+export FLASK_APP=app.routes
+export FLASK_ENV=development
+
+
+	2.	Start the Flask application:
+
+flask run
+
+
+	3.	Access the application at http://localhost:5000.
+
+4. Testing with cURL
+
+Use the following commands to test the API:
+
+Fetch JIRA Issues
+
+curl -X GET http://localhost:5000/api/jira/issues
+
+Sync Issues
+
+curl -X POST http://localhost:5000/api/jira/sync
+
+Update a Comment
+
+curl -X POST http://localhost:5000/api/jira/update_comment \
+     -H "Content-Type: application/json" \
+     -d '{"jira_number": "JIRA-123", "comment": "Updated comment"}'
+
+Resolve an Issue
+
+curl -X POST http://localhost:5000/api/jira/resolve \
+     -H "Content-Type: application/json" \
+     -d '{"jira_number": "JIRA-123", "resolution": "Done"}'
+
+5. Deployment to Kubernetes
+
+Docker Image
+	1.	Build the Docker image:
+
+docker build -t your-image-name .
+
+
+	2.	Push the image to your registry:
+
+docker push your-image-name
+
+
+
+Helm Chart
+	1.	Package the Helm chart:
+
+helm package helm/
+
+
+	2.	Push to your Helm repository (e.g., Artifactory).
+
+Kubernetes Deployment
+	1.	Apply the Kubernetes manifests:
+
+kubectl apply -f kube/deployment.yaml
+
+
+
+ArgoCD Integration
+	1.	Create an ArgoCD application manifest to deploy the Helm chart.
+	2.	Automate the pipeline using Bamboo with steps for:
+	•	Building and pushing the Docker image.
+	•	Uploading the Helm chart to Artifactory.
+	•	Deploying via ArgoCD.
+
+6. Project Structure
+
+project/
+├── app/
+│   ├── __init__.py
+│   ├── settings.py
+│   ├── routes.py
+│   ├── db_ops.py
+│   ├── jira_ops.py
+│   ├── templates/
+│   │   ├── detailed_results.html
+│   │   ├── interactive.html
+│   │   ├── summary.html
+│   │   └── db_summary.html
+│   └── static/
+│       └── style.css
+├── secrets/
+│   └── user_tokens.json
+├── .env
+├── .gitignore
+├── Dockerfile
+├── requirements.txt
+├── README.md
+├── helm/
+│   ├── Chart.yaml
+│   ├── values.yaml
+│   └── templates/
+├── kube/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── ingress.yaml
+
+7. Notes
+
+Environment Variables
+	•	Development: .env file is used.
+	•	Production: Secrets are stored in Kubernetes.
+
+Security
+	•	Add sensitive files like .env and secrets/ to .gitignore.
+
+Styling
+	•	All HTML templates are styled with style.css in the static/ directory.
+
+Interactive Updates
+	•	HTML templates include forms for updating comments and resolving issues. They dynamically call the corresponding Flask routes.
+
+8. Future Enhancements
+	•	Add authentication and authorization for API routes.
+	•	Implement more detailed error handling.
+	•	Integrate monitoring tools like Prometheus or Grafana for Kubernetes.
+
+This README.md provides a full guide for setting up, running, and deploying your Flask JIRA Sync Service. Let me know if you’d like any refinements or additional details!
