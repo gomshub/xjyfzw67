@@ -1,3 +1,18 @@
+
+@echo off
+REM Get the current username
+set "USERNAME=%USERNAME%"
+
+REM Prepare the POST data
+set "POST_DATA=username=%USERNAME%"
+
+REM Use curl to send the POST request
+curl -X POST http://localhost:6000/interactive -H "Content-Type: application/x-www-form-urlencoded" -d "%POST_DATA%"
+
+REM Pause for user to see the output
+pause
+
+
 To get the system user on a Windows machine using a shell script and pass it to an HTML file for further use, you can achieve this through the following steps:
 
 Step 1: Get the System User in Shell Script
