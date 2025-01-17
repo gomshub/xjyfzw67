@@ -1,3 +1,206 @@
+
+Here’s a detailed guide to set up your local development environment, including the use of loadenv(), .gitignore management, testing with Flask, project structure, and curl examples.
+
+1. Project Structure
+
+Your project should follow a structure similar to this:
+
+project/
+├── app/
+│   ├── __init__.py
+│   ├── settings.py
+│   ├── routes.py
+│   ├── db_ops.py
+│   ├── jira_ops.py
+│   ├── templates/
+│   │   ├── detailed_results.html
+│   │   ├── interactive.html
+│   │   └── ...
+│   └── static/
+│       └── style.css
+├── secrets/               # For local dev secrets
+│   └── user_tokens.json
+├── .env                   # For local development environment variables
+├── .gitignore             # Ignore sensitive files
+├── Dockerfile
+├── requirements.txt       # Python dependencies
+├── README.md
+└── venv/                  # Python virtual environment
+
+2. .gitignore File
+
+Add the following entries to your .gitignore file to avoid committing sensitive files:
+
+# Ignore virtual environment
+venv/
+
+# Ignore secrets
+secrets/
+.env
+
+# Byte-compiled Python files
+__pycache__/
+*.py[cod]
+
+# Ignore local editor or OS-specific files
+*.swp
+.DS_Store
+
+3. Modify settings.py for loadenv()
+
+Use loadenv() from python-dotenv to load environment variables locally:
+
+import os
+import json
+from dotenv import load_dotenv
+
+class Config:
+    FLASK_ENV = os.getenv("FLASK_ENV", "production")
+    SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key")
+    BASE_URL = os.getenv("BASE_URL", "http://localhost:6000")
+
+    # Load .env only in local development
+    if FLASK_ENV == "development":
+        load_dotenv()  # Load variables from .env
+        KUBE_SECRET_PATH = os.getenv("LOCAL_SECRET_PATH", "./secrets")
+    else:
+        KUBE_SECRET_PATH = os.getenv("KUBE_SECRET_PATH", "/var/run/secrets/kubernetes.io/serviceaccount")
+
+    USER_TOKENS_FILE = f"{KUBE_SECRET_PATH}/user_tokens.json"
+
+    @classmethod
+    def load_user_tokens(cls):
+        """Load user tokens from the JSON file."""
+        try:
+            with open(cls.USER_TOKENS_FILE, "r") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"User tokens file not found at {cls.USER_TOKENS_FILE}")
+        except json.JSONDecodeError:
+            raise ValueError(f"Invalid JSON in user tokens file: {cls.USER_TOKENS_FILE}")
+
+4. Create .env File for Local Development
+
+Add this to your .env file:
+
+FLASK_ENV=development
+SECRET_KEY=your_secret_key
+BASE_URL=http://localhost:6000
+LOCAL_SECRET_PATH=./secrets
+
+5. Local Environment Setup
+
+Follow these steps to set up your local development environment:
+	1.	Create a Virtual Environment:
+
+python3 -m venv venv
+
+
+	2.	Activate the Virtual Environment:
+	•	Linux/Mac:
+
+source venv/bin/activate
+
+
+	•	Windows:
+
+venv\Scripts\activate
+
+
+	3.	Install Dependencies:
+
+pip install -r requirements.txt
+
+
+	4.	Create Secrets Directory and Files:
+
+mkdir secrets
+echo '{"user1": "token_for_user1"}' > secrets/user_tokens.json
+
+
+	5.	Run Flask:
+
+export FLASK_APP=app.routes
+export FLASK_ENV=development
+flask run
+
+6. Add Instructions to README
+
+Example README.md:
+
+# Flask JIRA Sync Service
+
+## Setup Local Environment
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/your-repo.git
+   cd your-repo
+
+	2.	Create and activate a virtual environment:
+
+python3 -m venv venv
+source venv/bin/activate
+
+
+	3.	Install dependencies:
+
+pip install -r requirements.txt
+
+
+	4.	Create a .env file in the project root:
+
+FLASK_ENV=development
+SECRET_KEY=your_secret_key
+BASE_URL=http://localhost:6000
+LOCAL_SECRET_PATH=./secrets
+
+
+	5.	Create a secrets/user_tokens.json file:
+
+{
+    "user1": "token_for_user1",
+    "user2": "token_for_user2"
+}
+
+
+	6.	Run the Flask app:
+
+flask run
+
+
+	7.	Access the app at http://localhost:5000.
+
+Testing the API with cURL
+
+Fetch JIRA Issues
+
+curl -X GET http://localhost:5000/api/jira/issues
+
+Sync Issues
+
+curl -X POST http://localhost:5000/api/jira/sync
+
+Update Comment Interactively
+
+curl -X POST http://localhost:5000/api/jira/update_comment \
+     -H "Content-Type: application/json" \
+     -d '{"jira_number": "JIRA-123", "comment": "Updated comment"}'
+
+---
+
+### **7. Test with cURL**
+Use the provided curl commands in the `README.md` to test the APIs.
+
+---
+
+### **8. Verify Deployment in Kube**
+To ensure the `.env` file is ignored and the secrets are safely handled in Kubernetes:
+- In Kubernetes, mount secrets directly from ConfigMaps or Secrets.
+- The local `.env` and `secrets` directory should only be used in development.
+
+This approach keeps your local setup simple and your production deployment secure.
+
 Here is a comprehensive README.md for your project:
 
 Flask JIRA Sync Service
