@@ -1,3 +1,6 @@
+
+mkdir secrets
+echo '{"user1": "token_for_user1", "user2": "token_for_user2"}' > secrets/user_tokens.json
 include base url in html interactive response
 
 If the HTML response is a file that can be opened in different environments (where the service URL may vary), you need a way to dynamically determine the full API URL when interacting with the service. Here’s how you can handle this:
