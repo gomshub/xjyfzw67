@@ -1,0 +1,119 @@
+Let’s address your points step-by-step:
+
+1. Where is the update_comment curl call in the HTML script via the run_curl service?
+
+The run_curl service can execute any curl command, including the update_comment call. Below is an example of how you can integrate the update_comment functionality in the HTML file:
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Update Comment</title>
+    <script>
+        const baseUrl = "http://<EXTERNAL-IP>"; // Replace <EXTERNAL-IP> with the middleware's service endpoint
+
+        function updateComment(jiraNumber) {
+            const comment = document.getElementById(`comment_${jiraNumber}`).value;
+            const curlCommand = `curl -X POST -H "Content-Type: application/json" -d '{"jira_number": "${jiraNumber}", "comment": "${comment}"}' ${baseUrl}/update_comment`;
+
+            fetch(`${baseUrl}/run-curl`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: curlCommand })
+            })
+            .then(response => response.json())
+            .then(data => alert(`Curl Output: ${data.output}`))
+            .catch(err => console.error(err));
+        }
+    </script>
+</head>
+<body>
+    <h1>Update Jira Comment</h1>
+    <div>
+        <label for="comment_12345">Comment for Jira 12345:</label>
+        <input type="text" id="comment_12345" placeholder="Enter your comment">
+        <button onclick="updateComment('12345')">Update Comment</button>
+    </div>
+</body>
+</html>
+
+	•	The updateComment function constructs the curl command for the update_comment service.
+	•	It then passes this command to the middleware /run-curl service.
+	•	The middleware executes the curl command and returns the result to the browser.
+
+2. What happens if the update_comment curl call from the HTML script appends the local HTML path? Will run_curl face the same issue?
+
+No, the run_curl service will not face the same issue because the middleware executes the curl command in a controlled environment (server-side) rather than relying on the browser’s behavior.
+
+Why the Issue Occurs in Browser Scripts:
+	•	When a browser makes a fetch or XMLHttpRequest, it appends the local file path to the request URL if the baseUrl is improperly set or missing. This is because the browser interprets relative paths based on the file location.
+
+How run_curl Avoids the Issue:
+	•	The middleware is hosted in a server environment (Kubernetes in this case). It receives only the command and runs it directly using subprocess.run. The local file system path is irrelevant because:
+	1.	The middleware is unaware of the HTML file’s location.
+	2.	The curl command constructed in JavaScript includes the full baseUrl for the service endpoint, ensuring no relative paths are used.
+
+Solution to Prevent Local Path Issues in HTML Scripts
+	1.	Always Use Full URLs:
+	•	Ensure the baseUrl is explicitly set to the middleware service’s endpoint (e.g., http://<EXTERNAL-IP>).
+	2.	Avoid Hardcoding Relative Paths:
+	•	Construct all service URLs dynamically using baseUrl and avoid relative paths like /update_comment.
+	3.	Debugging Tip:
+	•	If you face issues, inspect the network requests in the browser’s developer tools to verify the URLs being called.
+
+Improved HTML for update_comment
+
+Here’s an updated and complete HTML file that avoids relative path issues:
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Update Jira Comments</title>
+    <script>
+        const baseUrl = "http://<EXTERNAL-IP>"; // Replace <EXTERNAL-IP> with middleware service endpoint
+
+        function updateComment(jiraNumber) {
+            const comment = document.getElementById(`comment_${jiraNumber}`).value;
+            if (!comment) {
+                alert("Please enter a comment.");
+                return;
+            }
+
+            const curlCommand = `curl -X POST -H "Content-Type: application/json" -d '{"jira_number": "${jiraNumber}", "comment": "${comment}"}' ${baseUrl}/update_comment`;
+
+            fetch(`${baseUrl}/run-curl`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: curlCommand })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert(`Comment updated successfully!\nOutput: ${data.output}`);
+                } else {
+                    alert(`Failed to update comment.\nError: ${data.message}`);
+                }
+            })
+            .catch(err => alert(`Error: ${err.message}`));
+        }
+    </script>
+</head>
+<body>
+    <h1>Update Jira Comments</h1>
+    <div>
+        <label for="comment_12345">Comment for Jira 12345:</label>
+        <input type="text" id="comment_12345" placeholder="Enter your comment">
+        <button onclick="updateComment('12345')">Update Comment</button>
+    </div>
+</body>
+</html>
+
+This script ensures:
+	1.	The baseUrl is used for all service calls.
+	2.	No local file path issues arise during execution.
+	3.	The user receives clear alerts for both success and failure scenarios.
+
+Let me know if you need further clarifications!
