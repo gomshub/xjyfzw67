@@ -1,0 +1,134 @@
+If the file content is loading but the tokens or user-specific tokens aren’t being extracted, there are a few potential issues to check and fix. Let’s go through the steps to debug and resolve this:
+
+1. Verify the Structure of user_tokens.json
+
+Make sure that user_tokens.json is structured correctly and contains the tokens for the specific users. The file should look like this:
+
+{
+    "username1": "api_token_1",
+    "username2": "api_token_2"
+}
+
+Ensure that:
+	•	The JSON is valid.
+	•	The usernames and tokens are correctly paired.
+	•	No extra characters or errors are present in the JSON file.
+
+2. Check the Code That Reads the JSON File
+
+Ensure that the code correctly fetches the username from the incoming request and matches it with the keys in the user_tokens.json file.
+
+Here’s an updated version of the function that reads the tokens and includes detailed logging for debugging:
+
+import json
+import os
+
+def get_api_token(username):
+    try:
+        token_file = os.getenv("USER_TOKENS_FILE", "user_tokens.json")  # Make sure this points to the correct file
+        with open(token_file, "r") as file:
+            tokens = json.load(file)
+        
+        # Log tokens to check if the file is loaded properly
+        print(f"Loaded tokens: {tokens}")
+
+        # Check if username exists in tokens
+        if username in tokens:
+            return tokens[username]
+        else:
+            print(f"Token not found for username: {username}")
+            return None
+    except FileNotFoundError:
+        print(f"Error: {token_file} not found.")
+        return None
+    except json.JSONDecodeError:
+        print(f"Error: {token_file} contains invalid JSON.")
+        return None
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return None
+
+3. Check How the username is Extracted
+
+Ensure that the username passed to the function is correct and matches the keys in the user_tokens.json file. For instance, if the username comes from a form or a request, ensure it’s being passed and extracted properly:
+
+username = request.form.get("username")  # or however you're extracting the username
+print(f"Received username: {username}")
+
+Check the logs to confirm that the username is being correctly extracted.
+
+4. Debugging the JSON Loading
+
+If the file content is being loaded, but the tokens are still not being fetched, try printing out the tokens object after it’s loaded from the JSON file to check if it matches the expected structure.
+
+Example debug:
+
+with open(token_file, "r") as file:
+    tokens = json.load(file)
+
+print(f"Tokens loaded: {tokens}")
+
+This will print the entire content of tokens so you can verify if the file is being loaded correctly and the structure matches your expectations.
+
+5. Test with Hardcoded Values
+
+For testing, try hardcoding a test token value and see if it works. This helps isolate whether the issue is with the file loading or elsewhere in the code:
+
+tokens = {"testuser": "test_token_1234"}
+username = "testuser"
+api_token = tokens.get(username)
+
+print(f"API token for {username}: {api_token}")
+
+If this works, the issue may be related to how the actual user_tokens.json file is being accessed or parsed.
+
+6. File Path Issues (for Kubernetes)
+
+If this is running in Kubernetes, ensure that the path to user_tokens.json is correct, especially if you’re mounting it via a Kubernetes secret or ConfigMap.
+
+Use kubectl exec to check the contents of the file inside the pod:
+
+kubectl exec -it <pod-name> -- cat /path/to/user_tokens.json
+
+This will confirm that the file exists and is correctly mounted in the pod.
+
+7. Example of Full Debug Process
+
+Here’s the full process with logging:
+
+import json
+import os
+
+def get_api_token(username):
+    try:
+        token_file = os.getenv("USER_TOKENS_FILE", "user_tokens.json")  # Ensure this is correct
+        print(f"Loading tokens from file: {token_file}")
+        
+        with open(token_file, "r") as file:
+            tokens = json.load(file)
+
+        print(f"Tokens loaded: {tokens}")  # Log the entire token file content
+
+        if username in tokens:
+            print(f"Token for {username} found.")
+            return tokens[username]
+        else:
+            print(f"Token for {username} not found.")
+            return None
+
+    except FileNotFoundError:
+        print(f"Error: {token_file} not found.")
+        return None
+    except json.JSONDecodeError:
+        print(f"Error: {token_file} contains invalid JSON.")
+        return None
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return None
+
+8. Conclusion
+	1.	Ensure JSON Structure: The user_tokens.json file should have the correct structure.
+	2.	Debug Logs: Use print() statements to check if the username and tokens are being extracted and matched correctly.
+	3.	File Access: If running on Kubernetes, ensure the file is mounted and accessible in the pod.
+
+By following these steps, you should be able to determine why the tokens are not being fetched and fix the issue. Let me know if you need further assistance!
