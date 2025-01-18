@@ -1,0 +1,106 @@
+No, modern web browsers cannot directly execute system commands like calling a .bat script or running curl for security reasons. However, you can achieve this functionality indirectly using the following approach:
+
+Solution Outline
+	1.	Use JavaScript in HTML:
+	•	Embed JavaScript in the HTML to trigger the .bat script indirectly.
+	2.	Leverage Local Execution:
+	•	Use a browser extension or a middleware (e.g., Node.js or Python server) to bridge the gap between the browser and the local system.
+	3.	Directly Trigger .bat (Feasible Option):
+	•	When interacting with a local HTML file, use a <button> that triggers a .bat script through a system-level interaction.
+
+Option 1: Use the .bat Script
+
+Create a .bat file that handles the curl request and outputs the result. The HTML can display the result by opening the script in a command prompt window.
+
+Batch Script: run_curl.bat
+
+@echo off
+:: Accept parameters for JIRA number and comment
+set JIRA_NUMBER=%1
+set COMMENT=%2
+
+:: Run the curl command
+curl -X POST "http://localhost:6000/update_comment" -H "Content-Type: application/json" ^
+     -d "{ \"jira_number\": \"%JIRA_NUMBER%\", \"comment\": \"%COMMENT%\" }"
+
+:: Pause to display the output
+pause
+
+HTML Example
+
+Include a button in the HTML file that calls the .bat script using the onclick event.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive JIRA Page</title>
+    <script>
+        function runCurlScript(jiraNumber) {
+            const comment = document.getElementById(`comment_${jiraNumber}`).value;
+
+            if (!comment) {
+                alert("Please enter a comment.");
+                return;
+            }
+
+            // Construct the command to call the batch script
+            const command = `cmd.exe /c start run_curl.bat ${jiraNumber} "${comment}"`;
+
+            // Use ActiveXObject for older versions of IE (or fallback)
+            try {
+                const shell = new ActiveXObject("WScript.Shell");
+                shell.Run(command);
+            } catch (e) {
+                alert("This feature requires running the HTML locally in Internet Explorer or using a middleware.");
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Interactive JIRA Page</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Comment</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>JIRA-001</td>
+                <td><input type="text" id="comment_JIRA-001" placeholder="Enter comment"></td>
+                <td>
+                    <button onclick="runCurlScript('JIRA-001')">Update Comment</button>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>
+
+How It Works
+	1.	The user interacts with the HTML file locally in their browser.
+	2.	Clicking the “Update Comment” button triggers the run_curl.bat script.
+	3.	The .bat script executes the curl request with the appropriate parameters (jira_number and comment).
+	4.	The script pauses, allowing the user to see the result in the command prompt window.
+
+Limitations
+	1.	Security:
+	•	Browsers restrict executing system commands for security reasons. This approach works only with Internet Explorer (via ActiveXObject) or a similar insecure workaround.
+	2.	Browser Compatibility:
+	•	Modern browsers like Chrome, Firefox, and Edge do not support running .bat scripts or shell commands directly.
+	3.	Local Execution Only:
+	•	The solution works only when running the HTML file locally (not served via a remote server).
+
+Option 2: Better Approach - Use a Middleware
+
+Instead of directly executing the .bat script, use a lightweight server like Node.js or Python to:
+	•	Host the HTML file.
+	•	Perform the curl operation from the backend.
+
+This keeps the architecture secure and compatible with modern browsers.
+
+Let me know if you’d like to see an implementation using a local server or have any other constraints!
