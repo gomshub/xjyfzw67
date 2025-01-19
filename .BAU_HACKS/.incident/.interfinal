@@ -1,0 +1,150 @@
+If you want the interactive service to directly open the browser with the resulting HTML instead of downloading and opening it manually via a BAT script, you can follow these steps:
+
+1. Modify the Interactive Service
+
+The interactive service should:
+	•	Return an HTML page as a response to the POST request.
+	•	Embed the username and relevant data dynamically into the HTML.
+
+Updated Flask Route for /interactive
+
+from flask import Flask, render_template, request, redirect, url_for
+
+app = Flask(__name__)
+
+@app.route('/interactive', methods=['POST'])
+def interactive_service():
+    # Get the username from the POST request
+    data = request.json
+    username = data.get('username', 'Unknown User')
+    
+    # Example JIRA data to include in the HTML response
+    jira_data = [
+        {'jira_number': 'JIRA-001', 'job_number': 'P01', 'summary': 'Issue 1 Summary'},
+        {'jira_number': 'JIRA-002', 'job_number': 'Q01', 'summary': 'Issue 2 Summary'}
+    ]
+
+    # Render the interactive HTML page with the data
+    return render_template('interactive.html', username=username, jira_data=jira_data)
+
+2. Create the HTML Template
+
+The HTML template (interactive.html) should:
+	•	Display the username and JIRA data.
+	•	Include buttons for actions like update comment or resolve status.
+	•	Trigger Flask API endpoints when those buttons are clicked.
+
+templates/interactive.html
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive JIRA Service</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h1>Interactive JIRA Service</h1>
+    <p>Welcome, <strong>{{ username }}</strong></p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Job Number</th>
+                <th>Summary</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for jira in jira_data %}
+            <tr>
+                <td><a href="https://jira.example.com/browse/{{ jira.jira_number }}" target="_blank">{{ jira.jira_number }}</a></td>
+                <td>{{ jira.job_number }}</td>
+                <td>{{ jira.summary }}</td>
+                <td>
+                    <button onclick="updateComment('{{ jira.jira_number }}')">Update Comment</button>
+                    <button onclick="resolveStatus('{{ jira.jira_number }}')">Resolve</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <script>
+        const baseUrl = "{{ url_for('interactive_service', _external=True) }}";
+
+        function updateComment(jiraNumber) {
+            const comment = prompt("Enter your comment:");
+            if (!comment) return;
+
+            fetch(`${baseUrl}/update_comment`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ jira_number: jiraNumber, comment })
+            })
+            .then(response => response.json())
+            .then(data => alert(`Comment updated: ${data.status}`))
+            .catch(err => console.error(err));
+        }
+
+        function resolveStatus(jiraNumber) {
+            if (!confirm("Are you sure you want to resolve this issue?")) return;
+
+            fetch(`${baseUrl}/resolve_status`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ jira_number: jiraNumber })
+            })
+            .then(response => response.json())
+            .then(data => alert(`Issue resolved: ${data.status}`))
+            .catch(err => console.error(err));
+        }
+    </script>
+</body>
+</html>
+
+3. Open Interactive Service in a Browser
+
+Instead of returning a file to download, the interactive service will now directly open the HTML page in the user’s browser. You can use the BAT script to launch the browser with the interactive service URL.
+
+Example BAT Script
+
+@echo off
+REM Get the current username
+set "USERNAME=%USERNAME%"
+
+REM Define the interactive service URL
+set "INTERACTIVE_SERVICE_URL=http://localhost:6000/interactive"
+
+REM Open the interactive service in the browser
+start "" "%INTERACTIVE_SERVICE_URL%" -H "Content-Type: application/json" -d "{\"username\":\"%USERNAME%\"}"
+
+4. Testing Steps
+	1.	Run the Flask App
+Start the Flask app locally or deploy it on your Kubernetes environment.
+	2.	Execute the BAT Script
+Run the interactive_service.bat script on the user’s machine. This will:
+	•	Capture the username.
+	•	Trigger the interactive service URL with the username.
+	•	Open the resulting interactive page in the user’s default browser.
+	3.	Use the Interactive Page
+The user can:
+	•	View their JIRA data.
+	•	Perform actions like update comment or resolve status, which call the respective services.
+
+This approach ensures seamless integration between the BAT script, the Flask service, and the interactive HTML page in the browser.
