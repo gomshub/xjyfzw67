@@ -1,3 +1,87 @@
+To pass a username and filter ID in a POST request to the interactive service using a .bat script and open the result in a browser, follow these steps:
+
+1. Create the Batch Script
+
+Here’s an example of a .bat script:
+
+@echo off
+:: Define variables
+set SERVICE_URL=http://localhost:6000/interactive
+set USERNAME=your_username
+set FILTER_ID=12345
+
+:: Use curl to make a POST request and save the response to a temporary HTML file
+curl -X POST -H "Content-Type: application/json" ^
+     -d "{\"username\":\"%USERNAME%\", \"filter_id\":\"%FILTER_ID%\"}" ^
+     %SERVICE_URL% ^
+     -o temp_interactive.html
+
+:: Open the HTML file in the default browser
+start temp_interactive.html
+
+2. Explanation of the Script
+	1.	Set Variables:
+	•	SERVICE_URL: The URL of your interactive service.
+	•	USERNAME: Replace your_username with the username you want to pass.
+	•	FILTER_ID: Replace 12345 with the desired filter ID.
+	2.	Curl Command:
+	•	Sends a POST request with a JSON body containing username and filter_id.
+	•	Saves the response to temp_interactive.html.
+	3.	Open in Browser:
+	•	The start command opens the temporary HTML file in the default browser.
+
+3. Example Python Code for Interactive Service
+
+Ensure your Flask interactive service is ready to handle this POST request:
+
+from flask import Flask, request, render_template
+
+app = Flask(__name__)
+
+@app.route('/interactive', methods=['POST'])
+def interactive_service():
+    data = request.json
+    username = data.get("username")
+    filter_id = data.get("filter_id")
+
+    # Logic to handle the request and generate the HTML response
+    return render_template("interactive.html", username=username, filter_id=filter_id)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=6000)
+
+4. Sample interactive.html Template
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Page</title>
+</head>
+<body>
+    <h1>Interactive Page</h1>
+    <p>Welcome, {{ username }}!</p>
+    <p>Filter ID: {{ filter_id }}</p>
+    <button onclick="alert('This is a placeholder button!')">Click Me</button>
+</body>
+</html>
+
+5. Run the Script
+
+Save the batch file as launch_interactive.bat and double-click it. It will:
+	1.	Send the POST request to the interactive service.
+	2.	Save the HTML response.
+	3.	Open the HTML file in the browser.
+
+6. Notes
+	•	Ensure the service URL is reachable (http://localhost:6000/interactive in this case).
+	•	If testing locally, start the Flask service first.
+	•	Replace placeholders in the script with actual values.
+
+Let me know if you need additional help!
+
+=#=
 If you want the interactive service to directly open the browser with the resulting HTML instead of downloading and opening it manually via a BAT script, you can follow these steps:
 
 1. Modify the Interactive Service
