@@ -1,3 +1,99 @@
+
+Kubernetes secrets are base64-encoded by default, not encrypted, but you can enhance their security by encrypting the JSON content before storing it in a Kubernetes secret. Here’s how you can securely handle a JSON file (e.g., user_tokens.json) in a Kubernetes secret:
+
+Steps to Encrypt JSON in a Kubernetes Secret
+
+1. Encrypt the JSON Content
+
+Use a tool like openssl or gpg to encrypt your JSON file before creating the secret.
+
+Example: Using OpenSSL to Encrypt
+
+openssl enc -aes-256-cbc -salt -in user_tokens.json -out user_tokens.json.enc -k <encryption_password>
+
+Here:
+	•	-aes-256-cbc is the encryption algorithm.
+	•	<encryption_password> is the password used for encryption.
+
+2. Create a Kubernetes Secret with the Encrypted File
+
+Base64-encode the encrypted file and add it to the Kubernetes secret.
+
+Encode the encrypted file:
+
+cat user_tokens.json.enc | base64 > user_tokens.enc.b64
+
+Create the secret YAML:
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encrypted-user-tokens
+type: Opaque
+data:
+  user_tokens.json.enc: <base64_encoded_encrypted_json>
+
+Replace <base64_encoded_encrypted_json> with the content of the user_tokens.enc.b64 file.
+
+Apply the secret:
+
+kubectl apply -f secret.yaml
+
+3. Decrypt in Application Code
+
+Modify your settings.py or equivalent configuration file to fetch and decrypt the secret at runtime.
+
+Example in Python (using openssl for decryption):
+
+import os
+import subprocess
+from base64 import b64decode
+
+def load_user_tokens(secret_path, decryption_password):
+    try:
+        # Read encrypted JSON secret from Kubernetes secret
+        with open(secret_path, 'rb') as f:
+            encrypted_data = f.read()
+
+        # Decrypt using OpenSSL
+        decrypted_data = subprocess.check_output(
+            ['openssl', 'enc', '-aes-256-cbc', '-d', '-base64', '-k', decryption_password],
+            input=b64decode(encrypted_data)
+        )
+
+        # Parse the decrypted JSON
+        return json.loads(decrypted_data)
+    except Exception as e:
+        print(f"Error loading user tokens: {e}")
+        return None
+
+# Usage
+secret_path = "/var/run/secrets/kubernetes.io/serviceaccount/user_tokens.json.enc"
+decryption_password = os.getenv("ENCRYPTION_PASSWORD")
+user_tokens = load_user_tokens(secret_path, decryption_password)
+
+4. Pass the Decryption Password Securely
+
+Store the decryption password (ENCRYPTION_PASSWORD) as a separate Kubernetes secret or inject it via an environment variable for the pod.
+
+Example Deployment YAML:
+
+env:
+- name: ENCRYPTION_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: encryption-key
+      key: password
+
+Benefits of This Approach:
+	•	The sensitive JSON content is encrypted and not stored as plain text.
+	•	The decryption key is stored separately, adding another layer of security.
+	•	Even if the Kubernetes secret is exposed, the encrypted JSON remains unreadable without the decryption key.
+
+Would you like help creating the complete YAML setup or configuring the decryption logic?
+
+=#=#
+
 If the file content is loading but the tokens or user-specific tokens aren’t being extracted, there are a few potential issues to check and fix. Let’s go through the steps to debug and resolve this:
 
 1. Verify the Structure of user_tokens.json
