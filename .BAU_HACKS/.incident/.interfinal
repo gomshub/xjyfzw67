@@ -1,3 +1,40 @@
+@echo off
+:: Define variables
+set SERVICE_URL=http://localhost:6000/interactive
+set USERNAME=your_username
+set FILTER_ID=12345
+
+:: Create a temporary HTML file to redirect to the interactive service
+echo ^<!DOCTYPE html^> > temp_redirect.html
+echo ^<html lang="en"^> >> temp_redirect.html
+echo ^<head^> >> temp_redirect.html
+echo     ^<meta charset="UTF-8"^> >> temp_redirect.html
+echo     ^<meta name="viewport" content="width=device-width, initial-scale=1.0"^> >> temp_redirect.html
+echo     ^<title>Redirecting...</title^> >> temp_redirect.html
+echo     ^<script^> >> temp_redirect.html
+echo         const serviceUrl = "%SERVICE_URL%"; >> temp_redirect.html
+echo         const postData = { username: "%USERNAME%", filter_id: "%FILTER_ID%" }; >> temp_redirect.html
+echo         fetch(serviceUrl, { >> temp_redirect.html
+echo             method: 'POST', >> temp_redirect.html
+echo             headers: { 'Content-Type': 'application/json' }, >> temp_redirect.html
+echo             body: JSON.stringify(postData) >> temp_redirect.html
+echo         }) >> temp_redirect.html
+echo         .then(response => response.text()) >> temp_redirect.html
+echo         .then(html => { >> temp_redirect.html
+echo             document.write(html); >> temp_redirect.html
+echo         }) >> temp_redirect.html
+echo         .catch(err => console.error(err)); >> temp_redirect.html
+echo     ^</script^> >> temp_redirect.html
+echo ^</head^> >> temp_redirect.html
+echo ^<body^> >> temp_redirect.html
+echo     Redirecting to interactive service... >> temp_redirect.html
+echo ^</body^> >> temp_redirect.html
+echo ^</html^> >> temp_redirect.html
+
+:: Open the redirect HTML in the browser
+start temp_redirect.html
+=#
+
 To pass a username and filter ID in a POST request to the interactive service using a .bat script and open the result in a browser, follow these steps:
 
 1. Create the Batch Script
