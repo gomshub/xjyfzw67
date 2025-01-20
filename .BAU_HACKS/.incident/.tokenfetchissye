@@ -1,97 +1,133 @@
 
-Kubernetes secrets are base64-encoded by default, not encrypted, but you can enhance their security by encrypting the JSON content before storing it in a Kubernetes secret. Here’s how you can securely handle a JSON file (e.g., user_tokens.json) in a Kubernetes secret:
 
-Steps to Encrypt JSON in a Kubernetes Secret
 
-1. Encrypt the JSON Content
+Here’s how you can store a JSON file as plain text in a Kubernetes secret, read it in settings.py, and reference it in the deployment YAML.
 
-Use a tool like openssl or gpg to encrypt your JSON file before creating the secret.
+1. Create Kubernetes Secret with JSON Content
 
-Example: Using OpenSSL to Encrypt
+Assume your JSON file (user_tokens.json) looks like this:
 
-openssl enc -aes-256-cbc -salt -in user_tokens.json -out user_tokens.json.enc -k <encryption_password>
+{
+  "user1": "token1",
+  "user2": "token2"
+}
 
-Here:
-	•	-aes-256-cbc is the encryption algorithm.
-	•	<encryption_password> is the password used for encryption.
+Base64 encode the content:
 
-2. Create a Kubernetes Secret with the Encrypted File
+cat user_tokens.json | base64
 
-Base64-encode the encrypted file and add it to the Kubernetes secret.
-
-Encode the encrypted file:
-
-cat user_tokens.json.enc | base64 > user_tokens.enc.b64
-
-Create the secret YAML:
+Create a secret YAML file:
 
 apiVersion: v1
 kind: Secret
 metadata:
-  name: encrypted-user-tokens
+  name: user-tokens-secret
 type: Opaque
 data:
-  user_tokens.json.enc: <base64_encoded_encrypted_json>
+  user_tokens.json: <base64_encoded_json>
 
-Replace <base64_encoded_encrypted_json> with the content of the user_tokens.enc.b64 file.
+Replace <base64_encoded_json> with the base64-encoded content of the user_tokens.json file.
 
 Apply the secret:
 
-kubectl apply -f secret.yaml
+kubectl apply -f user-tokens-secret.yaml
 
-3. Decrypt in Application Code
+2. Update Deployment YAML
 
-Modify your settings.py or equivalent configuration file to fetch and decrypt the secret at runtime.
+Mount the secret as a volume or inject it as an environment variable.
 
-Example in Python (using openssl for decryption):
+Option 1: Mount as a Volume
 
-import os
-import subprocess
-from base64 import b64decode
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: your-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: your-app
+  template:
+    metadata:
+      labels:
+        app: your-app
+    spec:
+      containers:
+      - name: your-container
+        image: your-image:latest
+        volumeMounts:
+        - name: user-tokens-volume
+          mountPath: /etc/secrets
+          readOnly: true
+      volumes:
+      - name: user-tokens-volume
+        secret:
+          secretName: user-tokens-secret
 
-def load_user_tokens(secret_path, decryption_password):
-    try:
-        # Read encrypted JSON secret from Kubernetes secret
-        with open(secret_path, 'rb') as f:
-            encrypted_data = f.read()
+The JSON file will be available at /etc/secrets/user_tokens.json in the container.
 
-        # Decrypt using OpenSSL
-        decrypted_data = subprocess.check_output(
-            ['openssl', 'enc', '-aes-256-cbc', '-d', '-base64', '-k', decryption_password],
-            input=b64decode(encrypted_data)
-        )
-
-        # Parse the decrypted JSON
-        return json.loads(decrypted_data)
-    except Exception as e:
-        print(f"Error loading user tokens: {e}")
-        return None
-
-# Usage
-secret_path = "/var/run/secrets/kubernetes.io/serviceaccount/user_tokens.json.enc"
-decryption_password = os.getenv("ENCRYPTION_PASSWORD")
-user_tokens = load_user_tokens(secret_path, decryption_password)
-
-4. Pass the Decryption Password Securely
-
-Store the decryption password (ENCRYPTION_PASSWORD) as a separate Kubernetes secret or inject it via an environment variable for the pod.
-
-Example Deployment YAML:
+Option 2: Inject as an Environment Variable
 
 env:
-- name: ENCRYPTION_PASSWORD
+- name: USER_TOKENS_JSON
   valueFrom:
     secretKeyRef:
-      name: encryption-key
-      key: password
+      name: user-tokens-secret
+      key: user_tokens.json
 
-Benefits of This Approach:
-	•	The sensitive JSON content is encrypted and not stored as plain text.
-	•	The decryption key is stored separately, adding another layer of security.
-	•	Even if the Kubernetes secret is exposed, the encrypted JSON remains unreadable without the decryption key.
+3. Read the Secret in settings.py
 
-Would you like help creating the complete YAML setup or configuring the decryption logic?
+Depending on your deployment method, read the secret:
 
+Option 1: If mounted as a volume
+
+import json
+
+def load_user_tokens():
+    secret_path = "/etc/secrets/user_tokens.json"
+    try:
+        with open(secret_path, "r") as f:
+            tokens = json.load(f)
+        return tokens
+    except Exception as e:
+        print(f"Error loading user tokens: {e}")
+        return {}
+
+user_tokens = load_user_tokens()
+
+Option 2: If injected as an environment variable
+
+import os
+import json
+from base64 import b64decode
+
+def load_user_tokens():
+    try:
+        encoded_tokens = os.getenv("USER_TOKENS_JSON")
+        if not encoded_tokens:
+            raise ValueError("USER_TOKENS_JSON not found")
+        decoded_tokens = b64decode(encoded_tokens).decode("utf-8")
+        return json.loads(decoded_tokens)
+    except Exception as e:
+        print(f"Error loading user tokens: {e}")
+        return {}
+
+user_tokens = load_user_tokens()
+
+4. Example Usage in Application
+
+# Fetch API token for a user
+def get_api_token(username):
+    return user_tokens.get(username)
+
+# Example
+print(get_api_token("user1"))  # Output: token1
+
+Benefits:
+	•	Secure Access: The JSON is securely stored in the secret and not hardcoded in the codebase.
+	•	Flexibility: Works seamlessly in both local development (via .env) and Kubernetes environments.
+
+Would you like help testing or debugging this setup?
 =#=#
 
 If the file content is loading but the tokens or user-specific tokens aren’t being extracted, there are a few potential issues to check and fix. Let’s go through the steps to debug and resolve this:
