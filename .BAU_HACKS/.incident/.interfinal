@@ -1,3 +1,9 @@
+
+from flask_cors import CORS
+
+CORS(app, supports_credentials=True, origins=["*"], send_wildcard=True)
+
+
 Here’s the .bat script and the Flask route for the interactive service.
 
 .bat Script to Call Interactive Service and Open in Browser
