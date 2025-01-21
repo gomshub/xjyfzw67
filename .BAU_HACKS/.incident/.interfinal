@@ -1,4 +1,45 @@
 
+from flask import Flask, request, jsonify
+from flask_cors import CORS, cross_origin
+
+app = Flask(__name__)
+
+# Globally apply CORS to the app but restrict origins to specific routes
+@app.route("/update_comment", methods=["POST"])
+@cross_origin(origins=["http://localhost:3000", "null"])  # Allow specific origins
+def update_comment():
+    data = request.json
+    jira_number = data.get("jira_number")
+    comment = data.get("comment")
+    # Logic to update the comment
+    return jsonify({"status": "success", "jira_number": jira_number, "comment": comment})
+
+
+@app.route("/another_service", methods=["GET"])
+def another_service():
+    return jsonify({"message": "CORS is not applied here"})
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+
+
+from flask import Blueprint
+from flask_cors import CORS
+
+update_comment_bp = Blueprint("update_comment_bp", __name__)
+CORS(update_comment_bp, origins=["http://localhost:3000", "null"])
+
+@update_comment_bp.route("/update_comment", methods=["POST"])
+def update_comment():
+    # Your logic here
+    pass
+
+app.register_blueprint(update_comment_bp)
+
+
+
 from flask_cors import CORS
 
 CORS(app, supports_credentials=True, origins=["*"], send_wildcard=True)
