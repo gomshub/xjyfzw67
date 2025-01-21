@@ -1,3 +1,133 @@
+Here’s the .bat script and the Flask route for the interactive service.
+
+.bat Script to Call Interactive Service and Open in Browser
+
+This script fetches the logged-in system user, appends it as a parameter to the service URL, and opens the interactive service in the default browser.
+
+@echo off
+:: Set the service URL
+set BASE_URL=http://localhost:6000/interactive
+
+:: Get the system username
+set USERNAME=%USERNAME%
+
+:: Construct the interactive service URL with the username parameter
+set SERVICE_URL=%BASE_URL%?username=%USERNAME%
+
+:: Open the interactive service in the default browser
+start %SERVICE_URL%
+
+Flask Route for Interactive Service
+
+The Flask route receives the username as a query parameter, processes it, and renders the interactive HTML page.
+
+Flask Code
+
+from flask import Flask, request, render_template
+
+app = Flask(__name__)
+
+@app.route('/interactive', methods=['GET'])
+def interactive_service():
+    # Get the username from the query parameters
+    username = request.args.get('username', 'Guest')
+
+    # Example data passed to the template
+    jira_data = [
+        {"jira_number": "JIRA-001", "job_number": "P01", "summary": "Test issue summary"},
+        {"jira_number": "JIRA-002", "job_number": "Q01", "summary": "Another test issue"},
+    ]
+
+    # Render the interactive HTML page
+    return render_template('interactive.html', username=username, jira_data=jira_data)
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=6000)
+
+HTML Template (templates/interactive.html)
+
+This is the HTML file rendered by the Flask service. It includes placeholders for dynamic data and displays the username passed as a query parameter.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Jira Service</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+        th {
+            background-color: #f2f2f2;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>Welcome, {{ username }}</h1>
+    <h2>Jira Issues</h2>
+    {% if jira_data %}
+    <table>
+        <thead>
+            <tr>
+                <th>Jira Number</th>
+                <th>Job Number</th>
+                <th>Summary</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in jira_data %}
+            <tr>
+                <td>{{ issue.jira_number }}</td>
+                <td>{{ issue.job_number }}</td>
+                <td>{{ issue.summary }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No Jira issues found.</p>
+    {% endif %}
+</body>
+</html>
+
+Steps to Test
+	1.	Run the Flask App
+Save the Python script as app.py and run it:
+
+python app.py
+
+The service will start at http://localhost:6000.
+
+	2.	Run the .bat Script
+Save the .bat script as launch_interactive.bat and double-click it. It will:
+	•	Retrieve the system username.
+	•	Construct the URL for the interactive service.
+	•	Open the URL in the default web browser.
+	3.	Test in Browser
+	•	The interactive page will load in the browser.
+	•	The page will display Jira issues and include the username in the greeting.
+
+Key Points
+	•	The .bat script dynamically passes the system username to the service URL.
+	•	Flask dynamically renders the page with the username and Jira data.
+	•	No local file is saved, avoiding file:// or CORS issues.
+
+Let me know if you need further clarification!
+
+
+.=####
+
 @echo off
 :: Define variables
 set SERVICE_URL=http://localhost:6000/interactive
