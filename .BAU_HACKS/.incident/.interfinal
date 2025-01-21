@@ -1,4 +1,99 @@
 
+To alert the curl command on the HTML page when the update_comment button is clicked and the request fails, you can modify the JavaScript logic to dynamically generate and display the curl command that replicates the failed fetch request.
+
+Here’s how to implement this:
+
+Updated Example with curl Command Alert
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Jira</title>
+    <script>
+        const baseUrl = "http://localhost:6000"; // Flask service URL
+
+        function updateComment(jiraNumber) {
+            const comment = document.getElementById(`comment_${jiraNumber}`).value;
+
+            fetch(`${baseUrl}/update_comment`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ jira_number: jiraNumber, comment }),
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                alert(`Comment updated successfully: ${data.status}`);
+            })
+            .catch(err => {
+                console.error(err);
+                // Generate a `curl` command for debugging
+                const curlCommand = `curl -X POST ${baseUrl}/update_comment -H "Content-Type: application/json" -d '{"jira_number":"${jiraNumber}","comment":"${comment}"}'`;
+                alert(`Failed to update comment. Error: ${err.message}\n\nDebug using this curl command:\n${curlCommand}`);
+            });
+        }
+    </script>
+</head>
+<body>
+    <h1>Interactive Jira</h1>
+    <table>
+        <tr>
+            <th>Jira Number</th>
+            <th>Comment</th>
+            <th>Actions</th>
+        </tr>
+        <tr>
+            <td>12345</td>
+            <td>
+                <input type="text" id="comment_12345" placeholder="Enter comment here">
+            </td>
+            <td>
+                <button onclick="updateComment(12345)">Update Comment</button>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+
+Key Changes
+	1.	Dynamic curl Command Generation:
+	•	If the fetch request fails, the catch block dynamically constructs a curl command.
+	•	The command includes:
+	•	The endpoint URL (/update_comment).
+	•	The headers (Content-Type: application/json).
+	•	The data payload (jira_number and comment).
+	2.	Alert the curl Command:
+	•	The dynamically generated curl command is displayed in an alert box for debugging.
+	•	Users can copy the command and run it in their terminal to test the service manually.
+
+Example Alert (on Failure)
+
+If the service fails, the following alert will appear:
+
+Failed to update comment. Error: HTTP error! status: 500
+
+Debug using this curl command:
+curl -X POST http://localhost:6000/update_comment -H "Content-Type: application/json" -d '{"jira_number":"12345","comment":"My comment"}'
+
+Notes
+	•	URL and Payload Validation:
+	•	Ensure the baseUrl and payload (jira_number and comment) are correct.
+	•	CORS Configuration:
+	•	Ensure CORS is correctly configured for the /update_comment endpoint if accessed from a browser.
+	•	Testing:
+	•	Use Developer Tools (F12) → Network Tab to inspect the failed request and debug further.
+
+With this approach, you can debug issues more effectively by directly running the curl command provided in the alert.
+
+=#=
 from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin
 
