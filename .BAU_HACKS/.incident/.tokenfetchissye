@@ -1,4 +1,162 @@
 
+Here’s a detailed implementation to achieve the following:
+	1.	Load user_tokens.json as an environment variable in Kubernetes.
+	2.	Load user_tokens.json from a .env file in the local development environment.
+	3.	Access the api_token for a given system user in settings.py.
+	4.	Handle missing tokens in routes.py with error handling.
+
+Step 1: Set user_tokens.json as an Environment Variable in Kubernetes
+
+Kube Secret YAML
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: user-tokens-secret
+type: Opaque
+data:
+  user_tokens.json: |
+    eyJ1c2VyMV9hcGlfdG9rZW4iOiAiQUJDREVGR0giLCAidXNlcjJfYXBpX3Rva2VuIjogIkhJSkxNTk9QIn0K
+
+	•	Encode your JSON file into Base64 (e.g., using base64 or an online encoder):
+
+base64 user_tokens.json
+
+
+
+Deployment YAML
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interactive-jira-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: interactive-jira-container
+          image: your-docker-image
+          env:
+            - name: USER_TOKENS_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: user-tokens-secret
+                  key: user_tokens.json
+
+This will expose the user_tokens.json content to the application as the USER_TOKENS_JSON environment variable.
+
+Step 2: Local Development Setup
+
+For local development:
+	1.	Add user_tokens.json to your .env file:
+
+USER_TOKENS_JSON='{"user1_api_token": "ABCDEF", "user2_api_token": "HIJLMNOP"}'
+
+
+	2.	Ensure .env is ignored in .gitignore:
+
+.env
+
+
+	3.	Install python-dotenv to read .env:
+
+pip install python-dotenv
+
+Step 3: Update settings.py
+
+Here’s how to load the user_tokens.json either from the environment variable in Kubernetes or from .env during local development:
+
+import os
+import json
+from dotenv import load_dotenv
+
+# Load .env in local development
+load_dotenv()
+
+class Config:
+    FLASK_ENV = os.getenv("FLASK_ENV", "production")
+    SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key")
+
+    # Load user tokens JSON
+    user_tokens_env = os.getenv("USER_TOKENS_JSON", "{}")  # Default to empty JSON if not found
+    try:
+        USER_TOKENS = json.loads(user_tokens_env)
+    except json.JSONDecodeError:
+        raise ValueError("Invalid JSON format for USER_TOKENS_JSON environment variable")
+
+    @staticmethod
+    def get_api_token(username):
+        """Retrieve API token for the given username."""
+        return Config.USER_TOKENS.get(username, None)
+
+Step 4: Use get_api_token in routes.py
+
+In routes.py, use the get_api_token method from Config to fetch the API token for a given user. If no token is found, return an appropriate error message.
+
+from flask import Flask, request, jsonify
+from settings import Config
+
+app = Flask(__name__)
+
+@app.route('/interactive', methods=['POST'])
+def interactive():
+    """Interactive service."""
+    data = request.json
+    username = data.get("username")
+
+    if not username:
+        return jsonify({"error": "Username is required"}), 400
+
+    # Fetch the API token
+    api_token = Config.get_api_token(username)
+
+    if not api_token:
+        return jsonify({"error": f"API token not found for user '{username}'"}), 404
+
+    # Use the API token as needed
+    # Example response
+    return jsonify({"message": "Interactive service loaded", "api_token": api_token}), 200
+
+Step 5: Testing Locally
+	1.	Start the Flask App:
+
+flask run
+
+
+	2.	Test Using Curl:
+
+curl -X POST http://localhost:5000/interactive \
+-H "Content-Type: application/json" \
+-d '{"username": "user1"}'
+
+
+	3.	Expected Responses:
+	•	If the token exists:
+
+{
+  "message": "Interactive service loaded",
+  "api_token": "ABCDEF"
+}
+
+
+	•	If the token is missing:
+
+{
+  "error": "API token not found for user 'user1'"
+}
+
+Step 6: Deployment
+
+Once the user_tokens.json secret is added and referenced in Kubernetes:
+	•	Deploy the updated app with the deployment YAML file.
+	•	The application will automatically read the USER_TOKENS_JSON from the secret.
+
+Notes:
+	•	The USER_TOKENS_JSON environment variable should contain the full JSON content as a string.
+	•	The get_api_token function in Config centralizes token management and ensures consistent behavior across the app.
+
+
+=#=#
 
 
 Here’s how you can store a JSON file as plain text in a Kubernetes secret, read it in settings.py, and reference it in the deployment YAML.
