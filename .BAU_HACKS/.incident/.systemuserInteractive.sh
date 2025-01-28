@@ -1,4 +1,90 @@
+Here’s the .bat script to:
+	1.	Launch the Interactive Service via POST or GET request using curl.
+	2.	Pass system user and filter_id as input variables.
+	3.	Open the returned HTML file in the default web browser.
 
+Interactive Service .bat Script
+
+Save this as launch_interactive_service.bat:
+
+@echo off
+:: Get system username
+set USERNAME=%USERNAME%
+
+:: Input filter_id (you can prompt or hardcode it)
+set /p FILTER_ID=Enter Filter ID: 
+
+:: Service URL
+set SERVICE_URL=http://localhost:6000/interactive
+
+:: Temp HTML file path (set where you want to save the response)
+set OUTPUT_FILE=%TEMP%\interactive_response.html
+
+:: Choose HTTP method: POST or GET
+set METHOD=POST
+
+if /I "%METHOD%"=="POST" (
+    :: Make POST request with curl
+    curl -X POST "%SERVICE_URL" ^
+        -H "Content-Type: application/json" ^
+        -d "{\"username\": \"%USERNAME%\", \"filter_id\": \"%FILTER_ID%\"}" ^
+        -o "%OUTPUT_FILE%"
+) else if /I "%METHOD%"=="GET" (
+    :: Make GET request with curl
+    curl -G "%SERVICE_URL" ^
+        -d "username=%USERNAME%" ^
+        -d "filter_id=%FILTER_ID%" ^
+        -o "%OUTPUT_FILE%"
+) else (
+    echo Invalid HTTP method. Only POST or GET are allowed.
+    exit /b 1
+)
+
+:: Check if the file was created
+if exist "%OUTPUT_FILE%" (
+    echo Interactive HTML file saved to: %OUTPUT_FILE%
+    echo Opening in default web browser...
+
+    :: Open the HTML file in the default browser
+    start "" "%OUTPUT_FILE%"
+) else (
+    echo Failed to fetch the interactive HTML page. Please check your input or service availability.
+)
+
+How It Works
+	1.	Username and Filter ID:
+	•	%USERNAME% automatically gets the system user.
+	•	%FILTER_ID% is either hardcoded or prompted when you run the script.
+	2.	Service URL:
+	•	Update set SERVICE_URL with the actual URL of your interactive service.
+	3.	HTTP Method:
+	•	Default is POST. Set set METHOD=GET if required.
+	4.	Output File:
+	•	The response from the service is saved to a temporary .html file, which is then opened in the default web browser.
+
+How to Use
+	1.	Save the .bat file to your desired location (e.g., C:\scripts\launch_interactive_service.bat).
+	2.	Run the script by double-clicking or from the command line:
+
+launch_interactive_service.bat
+
+
+	3.	Enter the Filter ID when prompted.
+	4.	The returned HTML file will open in your default web browser.
+
+Testing with an Example
+
+Assume:
+	•	The interactive service URL is http://localhost:6000/interactive.
+	•	The username is the system user.
+	•	You provide a filter_id like 1234.
+
+The .bat script will:
+	1.	Send a POST or GET request to the interactive service.
+	2.	Save the response HTML to a temporary file.
+	3.	Automatically open the file in your browser for interaction.
+
+#==#
 @echo off
 REM Get the current username
 set "USERNAME=%USERNAME%"
