@@ -1,0 +1,26 @@
+You can use the following kubectl command to get cluster information in YAML format:
+
+1️⃣ Get Full Cluster Info in YAML
+
+kubectl cluster-info dump > cluster-info.yaml
+
+	•	This dumps detailed cluster information into a YAML file (cluster-info.yaml).
+	•	It includes kube-system components, configurations, and status.
+
+2️⃣ Get Node Allocatable Resources in YAML
+
+If you want allocatable CPU/Memory for nodes:
+
+kubectl get nodes -o yaml > nodes-info.yaml
+
+	•	This will give details about CPU, memory, and capacity per node.
+
+3️⃣ Get Only Node Resource Summary
+
+If you only need a quick look at node resources, run:
+
+kubectl describe nodes > nodes-summary.txt
+
+	•	This shows allocatable resources, capacity, and pod limits for each node.
+
+Would you like help interpreting the YAML output?
