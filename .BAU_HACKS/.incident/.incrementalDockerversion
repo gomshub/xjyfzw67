@@ -1,0 +1,172 @@
+🔄 Implementing Incremental Image & Chart Versioning in Bamboo
+
+To ensure each deployment has a unique version, we will:
+✅ Use incremental versioning for the Docker image and Helm chart.
+✅ Retrieve the last version, increment it, and update values.yaml.
+✅ Automate everything in Bamboo CI/CD.
+
+1️⃣ Get the Last Version & Increment It
+
+We will retrieve the latest version number, increment it, and apply it to:
+🔹 Docker image version
+🔹 Helm chart version
+
+📜 Bash Script to Increment Version
+
+#!/bin/bash
+
+# Get the last image version from the registry
+REGISTRY_URL="internal-registry.company.com/jira-app"
+LATEST_VERSION=$(curl -s "https://$REGISTRY_URL/v2/jira-app/tags/list" | jq -r '.tags | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))) | sort | last')
+
+# If no previous version, start from 1.0.0
+if [[ -z "$LATEST_VERSION" ]]; then
+    NEW_VERSION="1.0.0"
+else
+    # Increment the patch version (e.g., 1.0.0 -> 1.0.1)
+    IFS='.' read -r major minor patch <<< "$LATEST_VERSION"
+    NEW_VERSION="$major.$minor.$((patch+1))"
+fi
+
+echo "New Version: $NEW_VERSION"
+
+# Export the new version for use in the Bamboo script
+export NEW_VERSION
+
+📌 This script ensures:
+✅ If no version exists, it starts from 1.0.0
+✅ If a version (e.g., 1.0.0) exists, it increments the patch version → 1.0.1
+✅ You can modify it to increment major/minor versions if needed.
+
+2️⃣ Build & Push the Docker Image
+
+We now use the incremented version for our Docker image.
+
+docker build -t internal-registry.company.com/jira-app:$NEW_VERSION .
+docker push internal-registry.company.com/jira-app:$NEW_VERSION
+
+📌 Ensures each image has a unique tag
+✅ No “latest” conflicts
+✅ Each deployment gets the correct version
+
+3️⃣ Update Helm Chart Version
+
+The Helm chart version must match the Docker image version.
+
+# Update Helm chart version in Chart.yaml
+sed -i "s/^version:.*/version: $NEW_VERSION/" helm-chart/Chart.yaml
+
+# Update Docker image version in values.yaml
+sed -i "s|tag:.*|tag: $NEW_VERSION|" helm-chart/values.yaml
+
+📌 Ensures Helm & Docker versions stay in sync.
+
+4️⃣ Package & Push the Helm Chart
+
+helm package helm-chart --version $NEW_VERSION
+helm push helm-chart-$NEW_VERSION.tgz internal-artifactory
+
+📌 Each Helm chart has a unique version number
+✅ No overwriting of old charts
+✅ Ensures rollback capability
+
+5️⃣ Update ArgoCD GitOps Repo
+
+ArgoCD monitors a GitOps repository for changes in values.yaml.
+We must update this file to trigger the deployment.
+
+# Clone GitOps repo
+git clone git@github.com:company/argo-cd-config.git
+cd argo-cd-config
+
+# Update values.yaml with the new image version
+sed -i "s|tag:.*|tag: $NEW_VERSION|" "helm-chart/values.yaml"
+
+# Commit and push changes
+git add helm-chart/values.yaml
+git commit -m "Updated Jira app image to $NEW_VERSION"
+git push origin main
+
+📌 ArgoCD will detect the change and deploy the new version automatically.
+
+6️⃣ Trigger ArgoCD Sync (Optional)
+
+ArgoCD automatically syncs, but we can manually trigger a sync.
+
+curl -X POST "https://argocd.company.com/api/v1/applications/jira-app/sync" \
+    -H "Authorization: Bearer $ARGOCD_JWT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"prune": false, "dryRun": false, "strategy": {"hook": {"force": true}}}'
+
+📌 Ensures the deployment happens immediately instead of waiting for ArgoCD’s sync interval.
+
+📌 Final Bamboo CI/CD Flow
+
+Step	Action
+1	Fetch the latest image version from the registry
+2	Increment the version number (e.g., 1.0.1 → 1.0.2)
+3	Build & push the Docker image with new version
+4	Update Helm chart version in Chart.yaml & values.yaml
+5	Package & push the Helm chart
+6	Update values.yaml in GitOps repo
+7	Push changes to Git to trigger ArgoCD
+8	ArgoCD deploys the new version automatically
+
+🔥 Full Bamboo Script
+
+#!/bin/bash
+
+set -e  # Exit on error
+
+# Fetch latest version & increment it
+REGISTRY_URL="internal-registry.company.com/jira-app"
+LATEST_VERSION=$(curl -s "https://$REGISTRY_URL/v2/jira-app/tags/list" | jq -r '.tags | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))) | sort | last')
+
+if [[ -z "$LATEST_VERSION" ]]; then
+    NEW_VERSION="1.0.0"
+else
+    IFS='.' read -r major minor patch <<< "$LATEST_VERSION"
+    NEW_VERSION="$major.$minor.$((patch+1))"
+fi
+
+echo "New Version: $NEW_VERSION"
+
+# Login to internal Docker registry
+echo "$DOCKER_PASSWORD" | docker login internal-registry.company.com -u "$DOCKER_USERNAME" --password-stdin
+
+# Build & push Docker image
+docker build -t internal-registry.company.com/jira-app:$NEW_VERSION .
+docker push internal-registry.company.com/jira-app:$NEW_VERSION
+
+# Update Helm chart version
+sed -i "s/^version:.*/version: $NEW_VERSION/" helm-chart/Chart.yaml
+sed -i "s|tag:.*|tag: $NEW_VERSION|" helm-chart/values.yaml
+
+# Package & push Helm chart
+helm package helm-chart --version $NEW_VERSION
+helm push helm-chart-$NEW_VERSION.tgz internal-artifactory
+
+# Update ArgoCD GitOps repo
+git clone git@github.com:company/argo-cd-config.git
+cd argo-cd-config
+sed -i "s|tag:.*|tag: $NEW_VERSION|" "helm-chart/values.yaml"
+git add helm-chart/values.yaml
+git commit -m "Updated Jira app image to $NEW_VERSION"
+git push origin main
+
+# Trigger ArgoCD sync
+curl -X POST "https://argocd.company.com/api/v1/applications/jira-app/sync" \
+    -H "Authorization: Bearer $ARGOCD_JWT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"prune": false, "dryRun": false, "strategy": {"hook": {"force": true}}}'
+
+echo "✅ Deployment successful: Jira app $NEW_VERSION"
+
+🎯 What’s Achieved?
+
+✔️ Incremental versioning of Docker image & Helm chart.
+✔️ Helm & Docker versions are always in sync.
+✔️ Automated GitOps update → triggers ArgoCD.
+✔️ ArgoCD syncs & deploys the new version seamlessly.
+
+Would you like further customizations? 🚀
