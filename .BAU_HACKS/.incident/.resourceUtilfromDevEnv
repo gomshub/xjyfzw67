@@ -1,0 +1,83 @@
+To determine the CPU and RAM required for a Python module running on Windows in a development environment, follow these steps:
+
+1️⃣ Measure CPU & Memory Usage with psutil
+
+You can use the psutil Python module to track resource usage while the module runs.
+
+📜 Script to Monitor Resource Usage
+
+import psutil
+import time
+import os
+
+# Get the PID of the current process
+pid = os.getpid()
+process = psutil.Process(pid)
+
+print(f"Monitoring process {pid}...")
+
+while True:
+    # Get CPU and memory usage
+    cpu_usage = process.cpu_percent(interval=1)  # 1-second interval
+    memory_info = process.memory_info()
+    memory_usage = memory_info.rss / (1024 * 1024)  # Convert bytes to MB
+
+    print(f"CPU: {cpu_usage}% | Memory: {memory_usage:.2f} MB")
+
+    time.sleep(5)  # Check every 5 seconds
+
+🔹 How This Works:
+	•	psutil.cpu_percent(interval=1): Monitors CPU usage.
+	•	process.memory_info().rss: Gets resident memory (RAM usage).
+	•	Prints CPU & memory usage every 5 seconds.
+
+📌 Run your Python module while monitoring usage.
+
+2️⃣ Use Windows Task Manager
+	1.	Run your Python script:
+
+python your_script.py
+
+
+	2.	Open Task Manager (Ctrl + Shift + Esc).
+	3.	Go to “Processes” → Find python.exe.
+	4.	Monitor:
+	•	CPU usage (percentage).
+	•	Memory (RAM) usage (MB).
+	•	Peak usage over time.
+
+📌 Take the highest values recorded to determine peak needs.
+
+3️⃣ Use Windows Resource Monitor
+	1.	Press Win + R, type resmon, and press Enter.
+	2.	Go to the CPU & Memory tabs.
+	3.	Look for python.exe and check:
+	•	CPU usage (percentage)
+	•	RAM usage (Working Set/Private Bytes)
+
+📌 Best for real-time monitoring during long runs.
+
+4️⃣ Profiling with cProfile (Advanced)
+
+For deeper insights into function-level CPU usage:
+
+python -m cProfile -s time your_script.py
+
+📌 This helps find CPU-intensive functions.
+
+📊 How to Estimate Resources for Kubernetes?
+	•	Take the peak CPU & memory usage.
+	•	Add a buffer (20–30%) for safe limits.
+	•	Define resource requests & limits in Kubernetes YAML.
+
+Example:
+
+resources:
+  requests:
+    cpu: "500m"   # 50% of a core
+    memory: "256Mi"
+  limits:
+    cpu: "1"      # 1 core max
+    memory: "512Mi"
+
+Would you like help in determining a recommended Kubernetes request/limit based on your measurements? 🚀
