@@ -1,3 +1,32 @@
+
+# Use the slim version of Python 3.11.7
+FROM python:3.11.7-slim
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Install Java Runtime (for ojdbc support)
+RUN apt-get update && apt-get install -y openjdk-11-jre-headless
+
+# Install necessary Python dependencies (JayDeBeApi)
+RUN pip install --no-cache-dir JayDeBeApi
+
+# Copy your application code into the container
+COPY ./app /app
+
+# Copy the Oracle JDBC (ojdbc) jar file into the container
+COPY ./utils/lib/ojdbc8.jar /app/utils/lib/ojdbc8.jar
+
+# Install any additional Python dependencies (if you have a requirements.txt)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Expose the port your application will run on
+EXPOSE 8080
+
+# Command to run your application (e.g., Flask app)
+CMD ["python", "app.py"]
+
+
 Here’s an automated Bamboo script to handle:
 	•	Logging into the internal Docker registry using a user token
 	•	Building & pushing the Docker image
