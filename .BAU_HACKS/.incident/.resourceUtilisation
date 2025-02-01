@@ -1,0 +1,35 @@
+Let’s analyze if your single-node Kubernetes cluster has enough resources to deploy a new pod with 500m CPU and 2048Mi Memory.
+
+1️⃣ Check Available Resources
+
+Your node allocatable resources:
+	•	CPU = 8 cores
+	•	Memory = 32,734,608 Ki ≈ 31.2 GiB
+
+Currently allocated resources (for 2 running pods):
+	•	CPU Requests: 500m + 500m = 1 core
+	•	Memory Requests: 4096Mi + 2048Mi = 6144Mi (6 GiB)
+
+2️⃣ After Deploying the New Pod
+
+Your new pod requests:
+	•	CPU = 500m (0.5 core)
+	•	Memory = 2048Mi (2 GiB)
+
+Total resource consumption after deployment:
+	•	CPU Requests: 1 core + 0.5 core = 1.5 cores ✅ (still far from 8 cores available)
+	•	Memory Requests: 6 GiB + 2 GiB = 8 GiB ✅ (still far from 31.2 GiB available)
+
+3️⃣ Will It Fit? ✅ Yes, the node has enough resources.
+	•	CPU Utilization: 1.5 cores out of 8 → Only 18.75% used.
+	•	Memory Utilization: 8 GiB out of 31.2 GiB → Only 25.6% used.
+
+Your node has sufficient CPU and memory to handle this new deployment without overloading.
+
+4️⃣ Considerations for Future Deployments
+
+✅ You can deploy this pod without issues.
+❗ If you deploy more services, monitor CPU and Memory usage in Grafana to ensure the node isn’t overloaded.
+❗ If your node runs close to 80% CPU or Memory, consider adding more nodes or optimizing resources.
+
+Would you like help setting up resource monitoring in Grafana or OpenLens?
