@@ -1,3 +1,79 @@
+To get a rough estimate of CPU and memory usage for the fetch_and_compare.sh script and the interactive service, you can use time, top, and ps commands.
+
+📜 Shell Script: monitor_usage.sh
+
+This script will:
+	1.	Run the fetch script and measure CPU & memory usage.
+	2.	Log the resource consumption in a file.
+	3.	Can be scheduled with cron to monitor periodically.
+
+#!/bin/bash
+
+# Path to the fetch_and_compare.sh script
+SCRIPT_PATH="/path/to/fetch_and_compare.sh"
+
+# Log file
+LOG_FILE="/var/log/script_usage.log"
+
+echo "Running fetch_and_compare.sh with resource monitoring..."
+
+# Run script and measure time
+/usr/bin/time -v bash "$SCRIPT_PATH" > /dev/null 2>> "$LOG_FILE" &
+
+# Get PID of the running process
+SCRIPT_PID=$!
+
+# Monitor CPU and memory usage every second while the script runs
+while ps -p $SCRIPT_PID > /dev/null; do
+    ps -p $SCRIPT_PID -o %cpu,%mem,vsz,rss --no-headers >> "$LOG_FILE"
+    sleep 1
+done
+
+echo "Resource usage logged in $LOG_FILE"
+
+⏲️ Schedule it with Cron (Every 30 min)
+
+Add to crontab:
+
+*/30 * * * * /bin/bash /path/to/monitor_usage.sh
+
+🔍 Understanding Metrics in script_usage.log
+	•	%CPU → CPU usage percentage.
+	•	%MEM → Memory usage percentage.
+	•	VSZ (Virtual Size) → Total memory the process is using (including swapped-out memory).
+	•	RSS (Resident Set Size) → Actual RAM being used (excluding swapped memory).
+
+📊 Estimate Resources in Kubernetes
+
+After running the script for a few hours/days, check the logs:
+
+tail -n 50 /var/log/script_usage.log
+
+Example output:
+
+2.5  1.2  200000  50000
+3.0  1.5  250000  60000
+
+	•	If CPU usage averages 2-3%, request 250m (0.25 CPU) in Kubernetes.
+	•	If Memory (RSS) is ~60MB, request 128Mi for safety.
+
+📝 Adjusting Kubernetes Resource Requests
+
+In Helm values.yaml or Kubernetes deployment.yaml:
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+This method provides real-world usage metrics for better Kubernetes resource allocation. 🚀
+
+=#=
+
+
 Let’s analyze if your single-node Kubernetes cluster has enough resources to deploy a new pod with 500m CPU and 2048Mi Memory.
 
 1️⃣ Check Available Resources
