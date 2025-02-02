@@ -1,0 +1,92 @@
+Automated Shell Script for JIRA and Email Monitoring
+
+This script will:
+	1.	Run every 30 minutes via a cron job.
+	2.	Fetch JIRA list and email content via curl.
+	3.	Compare the latest HTML results with the previously stored versions.
+	4.	If there are changes, it will:
+	•	Upload the new file to Artifactory
+	•	Trigger the sync service to update the database
+	•	Send an email notification (if email content changes)
+
+📜 Shell Script: fetch_and_compare.sh
+
+#!/bin/bash
+
+# Set variables
+JIRA_URL="http://your-kube-service-url/listJiras"
+EMAIL_URL="http://your-kube-service-url/email_service"
+SYNC_SERVICE_URL="http://your-kube-service-url/sync_service"
+ARTIFACTORY_URL="https://your-artifactory-repo/path/"
+ARTIFACTORY_USER="your-username"
+ARTIFACTORY_PASSWORD="your-password"
+EMAIL_RECIPIENTS="your-email@example.com"
+
+# Paths for storing previous and current results
+JIRA_PREV_FILE="/tmp/prev_jira.html"
+JIRA_NEW_FILE="/tmp/new_jira.html"
+
+EMAIL_PREV_FILE="/tmp/prev_email.html"
+EMAIL_NEW_FILE="/tmp/new_email.html"
+
+# Fetch latest JIRA list
+curl -s -o "$JIRA_NEW_FILE" "$JIRA_URL"
+
+# Compare JIRA HTML results
+if ! cmp -s "$JIRA_PREV_FILE" "$JIRA_NEW_FILE"; then
+    echo "JIRA List changed. Uploading to Artifactory and syncing DB..."
+
+    # Upload to Artifactory
+    curl -u "$ARTIFACTORY_USER:$ARTIFACTORY_PASSWORD" \
+         -T "$JIRA_NEW_FILE" \
+         "$ARTIFACTORY_URL$(date +'%Y-%m-%d_%H-%M-%S')_jira.html"
+
+    # Call Sync Service
+    curl -X POST "$SYNC_SERVICE_URL"
+
+    # Update previous file
+    cp "$JIRA_NEW_FILE" "$JIRA_PREV_FILE"
+else
+    echo "No changes in JIRA list."
+fi
+
+# Fetch latest Email content
+curl -s -o "$EMAIL_NEW_FILE" "$EMAIL_URL"
+
+# Compare Email HTML results
+if ! cmp -s "$EMAIL_PREV_FILE" "$EMAIL_NEW_FILE"; then
+    echo "Email content changed. Sending email alert..."
+
+    # Send email notification
+    curl -X POST "http://your-email-service/send" \
+         -H "Content-Type: application/json" \
+         -d "{\"to\":\"$EMAIL_RECIPIENTS\",\"subject\":\"JIRA Update\",\"body\":\"JIRA list has changed. Please review.\"}"
+
+    # Update previous file
+    cp "$EMAIL_NEW_FILE" "$EMAIL_PREV_FILE"
+else
+    echo "No changes in Email content."
+fi
+
+⏲️ Schedule with Cron (Every 30 Minutes)
+	1.	Open crontab:
+
+crontab -e
+
+
+	2.	Add this line to schedule execution every 30 minutes:
+
+*/30 * * * * /bin/bash /path/to/fetch_and_compare.sh >> /var/log/jira_sync.log 2>&1
+
+
+	3.	Save and exit.
+
+🔍 Explanation
+	•	curl -s -o → Fetches data silently and saves it to a file.
+	•	cmp -s → Compares two files silently.
+	•	If files differ,
+	•	JIRA HTML is uploaded to Artifactory.
+	•	Sync service is triggered to update the database.
+	•	Email is sent if email content changes.
+
+This automates the JIRA sync and email alerts efficiently. 🚀
