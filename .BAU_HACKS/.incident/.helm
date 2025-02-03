@@ -1,0 +1,43 @@
+To push a Helm chart using Helm 3 from an internally downloaded Helm binary and authenticate using a token, use the following command format:
+
+📝 Command to Push Helm Chart
+
+echo "$TOKEN" | helm3 -c "helm push my-chart-1.0.0.tgz oci://artifactory.company.com/helm-charts --username $USERNAME --password $TOKEN"
+
+🔹 Explanation of the Command
+	1.	echo "$TOKEN" → Provides the authentication token for Helm.
+	2.	helm3 -c → Runs Helm 3 with a command.
+	3.	helm push my-chart-1.0.0.tgz → Pushes the Helm chart (my-chart-1.0.0.tgz).
+	4.	oci://artifactory.company.com/helm-charts → The internal Artifactory Helm repository URL.
+	5.	--username $USERNAME --password $TOKEN → Authenticates using the token.
+
+💡 Alternative Method (if -c does not work)
+
+If helm3 -c does not work, try this standard Helm push command:
+
+export HELM_EXPERIMENTAL_OCI=1
+helm3 registry login artifactory.company.com --username $USERNAME --password $TOKEN
+helm3 push my-chart-1.0.0.tgz oci://artifactory.company.com/helm-charts
+
+🚀 Steps to Push a Helm Chart
+	1.	Download Helm 3 from Artifactory
+
+curl -u "$USERNAME:$TOKEN" -o /usr/local/bin/helm3 "https://artifactory.company.com/helm3-linux-amd64"
+chmod +x /usr/local/bin/helm3
+
+
+	2.	Verify Helm Installation
+
+helm3 version
+
+
+	3.	Package the Helm Chart
+
+helm3 package my-chart/
+
+
+	4.	Push the Chart to Artifactory
+
+echo "$TOKEN" | helm3 -c "helm push my-chart-1.0.0.tgz oci://artifactory.company.com/helm-charts --username $USERNAME --password $TOKEN"
+
+Let me know if you need adjustments! 🚀
