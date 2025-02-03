@@ -1,3 +1,7 @@
+curl -s "https://registry.example.com/v2/myimage/tags/list" | grep -o '"[0-9]*\.[0-9]*\.[0-9]*"' | sort -Vr | head -n1
+
+
+
 🔄 Implementing Incremental Image & Chart Versioning in Bamboo
 
 To ensure each deployment has a unique version, we will:
