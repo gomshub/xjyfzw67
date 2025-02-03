@@ -1,4 +1,43 @@
 
+# Use a lightweight Python base image
+FROM python:3.11.7-slim
+
+# Set environment variables
+ENV ARTIFACTORY_URL="https://artifactory.company.com/artifactory"
+ENV JDK_PACKAGE="jdk-17.tar.gz"
+ENV JAVA_HOME="/usr/local/jdk-17"
+ENV PATH="$JAVA_HOME/bin:$PATH"
+
+# Download and install JDK manually from Artifactory (without apt-get)
+RUN curl -u <USERNAME>:<PASSWORD> -o /tmp/$JDK_PACKAGE "$ARTIFACTORY_URL/$JDK_PACKAGE" && \
+    mkdir -p $JAVA_HOME && \
+    tar -xzf /tmp/$JDK_PACKAGE -C /usr/local && \
+    rm /tmp/$JDK_PACKAGE
+
+# Verify JDK installation
+RUN ["java", "-version"]
+
+# Create working directory
+WORKDIR /app
+
+# Copy Python dependencies
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application files
+COPY . /app
+
+# Copy ojdbc6.jar to the required location
+COPY /app/utils/lib/ojdbc6.jar /app/utils/lib/ojdbc6.jar
+
+# Set environment variables for JDBC driver
+ENV CLASSPATH="/app/utils/lib/ojdbc6.jar"
+
+# Set entry point for Gunicorn server
+ENTRYPOINT ["gunicorn", "-w", "4", "-b", "0.0.0.0:8000", "routes:app"]
+
+
+=#=
 # Use the slim version of Python 3.11.7
 FROM python:3.11.7-slim
 
