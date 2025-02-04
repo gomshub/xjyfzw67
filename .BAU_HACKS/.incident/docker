@@ -1,4 +1,55 @@
 
+📌 Solution: Use Internal Artifactory JDK Docker Image in Your Dockerfile
+
+Since your company hosts a JDK Docker image in the internal Artifactory, the best approach is to use that image as a base instead of manually installing JDK.
+
+🖥️ Updated Dockerfile (Python + JDK from Internal Artifactory)
+
+# Use the internal JDK image from Artifactory as the base image
+FROM artifactory.company.com/docker-repo/adoptopenjdk11:latest AS jdk_base
+
+# Use Python 3.11.7-slim as the second base image
+FROM python:3.11.7-slim
+
+# Copy JDK from the first image
+COPY --from=jdk_base /opt/jdk /opt/jdk
+
+# Set environment variables for Java
+ENV JAVA_HOME=/opt/jdk
+ENV PATH="$JAVA_HOME/bin:$PATH"
+
+# Configure pip to use the internal Artifactory
+COPY pip.conf /etc/pip.conf
+
+# Install Python dependencies
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copy application files
+COPY . /app
+WORKDIR /app
+
+# Run the application with Gunicorn
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "routes:app"]
+
+🚀 How This Works
+	1.	Uses the internal JDK Docker image from Artifactory (artifactory.company.com/docker-repo/adoptopenjdk11:latest).
+	2.	Copies the JDK binaries from the first image into the final image (/opt/jdk).
+	3.	Sets JAVA_HOME and updates PATH, ensuring Java is available.
+	4.	Uses an internal pip.conf to install Python dependencies from Artifactory.
+	5.	Copies application files and runs Gunicorn, launching the Flask service.
+
+✅ Advantages of This Approach
+	•	No need for apt-get or manual JDK installation.
+	•	Faster builds, as the JDK is already included in a Docker image.
+	•	Secure and consistent, using an internally approved JDK version.
+	•	Compatible with JayDeBeApi, since Java is correctly configured.
+
+Would you like a Bamboo script to automate the Docker build and push process? 🚀
+
+
+
+
 # Use Python 3.11.7-slim as the base image
 FROM python:3.11.7-slim
 
