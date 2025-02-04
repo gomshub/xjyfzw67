@@ -1,3 +1,60 @@
+
+To fetch the image version from the GitOps repo for ArgoCD using curl, follow these steps:
+
+🔹 1. Fetch Image Version from values.yaml (GitOps Repo)
+
+🚀 Using curl to Retrieve Raw File Content
+
+If your GitOps repo is hosted on GitHub, GitLab, or Bitbucket, you can retrieve the values.yaml file using curl.
+
+# Define the GitOps repo URL (Replace with actual URL)
+GITOPS_URL="https://raw.githubusercontent.com/company/gitops-repo/main/services/my-service/values.yaml"
+
+# Fetch values.yaml content
+curl -s $GITOPS_URL | grep "image:"
+
+🔹 2. Extract the Image Version Using awk or sed
+
+Since values.yaml contains:
+
+image: "artifactory.company.com/my-service:20240201010101"
+
+You can extract the image version using:
+
+IMAGE_TAG=$(curl -s $GITOPS_URL | grep "image:" | awk -F ':' '{print $NF}' | tr -d '"')
+
+echo "✅ Latest image version: $IMAGE_TAG"
+
+	🔹 Example Output: ✅ Latest image version: 20240201010101
+
+🔹 3. Fetch Helm Chart Version from Chart.yaml
+
+If you need the Helm Chart version from Chart.yaml:
+
+CHART_URL="https://raw.githubusercontent.com/company/gitops-repo/main/services/my-service/Chart.yaml"
+
+CHART_VERSION=$(curl -s $CHART_URL | grep "version:" | awk '{print $2}')
+
+echo "✅ Helm Chart version: $CHART_VERSION"
+
+🔹 4. Use Image Version in CI/CD for Deployment
+
+You can now use $IMAGE_TAG in Bamboo CI/CD, Helm upgrade, or Docker pull.
+
+🔹 Example: Deploy using Helm
+
+helm upgrade my-service oci://artifactory.company.com/helm-charts \
+  --set image="artifactory.company.com/my-service:$IMAGE_TAG"
+
+🎯 Summary
+	•	✅ Retrieve values.yaml using curl
+	•	✅ Extract the latest image version
+	•	✅ Retrieve Chart.yaml for Helm version
+	•	✅ Use it in Helm upgrade or Kubernetes deployment
+
+Let me know if you need additional tweaks! 🚀
+
+
 #!/bin/bash
 
 # Define Image Repository Path
