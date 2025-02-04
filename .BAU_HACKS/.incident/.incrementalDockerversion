@@ -1,3 +1,51 @@
+#!/bin/bash
+
+IMAGE_NAME="your-registry.com/your-image"
+
+# List all images matching the IMAGE_NAME
+echo "Available images for $IMAGE_NAME:"
+docker images | grep "$IMAGE_NAME"
+
+# Fetch the latest tag by sorting versions
+LATEST_TAG=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "$IMAGE_NAME" | sort -V | tail -n 1)
+
+echo "Latest image found: $LATEST_TAG"
+
+# Pull the latest image if found
+if [ -n "$LATEST_TAG" ]; then
+    docker pull "$LATEST_TAG"
+else
+    echo "No image found for $IMAGE_NAME."
+fi
+
+====
+#!/bin/bash
+
+IMAGE_NAME="your-registry.com/your-image"
+LATEST_TAG=$(docker images --format "{{.Tag}}" $IMAGE_NAME | sort -V | tail -n 1)
+
+if [[ -z "$LATEST_TAG" || "$LATEST_TAG" == "latest" ]]; then
+    NEW_TAG="1.0.0"
+else
+    # Increment the patch version (1.0.0 → 1.0.1)
+    IFS='.' read -r major minor patch <<< "$LATEST_TAG"
+    NEW_TAG="$major.$minor.$((patch + 1))"
+fi
+
+echo "Pulling latest image: $IMAGE_NAME:$LATEST_TAG"
+docker pull $IMAGE_NAME:$LATEST_TAG
+
+echo "New version will be: $NEW_TAG"
+
+# Tag and push the new version
+docker tag $IMAGE_NAME:$LATEST_TAG $IMAGE_NAME:$NEW_TAG
+docker push $IMAGE_NAME:$NEW_TAG
+===
+
+
+
+
+
 curl -s "https://registry.example.com/v2/myimage/tags/list" | grep -o '"[0-9]*\.[0-9]*\.[0-9]*"' | sort -Vr | head -n1
 
 
