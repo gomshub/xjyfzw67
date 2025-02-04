@@ -1,0 +1,155 @@
+🔧 Enhancing Error Handling with Custom Exceptions & Logging in Flask
+
+To improve error handling in your Flask application, we will:
+✅ Implement custom error messages with detailed stack trace (line number, file, and error details).
+✅ Define centralized exception handling in exception_config.py.
+✅ Call jira_ops.py and db_ops.py from routes.py for separation of concerns.
+
+📌 1. Create exception_config.py for Custom Error Handling
+
+This file will store custom exceptions and error messages.
+
+import traceback
+import sys
+
+class CustomException(Exception):
+    """Base class for custom exceptions with detailed error messages."""
+
+    def __init__(self, message):
+        self.message = message
+        super().__init__(self.message)
+
+    def format_error(self):
+        """Format the error with traceback, file name, and line number."""
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        tb = traceback.extract_tb(exc_traceback)
+        last_call = tb[-1]  # Get last call in stack trace
+        file_name, line_number, function_name, text = last_call
+
+        return {
+            "status": "error",
+            "message": self.message,
+            "file": file_name,
+            "line": line_number,
+            "function": function_name,
+            "error_details": str(exc_value),
+            "traceback": traceback.format_exc()
+        }
+
+📌 2. Update jira_ops.py for JIRA Connection
+
+Instead of directly handling errors in routes.py, we move the logic to jira_ops.py.
+
+import requests
+import os
+from exception_config import CustomException
+
+JIRA_URL = os.getenv("JIRA_URL", "https://your-jira-instance.com/rest/api/2/serverInfo")
+JIRA_TOKEN = os.getenv("JIRA_API_TOKEN")
+
+def test_jira_connection():
+    """Test connection to JIRA API."""
+    try:
+        headers = {"Authorization": f"Bearer {JIRA_TOKEN}", "Accept": "application/json"}
+        response = requests.get(JIRA_URL, headers=headers, timeout=5)
+
+        if response.status_code == 200:
+            return {"status": "success", "message": "JIRA is reachable!"}
+        else:
+            raise CustomException(f"JIRA responded with status {response.status_code}")
+
+    except Exception as e:
+        error = CustomException(f"Failed to connect to JIRA: {str(e)}")
+        return error.format_error()
+
+📌 3. Update db_ops.py for Database Connection
+
+Handles database connectivity separately.
+
+import jaydebeapi
+import os
+from exception_config import CustomException
+
+DB_URL = os.getenv("DB_URL", "jdbc:oracle:thin:@//your-db-host:1521/your-db")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+OJDBC_JAR = "/app/utils/lib/ojdbc6.jar"
+
+def test_db_connection():
+    """Test connection to Oracle database."""
+    try:
+        conn = jaydebeapi.connect(
+            "oracle.jdbc.driver.OracleDriver",
+            DB_URL,
+            [DB_USER, DB_PASSWORD],
+            OJDBC_JAR
+        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT SYSDATE FROM DUAL")  # Test query
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        return {"status": "success", "message": f"DB connection successful! Current DB time: {result[0]}"}
+
+    except Exception as e:
+        error = CustomException(f"Failed to connect to DB: {str(e)}")
+        return error.format_error()
+
+📌 4. Update routes.py to Use jira_ops.py & db_ops.py
+
+This ensures better modularity.
+
+from flask import Flask, jsonify
+import jira_ops
+import db_ops
+
+app = Flask(__name__)
+
+@app.route('/test/jira', methods=['GET'])
+def test_jira():
+    """Call JIRA connection test."""
+    result = jira_ops.test_jira_connection()
+    return jsonify(result)
+
+@app.route('/test/db', methods=['GET'])
+def test_db():
+    """Call Database connection test."""
+    result = db_ops.test_db_connection()
+    return jsonify(result)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+
+🚀 5. Test in Kubernetes
+	1.	Deploy the Flask app in Kubernetes.
+	2.	Run these curl commands from any pod to test:
+
+curl http://your-service-url/test/jira
+curl http://your-service-url/test/db
+
+
+	3.	If any error occurs, the response will include:
+	•	Custom error message
+	•	File name, function, and line number
+	•	Stack trace
+
+📌 Example Error Response
+
+{
+    "status": "error",
+    "message": "Failed to connect to JIRA: HTTPSConnectionPool(host='jira.company.com', port=443)",
+    "file": "jira_ops.py",
+    "line": 12,
+    "function": "test_jira_connection",
+    "error_details": "ConnectionError: [Errno 111] Connection refused",
+    "traceback": "Traceback (most recent call last): ..."
+}
+
+🎯 Benefits of This Approach
+
+✅ Custom error handling with file name, line number, and stack trace.
+✅ Modular code – Separate jira_ops.py and db_ops.py for better maintainability.
+✅ Easier debugging – Developers can quickly pinpoint the issue.
+
+Would you like me to add logging to a file or send alerts if errors occur? 🚀
