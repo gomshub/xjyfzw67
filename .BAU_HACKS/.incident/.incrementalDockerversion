@@ -1,5 +1,38 @@
 #!/bin/bash
 
+# Define Image Repository Path
+IMAGE_REPO="cr.example.com/images/image_name"
+
+# Get the latest tag from the local Docker images
+LATEST_TAG=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "$IMAGE_REPO" | awk -F: '{print $2}' | sort -V | tail -n1)
+
+# If no tag is found, start with a default
+if [[ -z "$LATEST_TAG" ]]; then
+    NEW_TAG="1.0.0"
+else
+    # Extract Major.Minor.Patch version (assumes semantic versioning)
+    MAJOR=$(echo $LATEST_TAG | cut -d. -f1)
+    MINOR=$(echo $LATEST_TAG | cut -d. -f2)
+    PATCH=$(echo $LATEST_TAG | cut -d. -f3)
+
+    # Increment the Patch version
+    NEW_PATCH=$((PATCH + 1))
+    NEW_TAG="$MAJOR.$MINOR.$NEW_PATCH"
+fi
+
+echo "Latest Tag: $LATEST_TAG"
+echo "New Tag: $NEW_TAG"
+
+# Build and tag the new image
+docker build -t "$IMAGE_REPO:$NEW_TAG" .
+
+# Push the new image
+docker push "$IMAGE_REPO:$NEW_TAG"
+
+
+
+#!/bin/bash
+
 IMAGE_NAME="your-registry.com/your-image"
 
 # List all images matching the IMAGE_NAME
