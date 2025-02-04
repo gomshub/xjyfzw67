@@ -1,4 +1,27 @@
 
+# Use Python 3.11.7-slim as the base image
+FROM python:3.11.7-slim
+
+# Define variables for Artifactory and JDK installation path
+ARG ARTIFACTORY_URL="https://artifactory.company.com/artifactory/generic-local/adoptopenjdk-11"
+ARG JDK_DIR="/opt/jdk"
+
+# Set environment variables for Java
+ENV JAVA_HOME=$JDK_DIR
+ENV PATH="$JAVA_HOME/bin:$PATH"
+
+# Download AdoptOpenJDK 11 binaries and move them to JDK directory
+RUN mkdir -p $JDK_DIR && \
+    curl -sSL -o /tmp/jdk.zip $ARTIFACTORY_URL && \
+    unzip /tmp/jdk.zip -d /tmp/ && \
+    mv /tmp/adoptopenjdk-11/* $JDK_DIR/ && \
+    rm -f /tmp/jdk.zip
+
+# Verify Java installation
+RUN java -version
+
+
+
 # Use a lightweight Python base image
 FROM python:3.11.7-slim
 
