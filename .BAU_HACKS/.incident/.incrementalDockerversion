@@ -1,4 +1,120 @@
 
+If you’re not sure about the exact registry URL, you can check it using Docker itself.
+
+🔹 1. Find the Docker Registry URL
+
+Try listing available images from your registry using:
+
+docker info | grep "Registry"
+
+or
+
+docker system info | grep "Registry"
+
+This will show the default registry URL that Docker uses.
+
+🔹 2. Get Image List Without Knowing URL
+
+If you have access to the Docker CLI, you can list available images without needing to manually construct the curl URL:
+
+docker search cr.example.com/test/images/
+
+or
+
+docker image ls cr.example.com/test/images/
+
+🔹 3. Automatically Detect the Registry URL
+
+If you’re working with an internal registry (like Artifactory, Harbor, Nexus), you can extract the correct API URL:
+
+REGISTRY="cr.example.com"
+IMAGE_PATH="test/images/image_name"
+
+# Check if API works for v2
+curl -s -u "$USERNAME:$PASSWORD" "https://$REGISTRY/v2/_catalog"
+
+	•	If this command fails, try without https://:
+
+curl -s -u "$USERNAME:$PASSWORD" "http://$REGISTRY/v2/_catalog"
+
+🔹 4. Debug Registry API
+
+If your registry doesn’t support v2/_catalog, you may have a custom path.
+Try hitting the root API:
+
+curl -s -u "$USERNAME:$PASSWORD" "https://$REGISTRY/"
+
+If it returns JSON or XML, look for registry-related endpoints.
+
+🔹 5. Validate the API Endpoint
+
+If you’re still unsure, try listing a specific image:
+
+curl -s -u "$USERNAME:$PASSWORD" "https://$REGISTRY/v2/$IMAGE_PATH/tags/list"
+
+If it fails, try:
+
+curl -s -u "$USERNAME:$PASSWORD" "http://$REGISTRY/v2/$IMAGE_PATH/tags/list"
+
+🎯 Summary
+	•	✅ Check registry URL using docker info
+	•	✅ List images using docker search or docker image ls
+	•	✅ Test different API endpoints using curl
+	•	✅ Try both https:// and http:// if unsure
+
+Let me know if you need more help! 🚀
+
+
+You can use Docker CLI to list images and fetch the latest version without using curl.
+
+1️⃣ Login to the Docker Registry
+
+First, ensure you’re logged in to the internal Docker registry:
+
+docker login cr.example.com
+
+Enter your username and password when prompted.
+
+2️⃣ List All Available Images in the Registry
+
+To see all images available in your registry:
+
+docker image ls cr.example.com/test/images/
+
+If you don’t see the images, try:
+
+docker images | grep "cr.example.com/test/images"
+
+3️⃣ Fetch the Latest Version of an Image
+
+To get the latest tag of a specific image:
+
+docker images --format "{{.Repository}}:{{.Tag}}" | grep "cr.example.com/test/images/image_name" | sort -V | tail -n 1
+
+This will:
+	•	Filter the images matching image_name
+	•	Sort by version
+	•	Return the latest version (last entry)
+
+4️⃣ Pull the Latest Version
+
+Once you have the latest version, pull it using:
+
+docker pull cr.example.com/test/images/image_name:latest
+
+If latest is not tagged properly, use:
+
+docker pull $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "cr.example.com/test/images/image_name" | sort -V | tail -n 1)
+
+🎯 Summary
+	•	✅ Login to the registry
+	•	✅ List images using docker images
+	•	✅ Get latest version using grep and sort
+	•	✅ Pull latest image automatically
+
+Let me know if you need further refinements! 🚀
+
+
 To fetch the image version from the GitOps repo for ArgoCD using curl, follow these steps:
 
 🔹 1. Fetch Image Version from values.yaml (GitOps Repo)
