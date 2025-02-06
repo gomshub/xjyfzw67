@@ -1,4 +1,41 @@
 
+🔹 Check for Successful Docker Push & Capture Success Message
+
+After running docker push, you can capture the success message and act accordingly.
+
+1️⃣ Capture Docker Push Output and Check Success
+
+IMAGE_NAME="artifactory.company.com/docker-repo/my-app"
+IMAGE_TAG="v1.0.1"
+
+# Run docker push and capture output
+PUSH_OUTPUT=$(docker push $IMAGE_NAME:$IMAGE_TAG 2>&1)
+
+# Check if the push was successful
+if echo "$PUSH_OUTPUT" | grep -q "latest: digest:"; then
+    echo "✅ Docker image pushed successfully: $IMAGE_NAME:$IMAGE_TAG"
+else
+    echo "❌ Docker push failed. Check logs."
+    echo "$PUSH_OUTPUT"
+    exit 1
+fi
+
+2️⃣ Alternative: Check Image in the Registry After Push
+
+If the registry does not provide a clear success message, verify the image exists:
+
+if docker manifest inspect $IMAGE_NAME:$IMAGE_TAG >/dev/null 2>&1; then
+    echo "✅ Docker push successful: $IMAGE_NAME:$IMAGE_TAG is available in the registry."
+else
+    echo "❌ Docker push failed. Image not found in the registry."
+    exit 1
+fi
+
+This ensures that the Docker image was pushed successfully before updating Helm charts or GitOps configurations. 🚀
+
+
+
+=#=#=
 If you’re not sure about the exact registry URL, you can check it using Docker itself.
 
 🔹 1. Find the Docker Registry URL
