@@ -1,3 +1,106 @@
+
+Below is an example Bash script that meets these requirements. This version:
+	•	Selects only files whose names start with “testttt” in the log directory.
+	•	Accepts an optional date range (start and end dates in YYYY-MM-DD format) to filter log lines. It assumes that each log line begins with a date in that format (i.e. the first 10 characters).
+	•	Works on both plain text files and gzip‑compressed files (.gz).
+
+Save the following as (for example) search_logs.sh, make it executable with chmod +x search_logs.sh, and then run it.
+
+#!/bin/bash
+# search_logs.sh
+#
+# Usage:
+#   ./search_logs.sh <search_phrase> [log_directory] [output_file] [start_date] [end_date]
+#
+# Example:
+#   ./search_logs.sh "ERROR" /logs output.txt 2025-01-01 2025-01-31
+#
+# This script searches only files whose names start with "testttt" in the given log directory.
+# If a start_date and end_date are provided, it filters log lines by comparing the first 10 characters
+# (assumed to be in YYYY-MM-DD format) to the date range.
+
+# Check for at least the search phrase argument.
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <search_phrase> [log_directory] [output_file] [start_date] [end_date]"
+    exit 1
+fi
+
+SEARCH_PHRASE="$1"
+LOGDIR="${2:-/logs}"
+OUTPUT_FILE="${3:-output.txt}"
+START_DATE="${4:-}"
+END_DATE="${5:-}"
+
+# Clear (or create) the output file.
+> "$OUTPUT_FILE"
+
+# Enable nullglob so that if no file matches the pattern the glob expands to nothing.
+shopt -s nullglob
+
+# Process only files that start with "testttt" in the log directory.
+for file in "$LOGDIR"/testttt*; do
+    if [ -f "$file" ]; then
+        # Determine whether the file is gzip-compressed.
+        if [[ "$file" == *.gz ]]; then
+            # Use zcat to read the compressed file and pipe to awk.
+            zcat "$file" | awk -v phrase="$SEARCH_PHRASE" -v start="$START_DATE" -v end="$END_DATE" -v fname="$(basename "$file")" '
+            {
+                # Check if the line contains the search phrase.
+                if (index($0, phrase) > 0) {
+                    # If both start and end dates are provided, assume the date is in positions 1-10.
+                    if (start != "" && end != "") {
+                        date = substr($0, 1, 10)
+                        if (date >= start && date <= end)
+                            print fname ": " $0
+                    } else {
+                        print fname ": " $0
+                    }
+                }
+            }' >> "$OUTPUT_FILE"
+        else
+            # For plain text files, use awk directly.
+            awk -v phrase="$SEARCH_PHRASE" -v start="$START_DATE" -v end="$END_DATE" -v fname="$(basename "$file")" '
+            {
+                if (index($0, phrase) > 0) {
+                    if (start != "" && end != "") {
+                        date = substr($0, 1, 10)
+                        if (date >= start && date <= end)
+                            print fname ": " $0
+                    } else {
+                        print fname ": " $0
+                    }
+                }
+            }' "$file" >> "$OUTPUT_FILE"
+        fi
+    fi
+done
+
+echo "Search complete. Results saved in $OUTPUT_FILE"
+
+How This Script Works
+	1.	Arguments:
+	•	$1 – The search phrase (mandatory).
+	•	$2 – The directory containing logs (defaults to /logs).
+	•	$3 – The output file path (defaults to output.txt).
+	•	$4 and $5 – The start and end dates in YYYY-MM-DD format (optional).
+If these are provided, the script assumes that every log line begins with a date in the first 10 characters.
+	2.	File Selection:
+	•	The script uses the glob pattern "$LOGDIR"/testttt* so that only files whose names begin with testttt are processed.
+	3.	Processing Files:
+	•	For gzip‑compressed files (those ending with .gz), the script uses zcat to decompress the file and pipes its content into awk.
+	•	For plain text files, it uses awk directly.
+	•	In each case, awk:
+	•	Checks if the line contains the search phrase.
+	•	If a date range is provided, extracts the first 10 characters of the line and compares them (as strings) to the start and end dates.
+	•	If the line passes these tests, it prints the line preceded by the basename of the file and a colon.
+	4.	Output:
+	•	All matching lines are appended to the specified output file.
+
+With the proper permissions (i.e. your user can read /logs and write to the output directory), this script will work as intended.
+
+
+=#==#
+
 #!/bin/bash
 
 # Usage check
