@@ -1,0 +1,31 @@
+import logging
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,  # Ensure INFO logs are shown
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger()
+
+@app.before_request
+def suppress_healthz_logs():
+    """Ignore logs for health check requests."""
+    if request.path == "/healthz":
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)  # Suppress access logs for /healthz
+
+@app.route('/healthz', methods=['GET'])
+def health_check():
+    return jsonify({"status": "ok"}), 200  # No logs for health check
+
+@app.route('/process', methods=['POST'])
+def process_data():
+    logger.info("Processing data request")  # INFO logs will always be visible
+    return jsonify({"message": "Data processed successfully"}), 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
