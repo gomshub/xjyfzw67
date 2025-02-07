@@ -1,3 +1,134 @@
+
+To retain high availability while suppressing health check logs, you should:
+	1.	Keep livenessProbe and readinessProbe for auto-recovery.
+	2.	Suppress logs for health checks (/healthz) at the application level.
+	3.	Ensure multiple replicas for fault tolerance.
+	4.	Set restartPolicy: Always so failed containers auto-restart.
+
+1. Flask: Suppress Health Check Logs
+
+Modify routes.py to avoid logging /healthz, but keep health checks operational.
+
+import logging
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,  # Keep INFO level logs
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger()
+
+@app.before_request
+def suppress_healthz_logs():
+    """Suppress logs for health check requests."""
+    if request.path in ["/healthz", "/ready"]:
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)  # Suppress access logs for health endpoints
+
+@app.route('/healthz', methods=['GET'])
+def health_check():
+    return jsonify({"status": "healthy"}), 200
+
+@app.route('/ready', methods=['GET'])
+def readiness_check():
+    return jsonify({"status": "ready"}), 200
+
+@app.route('/process', methods=['POST'])
+def process_data():
+    logger.info("Processing data request")
+    return jsonify({"message": "Data processed successfully"}), 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+
+2. Dockerfile: Set Gunicorn Logging Level
+
+Ensure that only necessary logs appear in containers.
+
+ENV GUNICORN_CMD_ARGS="--log-level info"
+
+3. Kubernetes Deployment with HA
+	•	Replicas = 3 (for high availability).
+	•	Liveness Probe to restart the container if it hangs.
+	•	Readiness Probe to remove unhealthy pods from the service.
+	•	Suppress Health Check Logs to reduce noise.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-service
+spec:
+  replicas: 3  # Ensure high availability
+  selector:
+    matchLabels:
+      app: my-service
+  template:
+    metadata:
+      labels:
+        app: my-service
+    spec:
+      containers:
+      - name: my-container
+        image: myregistry.com/my-image:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+        env:
+        - name: LOG_LEVEL
+          value: "info"  # Ensures app logs at INFO level
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 20
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "256Mi"
+          limits:
+            cpu: "1"
+            memory: "512Mi"
+      restartPolicy: Always  # Ensures auto-restart on failure
+
+4. Kubernetes Service (Optional)
+
+Ensure traffic is routed properly to only healthy pods.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  selector:
+    app: my-service
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: ClusterIP
+
+✅ Summary
+
+✔ Suppresses health check logs but keeps probes active.
+✔ Ensures high availability with 3 replicas and auto-restart on failure.
+✔ Readiness probes ensure only healthy pods receive traffic.
+✔ Liveness probes restart stuck pods.
+
+Would you like additional tuning, such as graceful shutdown or startup delays? 🚀
+
+
 import logging
 from flask import Flask, jsonify, request
 
