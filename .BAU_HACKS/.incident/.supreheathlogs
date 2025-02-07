@@ -1,4 +1,88 @@
 
+Below is an example Kubernetes Deployment YAML that uses a rolling update strategy. This strategy helps ensure that new pods are gradually rolled out while maintaining service availability. You can adjust parameters such as maxSurge and maxUnavailable to control how many pods can be added or taken down during the update.
+
+Example Deployment YAML with Rolling Update Strategy
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-service
+  labels:
+    app: my-service
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # At most one extra pod can be created above the desired count.
+      maxUnavailable: 1  # At most one pod can be unavailable during the update.
+  selector:
+    matchLabels:
+      app: my-service
+  template:
+    metadata:
+      labels:
+        app: my-service
+    spec:
+      containers:
+      - name: my-container
+        image: myregistry.com/my-image:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+        env:
+          - name: LOG_LEVEL
+            value: "info"
+          - name: JDBC_JAR_PATH
+            value: "/app/utils/lib/ojdbc6.jar"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 20
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "256Mi"
+          limits:
+            cpu: "1"
+            memory: "512Mi"
+      restartPolicy: Always
+
+Explanation of Key Fields
+	•	strategy.type: RollingUpdate
+Specifies that updates should be performed in a rolling fashion rather than recreating all pods at once.
+	•	rollingUpdate.maxSurge: 1
+Allows up to 1 extra pod (more than the desired number of replicas) to be created during the update. This extra capacity can help maintain service availability.
+	•	rollingUpdate.maxUnavailable: 1
+Specifies that at most 1 pod can be unavailable during the update process. This ensures that most of your replicas remain available to serve traffic.
+	•	livenessProbe and readinessProbe
+Ensure that Kubernetes can determine which pods are healthy and ready to accept traffic during the rolling update.
+	•	restartPolicy: Always
+Ensures that if a pod fails, Kubernetes will automatically restart it.
+
+How Rolling Updates Work
+	1.	Start of Update:
+When a new version of the image is deployed (for example, by updating the image tag in your values file), Kubernetes creates new pods with the new version.
+	2.	Gradual Replacement:
+With maxSurge: 1, Kubernetes creates one additional pod, and with maxUnavailable: 1, it ensures that no more than one pod is unavailable at any time. This means that while one new pod is starting, one old pod may be terminated.
+	3.	Probes and Health Checks:
+The readiness probe ensures that a new pod is only added to the Service endpoints once it is fully operational. The liveness probe will restart any pod that becomes unresponsive.
+	4.	Completion:
+Once all old pods have been replaced and the new pods pass the health checks, the rolling update is complete, and the updated application is running with minimal downtime.
+
+This rolling update strategy helps maintain high availability and minimizes disruption during updates. Let me know if you need further customization or explanation!
+
+
 To retain high availability while suppressing health check logs, you should:
 	1.	Keep livenessProbe and readinessProbe for auto-recovery.
 	2.	Suppress logs for health checks (/healthz) at the application level.
