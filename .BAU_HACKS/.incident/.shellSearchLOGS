@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# Usage check
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <search_phrase> [log_directory] [output_file]"
+    exit 1
+fi
+
+SEARCH_PHRASE="$1"
+LOGDIR="${2:-/logs}"       # Default to /logs if not provided
+OUTPUT_FILE="${3:-output.txt}"  # Default output file
+
+# Empty the output file (or create if it doesn't exist)
+> "$OUTPUT_FILE"
+
+# Loop through each file in the log directory
+for file in "$LOGDIR"/*; do
+    if [ -f "$file" ]; then
+        if [[ "$file" == *.gz ]]; then
+            # Use zgrep for .gz files; -H prints the filename
+            zgrep -H -- "$SEARCH_PHRASE" "$file" >> "$OUTPUT_FILE"
+        else
+            # Use grep for uncompressed files; -H prints the filename
+            grep -H -- "$SEARCH_PHRASE" "$file" >> "$OUTPUT_FILE"
+        fi
+    fi
+done
+
+echo "Search complete. Results saved in $OUTPUT_FILE"
