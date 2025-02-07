@@ -1,3 +1,59 @@
+
+Below is an example of how you can configure your NGINX Ingress to allow CORS for multiple HTTPS origins (e.g., https://ctlq.example.com, https://intg.example.com, https://pros.example.com). You simply need to add the appropriate annotations to your Ingress resource.
+
+Example Ingress YAML with CORS Enabled
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-ingress
+  namespace: your-namespace
+  annotations:
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://ctlq.example.com,https://intg.example.com,https://pros.example.com"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Content-Type, Accept, X-Requested-With"
+    # Optionally, if credentials are needed:
+    # nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+spec:
+  rules:
+    - host: your-service.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: your-service
+                port:
+                  number: 80
+
+Explanation:
+	1.	Annotations for CORS:
+	•	nginx.ingress.kubernetes.io/enable-cors: "true"
+This enables CORS processing on the ingress.
+	•	nginx.ingress.kubernetes.io/cors-allow-origin: "https://ctlq.example.com,https://intg.example.com,https://pros.example.com"
+Specifies a comma-separated list of allowed origins.
+	•	nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+Allows the specified HTTP methods.
+	•	nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Content-Type, Accept, X-Requested-With"
+Indicates which headers can be used in the actual request.
+	•	(Optional) nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+Allows credentials (cookies, HTTP authentication) to be included with requests if required.
+	2.	Ingress Rule:
+	•	The rule in the spec section routes requests from the defined host (your-service.example.com) to your service.
+	•	The CORS annotations apply to any request that passes through this Ingress, ensuring that your service accepts requests from the specified HTTPS origins.
+
+Usage Notes:
+	•	HTTPS:
+Since you’re working with HTTPS origins (e.g., https://ctlq.example.com), ensure your ingress controller is configured with TLS and that these domains are correctly set up with valid certificates.
+	•	Testing:
+After applying this YAML, you can test the CORS configuration by making cross-origin requests from one of the allowed origins (or using a tool like Postman with the appropriate Origin header).
+	•	Customization:
+Adjust the list of allowed origins or headers as needed for your specific security requirements.
+
+This configuration should allow your NGINX Ingress to properly handle CORS for the specified HTTPS origins without requiring any changes to your application code or additional Kubernetes YAML files for your service.
+
 Here’s the Kubernetes YAML configuration to deploy the sync_issues module, including deployment, service, ConfigMap, and Secret resources.
 
 1. Deployment YAML (sync-issues-deployment.yaml)
