@@ -1,4 +1,97 @@
 
+Below is an example README.md file that explains how to use the search_logs.sh script, including details about the arguments it accepts and usage examples.
+
+# search_logs.sh
+
+This is a Bash shell script that searches for a specified phrase in log files and optionally filters the results by a date range. The script works with both plain text and gzip-compressed files. It is designed to process only those files whose names begin with the pattern `testttt`.
+
+## Requirements
+
+- **Bash**: The script is written for the Bash shell.
+- **Access Permissions**: Your user must have read access to the log files (e.g., files in `/logs`) and write access to the output directory.
+- **Utilities**: 
+  - `awk` for processing the log lines.
+  - `zcat` for decompressing `.gz` files (if you have compressed log files).
+
+## Usage
+
+```bash
+./search_logs.sh <search_phrase> [log_directory] [output_file] [start_date] [end_date]
+
+Arguments
+	1.	<search_phrase> (required)
+The text or pattern to search for in the log files.
+	2.	[log_directory] (optional)
+The directory containing the log files.
+Default: /logs
+	3.	[output_file] (optional)
+The path to the file where matching lines will be written.
+Default: output.txt
+	4.	[start_date] (optional)
+The start date (in YYYY-MM-DD format) used to filter log lines.
+Note: This filtering assumes that each log line begins with a date in YYYY-MM-DD format (i.e., the first 10 characters).
+	5.	[end_date] (optional)
+The end date (in YYYY-MM-DD format) used to filter log lines.
+Note: This argument is used in conjunction with start_date.
+
+File Filtering
+
+The script processes only files whose names start with testttt in the specified log directory. This makes it easier to target a subset of log files.
+
+Examples
+	•	Example 1: Search for the phrase "ERROR" in files starting with testttt within /logs, and write the results to output.txt:
+
+./search_logs.sh "ERROR"
+
+
+	•	Example 2: Search for "WARNING" in the /logs directory and write matching lines to warnings.txt:
+
+./search_logs.sh "WARNING" /logs warnings.txt
+
+
+	•	Example 3: Search for the phrase "Critical" and filter results to include only log lines dated between January 1, 2025 and January 31, 2025:
+
+./search_logs.sh "Critical" /logs critical_output.txt 2025-01-01 2025-01-31
+
+
+
+How It Works
+	1.	Argument Parsing:
+The script expects at least the search phrase. If additional parameters are provided, it uses them as the log directory, output file, and date range, respectively.
+	2.	File Selection:
+The script uses a glob pattern to select files from the log directory that start with testttt. This allows you to limit the search to specific log files.
+	3.	Handling Compressed Files:
+	•	For files with a .gz extension, the script uses zcat to decompress the file content before processing.
+	•	For uncompressed files, the script uses awk directly.
+	4.	Date Filtering:
+If both a start and an end date are provided, the script extracts the first 10 characters from each line (assumed to be in YYYY-MM-DD format) and checks if the date falls within the specified range.
+	5.	Output Format:
+Each matching line is prefixed with the file name (using only the base name) followed by a colon. For example:
+
+testttt_log1: 2025-01-15 ERROR Something went wrong...
+
+
+
+Troubleshooting
+	•	Permissions:
+Ensure that you have the necessary permissions to read the log files in the specified directory and to write to the output file’s location.
+	•	Date Format:
+The script assumes that each log line starts with a date in the format YYYY-MM-DD. If your logs use a different format, you may need to adjust the date extraction logic in the script.
+	•	Dependencies:
+Verify that awk and zcat are installed and available in your environment.
+
+License
+
+This script is provided “as is” without any warranty. Use it at your own risk.
+
+Happy logging!
+
+---
+
+Simply save this content as `README.md` alongside your `search_logs.sh` script. This file will guide users on how to execute the script, what arguments it accepts, and provide examples to get started.
+
+
+=#=#
 Below is an example Bash script that meets these requirements. This version:
 	•	Selects only files whose names start with “testttt” in the log directory.
 	•	Accepts an optional date range (start and end dates in YYYY-MM-DD format) to filter log lines. It assumes that each log line begins with a date in that format (i.e. the first 10 characters).
