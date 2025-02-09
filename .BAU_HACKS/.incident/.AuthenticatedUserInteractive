@@ -1,3 +1,43 @@
+You can try Base64 encoding interactively in a Python shell.
+
+Steps to Try in Python Interactive Mode:
+	1.	Open a terminal or command prompt.
+	2.	Start the Python interactive shell by typing:
+
+python
+
+
+	3.	Run the following Python code:
+
+import base64
+
+# Encode a string
+data = "Hello, World!"
+encoded_data = base64.b64encode(data.encode()).decode()
+print("Encoded:", encoded_data)
+
+# Decode back to original
+decoded_data = base64.b64decode(encoded_data.encode()).decode()
+print("Decoded:", decoded_data)
+
+Expected Output:
+
+Encoded: SGVsbG8sIFdvcmxkIQ==
+Decoded: Hello, World!
+
+Try Encoding a Password:
+
+password = "MySecret123"
+encoded_password = base64.b64encode(password.encode()).decode()
+print("Encoded Password:", encoded_password)
+
+decoded_password = base64.b64decode(encoded_password.encode()).decode()
+print("Decoded Password:", decoded_password)
+
+Let me know if you need any modifications! 🚀
+
+=#====
+
 Below is an updated solution that uses HTTP headers (instead of query parameters) to pass the API token securely when launching the interactive service. This approach is preferable because it keeps sensitive information (the API token) out of the URL. The shell script will:
 	1.	Retrieve the system username.
 	2.	Prompt for the JIRA filter ID.
