@@ -1,0 +1,159 @@
+Yes, it is possible to encrypt both the bcrypt-hashed password and the JIRA API token, then store them in a sealed Kubernetes secret. Here’s how you can achieve this securely:
+
+Step 1: Generate Bcrypt Hash for Password and Encrypt JIRA API Token
+
+Since bcrypt is a one-way hashing algorithm, we can’t “encrypt” it further. However, we can base64-encode the bcrypt hash before storing it.
+For the JIRA API token, we can encrypt it and then store it in a sealed secret.
+
+Python Script to Hash Password and Encode Data
+
+import bcrypt
+import json
+import base64
+
+def hash_password(password):
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password.encode(), salt)
+    return base64.b64encode(hashed).decode()  # Base64 encode the bcrypt hash
+
+# Example user credentials
+users = {
+    "JohnDoe": {"password": "mysecret", "jira_api_token": "abcd1234"},
+    "JaneDoe": {"password": "securepass", "jira_api_token": "xyz9876"}
+}
+
+# Generate bcrypt hash & base64 encode API token
+hashed_users = {}
+for user, creds in users.items():
+    hashed_users[user] = {
+        "bcrypt_token": hash_password(creds["password"]),
+        "jira_api_token": base64.b64encode(creds["jira_api_token"].encode()).decode()
+    }
+
+# Convert to JSON string (for Kubernetes Secret)
+secret_json = json.dumps(hashed_users, indent=2)
+print(secret_json)
+
+🔹 What This Does:
+	•	Uses bcrypt for hashing passwords.
+	•	Base64 encodes both the bcrypt token and the JIRA API token for storage.
+
+Step 2: Store Encrypted Tokens in Kubernetes Sealed Secret
+
+After generating the bcrypt hashed + base64 encoded values, store them as a sealed Kubernetes secret.
+
+Create a Kubernetes Secret
+
+kubectl create secret generic user-api-tokens --from-literal=tokens='<JSON_OUTPUT_FROM_SCRIPT>' --namespace=my-namespace
+
+Then, convert it into a Sealed Secret using your internal Kubernetes UI.
+
+Step 3: Flask Service to Validate Credentials
+
+Your Flask service must:
+	1.	Retrieve encrypted secrets from Kubernetes.
+	2.	Decode base64-encoded values.
+	3.	Compare bcrypt-hashed passwords correctly.
+
+Flask API (routes.py)
+
+from flask import Flask, request, jsonify
+import bcrypt
+import json
+import base64
+import os
+import requests
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app, supports_credentials=True, origins=["https://kube.intg.example.com"])
+
+# Load Kubernetes secret containing users
+USER_API_TOKENS = json.loads(os.getenv("USER_API_TOKENS", "{}"))
+
+@app.route('/interactive_jira', methods=['GET'])
+def interactive_jira():
+    username = request.args.get('username')
+    api_token = request.args.get('api_token')
+    filter_id = request.args.get('filter_id')
+
+    if not username or not api_token:
+        return jsonify({"error": "Missing username or API token"}), 400
+
+    user_data = USER_API_TOKENS.get(username)
+
+    if not user_data:
+        return jsonify({"error": "User not found"}), 403
+
+    # Decode stored bcrypt hash and API token
+    stored_hashed_password = base64.b64decode(user_data["bcrypt_token"].encode())
+    stored_jira_api_token = base64.b64decode(user_data["jira_api_token"].encode()).decode()
+
+    # Verify bcrypt token
+    if bcrypt.checkpw(api_token.encode(), stored_hashed_password):
+        # Make a request to JIRA API
+        jira_url = f"https://jira.example.com/rest/api/2/filter/{filter_id}"
+        headers = {"Authorization": f"Bearer {stored_jira_api_token}"}
+
+        response = requests.get(jira_url, headers=headers)
+
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return jsonify({"error": "Failed to fetch JIRA data"}), response.status_code
+    else:
+        return jsonify({"error": "Invalid API token"}), 403
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
+
+🔹 What This Does:
+	•	Loads the encrypted secret from Kubernetes.
+	•	Base64-decodes the bcrypt hash and JIRA API token.
+	•	Validates user login securely using bcrypt.
+	•	Calls the JIRA API if authentication is successful.
+
+Step 4: Open Interactive Service in Browser via Shell Script
+
+This script:
+	1.	Gets the system username.
+	2.	Asks for the API token securely.
+	3.	Launches the Flask service in a browser.
+
+Shell Script
+
+#!/bin/bash
+
+# Get the system user
+SYSTEM_USER=$(whoami)
+
+# Define interactive service URL
+INTERACTIVE_URL="http://localhost:5000/interactive_jira"
+
+# Get user input for filter ID
+read -p "Enter JIRA Filter ID: " FILTER_ID
+
+# Get API Token input securely
+read -s -p "Enter API Token for $SYSTEM_USER: " API_TOKEN
+echo ""
+
+# Construct request URL
+REQUEST_URL="$INTERACTIVE_URL?username=$SYSTEM_USER&api_token=$API_TOKEN&filter_id=$FILTER_ID"
+
+# Open in browser
+xdg-open "$REQUEST_URL"  # For Linux
+open "$REQUEST_URL"       # For macOS
+start "$REQUEST_URL"      # For Windows
+
+# Alternatively, use CURL if browser opening fails
+curl -k "$REQUEST_URL"
+
+Final Steps
+	1.	Generate bcrypt tokens using Python and store them in a Kubernetes sealed secret.
+	2.	Deploy Flask API to authenticate users and fetch JIRA data.
+	3.	Run the shell script to open the service in a browser without CORS issues.
+
+🚀 This method ensures:
+✅ Secure storage of user credentials.
+✅ Protection of JIRA API tokens.
+✅ User verification using bcrypt without exposing passwords.
