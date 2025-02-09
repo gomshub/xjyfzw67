@@ -1,3 +1,178 @@
+Below is an updated solution that uses HTTP headers (instead of query parameters) to pass the API token securely when launching the interactive service. This approach is preferable because it keeps sensitive information (the API token) out of the URL. The shell script will:
+	1.	Retrieve the system username.
+	2.	Prompt for the JIRA filter ID.
+	3.	Prompt for the API token in plain text.
+	4.	Use curl with an HTTP header (Authorization) to pass the token.
+	5.	Open the resulting interactive HTML page in the default browser.
+
+Below are the complete details:
+
+1. Flask Service (routes.py) – Using Header-Based Authentication
+
+Your Flask service should expect the API token in the Authorization header rather than as a query parameter. For example:
+
+import os
+import json
+import bcrypt
+from flask import Flask, request, render_template, jsonify
+from flask_cors import CORS
+
+app = Flask(__name__)
+# Allow CORS for the domains you expect (adjust as needed)
+CORS(app, supports_credentials=True, origins=["https://ctlq.example.com", "https://intg.example.com", "https://pros.example.com"])
+
+def load_user_tokens():
+    """
+    Loads the user tokens from a file.
+    In production, this file is mounted from a Kubernetes secret.
+    """
+    token_file = os.getenv("USER_TOKENS_FILE", "user_tokens.json")
+    try:
+        with open(token_file, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        app.logger.error("Error loading user tokens: %s", e)
+        return {}
+
+USER_TOKENS = load_user_tokens()
+
+def verify_token(username, provided_token):
+    """
+    Verifies that the provided plaintext token matches the stored bcrypt hash.
+    """
+    stored_hash = USER_TOKENS.get(username)
+    if not stored_hash:
+        return False
+    try:
+        return bcrypt.checkpw(provided_token.encode('utf-8'), stored_hash.encode('utf-8'))
+    except Exception as e:
+        app.logger.error("Error verifying token for %s: %s", username, e)
+        return False
+
+@app.route('/interactive_jira', methods=['GET'])
+def interactive_jira():
+    username = request.args.get('username')
+    filter_id = request.args.get('filter_id', 'default')
+
+    if not username:
+        return jsonify({"error": "Username is required"}), 400
+
+    # Expect the token in the Authorization header in the form "Bearer <token>"
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return jsonify({"error": "Missing or invalid Authorization header"}), 401
+
+    provided_token = auth_header.split(" ")[1]
+
+    if not verify_token(username, provided_token):
+        return jsonify({"error": f"Unauthorized: Invalid token for user {username}"}), 403
+
+    # Render the interactive HTML page if authentication passes
+    return render_template("interactive.html", username=username, filter_id=filter_id)
+
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=5000, debug=True)
+
+Key points:
+	•	The service now expects the API token in the HTTP header (Authorization).
+	•	The token is verified against the bcrypt hash stored for the given username.
+
+2. Interactive HTML Template (interactive.html)
+
+This template is rendered by the Flask service and can include any interactive elements.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive JIRA Service</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Welcome, {{ username }}</h1>
+  <p>Filter ID: {{ filter_id }}</p>
+  <p>This is your interactive JIRA dashboard.</p>
+  <!-- Additional interactive elements can be added here -->
+</body>
+</html>
+
+3. Shell Script to Launch the Interactive Service (launch_interactive_service.sh)
+
+This shell script will prompt the user for their filter ID and API token, then use curl with an Authorization header to request the interactive service. Finally, it will open the returned HTML page in the default browser.
+
+#!/bin/bash
+set -e
+
+# Get the current system username; this might be the OS username or you can prompt for it.
+SYSTEM_USER=$(whoami)
+
+# Prompt for the JIRA Filter ID
+read -p "Enter JIRA Filter ID: " FILTER_ID
+
+# Prompt for the API token securely (plain text input)
+read -sp "Enter your API token: " API_TOKEN
+echo ""
+
+# Define the base URL for the interactive service
+# Ensure this URL is accessible (HTTP/HTTPS as appropriate)
+SERVICE_URL="http://localhost:5000/interactive_jira"
+
+# Construct the URL with query parameters for username and filter_id (token is passed in the header)
+REQUEST_URL="${SERVICE_URL}?username=${SYSTEM_USER}&filter_id=${FILTER_ID}"
+echo "Requesting: ${REQUEST_URL}"
+
+# Define a temporary output file to store the HTML response
+OUTPUT_FILE="/tmp/interactive_response.html"
+
+# Use curl with the Authorization header to call the interactive service
+curl -s -H "Authorization: Bearer ${API_TOKEN}" "${REQUEST_URL}" -o "${OUTPUT_FILE}"
+
+# Check if the output file was created and open it in the default browser
+if [ -f "${OUTPUT_FILE}" ]; then
+    echo "Interactive page fetched successfully."
+    # Adjust the command below according to your OS:
+    if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "${OUTPUT_FILE}"
+    elif command -v open >/dev/null 2>&1; then
+        open "${OUTPUT_FILE}"
+    else
+        echo "Please open ${OUTPUT_FILE} in your browser."
+    fi
+else
+    echo "Failed to fetch the interactive page."
+    exit 1
+fi
+
+Key points:
+	•	The script uses whoami to get the system username (or you could prompt for it).
+	•	It prompts for the filter ID and API token.
+	•	It constructs the URL with username and filter_id as query parameters.
+	•	It uses the -H "Authorization: Bearer ${API_TOKEN}" header in the curl command to pass the API token securely.
+	•	The returned HTML file is saved to a temporary location and then opened in the default browser (using xdg-open, open, or a fallback message).
+
+4. Summary of the Flow
+	1.	User Token Generation & Storage:
+	•	Each user generates a bcrypt hash of their API token.
+	•	The administrator collects these hashes into a single JSON file.
+	•	The JSON file is sealed (encrypted) via your internal Kubernetes UI and stored as a secret.
+	2.	Flask Interactive Service:
+	•	The service loads the user token JSON from a mounted secret.
+	•	It expects GET requests with query parameters username and filter_id and the API token in the Authorization header.
+	•	It uses bcrypt to verify that the provided token matches the stored hash for that username.
+	•	If valid, it renders an interactive HTML page.
+	3.	Shell Script:
+	•	The shell script retrieves the system username, prompts for filter ID and API token.
+	•	It uses curl to send a GET request with the API token passed in the Authorization header.
+	•	The returned HTML page is opened in the user’s default browser.
+	4.	Security:
+	•	This approach prevents one user from impersonating another because the bcrypt hash for a given username will only validate the correct API token.
+
+This complete solution should meet your requirements for secure user authentication, encrypted storage of tokens, and a user-friendly way to launch the interactive JIRA service in a browser. Let me know if you need any further modifications or additional details!
+
+
 Yes, it is possible to encrypt both the bcrypt-hashed password and the JIRA API token, then store them in a sealed Kubernetes secret. Here’s how you can achieve this securely:
 
 Step 1: Generate Bcrypt Hash for Password and Encrypt JIRA API Token
