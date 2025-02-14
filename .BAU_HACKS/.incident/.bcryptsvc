@@ -1,0 +1,71 @@
+Here’s an updated Flask bcrypt encoding service that takes both a password and a JIRA API token, hashes the password using bcrypt, base64 encodes the JIRA API token, and returns them as a JSON response.
+
+Installation Requirements
+
+If not already installed, install the required dependencies:
+
+pip install flask bcrypt base64
+
+Updated bcrypt Encoding Service (bcrypt_service.py)
+
+from flask import Flask, request, jsonify
+import bcrypt
+import base64
+
+app = Flask(__name__)
+
+# API to hash password and encode JIRA API token
+@app.route('/hash_credentials', methods=['POST'])
+def hash_credentials():
+    data = request.json
+    password = data.get("password")
+    jira_api_token = data.get("jira_api_token")
+
+    if not password or not jira_api_token:
+        return jsonify({"error": "Both password and JIRA API token are required"}), 400
+
+    # Hash the password using bcrypt
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    # Base64 encode the JIRA API token
+    encoded_jira_token = base64.b64encode(jira_api_token.encode('utf-8')).decode('utf-8')
+
+    return jsonify({
+        "hashed_password": hashed_password,
+        "encoded_jira_api_token": encoded_jira_token
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
+How to Run the Service
+
+Save the file as bcrypt_service.py and run:
+
+python bcrypt_service.py
+
+This will start the Flask service on port 5000.
+
+How to Use the Service
+
+1. Hash Password & Encode JIRA API Token
+
+Make a POST request with JSON input:
+
+curl -X POST http://localhost:5000/hash_credentials \
+     -H "Content-Type: application/json" \
+     -d '{"password": "mysecret", "jira_api_token": "myjiraapitoken"}'
+
+Response Example:
+
+{
+    "hashed_password": "$2b$12$eImiTXuWVxfM37uY4JANjQ==",
+    "encoded_jira_api_token": "bXlqaXJhYXBpdG9rZW4="
+}
+
+Next Steps
+	•	Save this JSON output into a Kubernetes secret (User_Api_tokens).
+	•	Use this hashed password for authentication validation.
+	•	Use the base64 decoded JIRA API token when making requests to JIRA.
+
+Let me know if you need any modifications! 🚀
