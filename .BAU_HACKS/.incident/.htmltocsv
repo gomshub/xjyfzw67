@@ -1,3 +1,28 @@
+
+#!/bin/bash
+
+# URL of the page to fetch
+URL="http://example.com/page.html"
+
+# Fetch the page content
+HTML_CONTENT=$(curl -s "$URL")
+
+# Extract all <tr> rows
+echo "$HTML_CONTENT" | awk '
+    BEGIN { in_table=0; }
+    /<table>/ { in_table=1; }
+    /<\/table>/ { in_table=0; }
+    in_table && /<tr>/ { row=""; next }
+    in_table && /<td>/ {
+        gsub(/<\/?td>/, "", $0); # Remove <td> tags
+        gsub(/^\s+|\s+$/, "", $0); # Trim spaces
+        row = (row == "" ? $0 : row "," $0);
+    }
+    in_table && /<\/tr>/ { print row; row=""; }
+' > output.csv
+
+echo "CSV data saved in output.csv"
+
 Here’s a shell script that uses curl, grep, sed, and awk to extract the <h1> title and the <td> value corresponding to NDH_Task_code, then outputs the result as CSV.
 
 Script:
