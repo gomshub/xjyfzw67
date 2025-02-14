@@ -1,4 +1,86 @@
 
+
+Below is an example shell script that:
+	1.	Reads a list of HTML URLs from a file (e.g., urls.txt),
+	2.	For each URL, downloads its content,
+	3.	Extracts the <h1> title, and
+	4.	Extracts all <td> cell values (from all <tr> rows) and “flattens” them into a single CSV row (with the title as the first column),
+	5.	Appends the result as one row in an output CSV file.
+
+You can adjust the selectors if your HTML structure is more complex.
+
+#!/bin/bash
+# File: extract_flattened_csv.sh
+
+# Input file containing one URL per line.
+INPUT_FILE="urls.txt"
+# Output CSV file.
+OUTPUT_FILE="output.csv"
+
+# Clear (or create) the output file.
+> "$OUTPUT_FILE"
+
+# Optionally, write a header. Since the number of <td> columns can vary, a generic header is used.
+# Uncomment the following line if you want a header row.
+# echo "title,columns" > "$OUTPUT_FILE"
+
+# Loop over each URL from the input file.
+while IFS= read -r url; do
+    echo "Processing: $url"
+
+    # Download the HTML content and remove newlines (to ease regex processing).
+    content=$(curl -s "$url" | tr '\n' ' ')
+
+    # Extract the <h1> title. (Assumes there is one <h1> tag.)
+    title=$(echo "$content" | grep -oP '(?<=<h1>).*?(?=</h1>)')
+
+    # Extract all <td> values.
+    # This looks for content inside <td> ... </td>,
+    # trims surrounding whitespace, and then joins them with commas.
+    tds=$(echo "$content" \
+           | grep -oP '(?<=<td>).*?(?=</td>)' \
+           | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+           | paste -sd "," -)
+
+    # Output the CSV row.
+    # Wrap the title in double quotes to help with any commas or spaces.
+    echo "\"$title\",$tds" >> "$OUTPUT_FILE"
+
+done < "$INPUT_FILE"
+
+echo "CSV output written to $OUTPUT_FILE"
+
+How to Use
+	1.	Save the Script:
+Save the code above into a file (e.g., extract_flattened_csv.sh).
+	2.	Prepare the URL List:
+Create a file named urls.txt in the same directory. Each line should contain one HTML URL, for example:
+
+http://example.com/page1.html
+http://example.com/page2.html
+
+
+	3.	Make the Script Executable:
+
+chmod +x extract_flattened_csv.sh
+
+
+	4.	Run the Script:
+
+./extract_flattened_csv.sh
+
+
+	5.	Result:
+The script creates (or overwrites) output.csv with one row per URL. Each row starts with the page’s <h1> title followed by all <td> values found in the page, separated by commas.
+
+Note
+	•	This script assumes that the HTML is well-formed and that the <h1> and <td> tags do not span multiple lines (or that the tr removal of newlines makes them appear on one line).
+	•	For more complex HTML, consider using an HTML parser (e.g., using Python with BeautifulSoup) for a more robust solution.
+	•	CSV escaping is kept simple here by wrapping only the title in quotes. If your <td> values might contain commas or quotes, you might need additional escaping.
+
+Feel free to adjust the script based on your exact HTML structure and CSV requirements!
+
+
 #!/bin/bash
 
 # URL of the page to fetch
