@@ -1,0 +1,41 @@
+Here’s a shell script that uses curl, grep, sed, and awk to extract the <h1> title and the <td> value corresponding to NDH_Task_code, then outputs the result as CSV.
+
+Script:
+
+#!/bin/bash
+
+# URL of the page to fetch
+URL="http://example.com/page.html"
+
+# Fetch the page content
+HTML_CONTENT=$(curl -s "$URL")
+
+# Extract <h1> title
+TITLE=$(echo "$HTML_CONTENT" | grep -oP '(?<=<h1>).*?(?=</h1>)')
+
+# Extract the NDH_Task_code's right-side column value
+TASK_CODE=$(echo "$HTML_CONTENT" | grep -A1 '<td>NDH_Task_code</td>' | tail -n1 | sed 's/<[^>]*>//g' | xargs)
+
+# Output in CSV format
+echo "title,task_code"
+echo "\"$TITLE\",\"$TASK_CODE\""
+
+Explanation:
+	1.	Uses curl -s to fetch the HTML page without showing progress.
+	2.	Extracts the <h1> content using grep -oP.
+	3.	Finds the <td>NDH_Task_code</td>, grabs the next <td>, and removes HTML tags.
+	4.	Formats the output as CSV.
+
+Run the script:
+
+Save it as extract_data.sh, then execute:
+
+chmod +x extract_data.sh
+./extract_data.sh
+
+This will print the result in CSV format:
+
+title,task_code
+"My Page Title","12345"
+
+Let me know if you need modifications!
