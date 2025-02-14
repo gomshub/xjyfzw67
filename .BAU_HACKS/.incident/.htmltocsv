@@ -1,4 +1,107 @@
 
+Below is an example Bash script that does the following:
+	1.	Reads a list of HTML URLs from a text file (one URL per line).
+	2.	For each URL, it downloads the HTML content and removes newline characters so that each row is on a single line.
+	3.	Extracts the <h1> title from the page.
+	4.	Finds all <tr>...</tr> blocks and—for each row—checks if the first <td> cell matches the pattern
+p01-ABC-XX (where “XX” are two digits).
+	5.	For each matching <tr>, it extracts all <td> cell values, then outputs a CSV row with the page’s title in the first column followed by the extracted cells.
+	6.	All rows from all URLs are appended into a single CSV file.
+
+You can adjust the regular expressions if your HTML structure differs.
+
+#!/bin/bash
+# File: extract_rows.sh
+
+# File containing one URL per line.
+INPUT_FILE="urls.txt"
+# Output CSV file.
+OUTPUT_FILE="output.csv"
+
+# Overwrite (or create) the output CSV file.
+> "$OUTPUT_FILE"
+
+# (Optional) Write a header row.
+# echo "title,col1,col2,col3,..." >> "$OUTPUT_FILE"
+
+# Loop over each URL from the input file.
+while IFS= read -r url; do
+    echo "Processing URL: $url"
+    
+    # Fetch HTML content and remove newlines for easier processing.
+    content=$(curl -s "$url" | tr '\n' ' ')
+    
+    # Extract the <h1> title (assuming one <h1> tag exists).
+    title=$(echo "$content" | grep -oP '(?<=<h1>).*?(?=</h1>)')
+    
+    # Extract all <tr>...</tr> blocks.
+    # Using grep -oP with a non-greedy match.
+    echo "$content" | grep -oP '<tr>.*?</tr>' | while read -r tr_block; do
+        # Extract all <td> values from this row.
+        # This produces one line per <td>.
+        td_values=($(echo "$tr_block" | grep -oP '(?<=<td>).*?(?=</td>)' | sed 's/<[^>]*>//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'))
+        
+        # Only continue if there is at least one <td>.
+        if [ ${#td_values[@]} -gt 0 ]; then
+            # Check if the first cell matches the pattern "p01-ABC-XX" (XX = two digits)
+            if [[ ${td_values[0]} =~ ^p01-ABC-[0-9]{2}$ ]]; then
+                # Join all td values with commas.
+                # We use printf to join array elements with a comma.
+                joined=$(printf ",%s" "${td_values[@]}")
+                joined=${joined:1}  # Remove leading comma.
+                
+                # Output a CSV row with the title as the first column.
+                echo "\"$title\",$joined" >> "$OUTPUT_FILE"
+            fi
+        fi
+    done
+
+done < "$INPUT_FILE"
+
+echo "CSV output written to $OUTPUT_FILE"
+
+How It Works
+	1.	Reading URLs:
+The script reads each URL from urls.txt.
+	2.	Downloading & Flattening HTML:
+It downloads the HTML content using curl -s and uses tr '\n' ' ' to collapse the content into a single line.
+	3.	Extracting the Title:
+It uses a PCRE (Perl-compatible) regular expression with grep -oP to get the content between <h1> and </h1>.
+	4.	Processing Table Rows:
+	•	It extracts each <tr>...</tr> block with grep -oP.
+	•	Then, it extracts all <td> cell values within the block.
+	•	It checks if the first <td> value matches the regex ^p01-ABC-[0-9]{2}$. Only rows with a first cell that fits this pattern are processed.
+	•	The <td> values are joined into a comma-separated string.
+	5.	Writing CSV:
+Each matching row is written to the CSV with the page title as the first column, followed by the <td> values.
+
+Usage Instructions
+	1.	Save the Script:
+Save the script above as extract_rows.sh.
+	2.	Prepare the URL File:
+Create a file named urls.txt in the same directory, for example:
+
+http://example.com/page1.html
+http://example.com/page2.html
+
+
+	3.	Make the Script Executable:
+
+chmod +x extract_rows.sh
+
+
+	4.	Run the Script:
+
+./extract_rows.sh
+
+
+	5.	Review the CSV:
+The output will be saved in output.csv, with one CSV row per matching table row (each row includes the page title as its first column).
+
+Feel free to adjust the regular expressions or CSV formatting as needed for your HTML pages.
+
+
+=#=
 
 Below is an example shell script that:
 	1.	Reads a list of HTML URLs from a file (e.g., urls.txt),
