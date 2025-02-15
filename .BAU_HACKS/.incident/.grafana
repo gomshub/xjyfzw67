@@ -1,0 +1,222 @@
+Since your data is already in Oracle DB, and you’re using Flask in Kubernetes, the simplest and most elegant way to build a custom dashboard would be:
+
+Recommended Approach: Grafana with Oracle DB
+
+✅ Simple: No need for a separate frontend app.
+✅ Elegant: Clean UI with pre-built visualizations.
+✅ Real-time: Can refresh data at set intervals.
+✅ Secure: Can integrate with authentication (LDAP, OAuth).
+
+Step-by-Step Implementation
+
+Step 1: Install Grafana in Kubernetes
+
+Option 1: Helm (Recommended)
+
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+helm install my-grafana grafana/grafana \
+  --namespace monitoring \
+  --set persistence.enabled=true \
+  --set service.type=LoadBalancer \
+  --set adminPassword='YourPassword'
+
+	•	This deploys Grafana in Kubernetes and exposes it as a LoadBalancer.
+	•	Default Credentials: admin / YourPassword.
+	•	Access Grafana via http://<LoadBalancer-IP>:3000
+
+Option 2: Kubernetes Manifest (Without Helm)
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:latest
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: grafana-storage
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: grafana-storage
+          persistentVolumeClaim:
+            claimName: grafana-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 3000
+  selector:
+    app: grafana
+
+	•	Apply using:
+
+kubectl apply -f grafana.yaml
+
+Step 2: Configure Oracle DB as a Data Source
+	1.	Log in to Grafana (http://<LoadBalancer-IP>:3000).
+	2.	Go to Configuration → Data Sources → Add a New Data Source.
+	3.	Select Oracle.
+	4.	Enter:
+	•	Host: <your-oracle-db-host>
+	•	Port: 1521 (default)
+	•	Database Name: <your-db-name>
+	•	User: <db-username>
+	•	Password: <db-password>
+	5.	Click Save & Test.
+
+Step 3: Create Dashboard Panels
+
+Now, let’s create a JIRA Issues Dashboard with key metrics.
+
+Panel 1: Total Issues Over Time (Line Chart)
+	1.	New Panel → Type: Line Chart
+	2.	Use this SQL Query:
+
+SELECT TO_CHAR(created_date, 'YYYY-MM-DD') AS date, COUNT(*) AS total_issues
+FROM jira_issues
+GROUP BY TO_CHAR(created_date, 'YYYY-MM-DD')
+ORDER BY date DESC;
+
+	3.	Click Apply.
+
+Panel 2: Issues by Status (Pie Chart)
+	1.	New Panel → Type: Pie Chart
+	2.	Query:
+
+SELECT status, COUNT(*) AS issue_count 
+FROM jira_issues 
+GROUP BY status 
+ORDER BY issue_count DESC;
+
+	3.	Click Apply.
+
+Panel 3: Critical Issues by Assignee (Bar Chart)
+	1.	New Panel → Type: Bar Chart
+	2.	Query:
+
+SELECT assignee, COUNT(*) AS critical_issues 
+FROM jira_issues 
+WHERE priority = 'Critical' 
+GROUP BY assignee 
+ORDER BY critical_issues DESC;
+
+	3.	Click Apply.
+
+Panel 4: Issues Created vs. Resolved (Time-Series)
+	1.	New Panel → Type: Time Series
+	2.	Query:
+
+SELECT TO_CHAR(created_date, 'YYYY-MM-DD') AS date,
+       COUNT(CASE WHEN status IN ('Done', 'Resolved') THEN 1 END) AS resolved_issues,
+       COUNT(*) AS total_issues
+FROM jira_issues
+GROUP BY TO_CHAR(created_date, 'YYYY-MM-DD')
+ORDER BY date DESC;
+
+	3.	Click Apply.
+
+Step 4: Set Up Alerts & Notifications
+
+Grafana allows email/Slack alerts when certain thresholds are reached.
+
+Example: Alert for More Than 10 Critical Issues
+	1.	Select Critical Issues Panel → Click Alert.
+	2.	Condition: WHEN count() > 10
+	3.	Notification: Add Slack / Email Webhook.
+	4.	Save & Test Alert.
+
+Step 5: Secure Grafana (Optional)
+	1.	Enable OAuth (Google, GitHub, LDAP) for authentication.
+	2.	Restrict Public Access:
+
+kubectl patch svc grafana -n monitoring -p '{"spec": {"type": "ClusterIP"}}'
+
+	3.	Ingress with TLS (if using Nginx Ingress Controller).
+
+Alternative Approach: Custom React/Vue Dashboard
+
+If you want a fully customized UI, follow these steps:
+
+Frontend: React + Chart.js
+	1.	Install dependencies:
+
+npx create-react-app jira-dashboard
+cd jira-dashboard
+npm install axios chart.js react-chartjs-2
+
+	2.	Fetch data from Flask API:
+
+import React, { useState, useEffect } from "react";
+import axios from "axios";
+import { Bar } from "react-chartjs-2";
+
+const Dashboard = () => {
+  const [data, setData] = useState({ labels: [], datasets: [] });
+
+  useEffect(() => {
+    axios.get("/api/issues/status").then((res) => {
+      const labels = res.data.map((row) => row.status);
+      const counts = res.data.map((row) => row.count);
+
+      setData({
+        labels: labels,
+        datasets: [
+          {
+            label: "Issue Count",
+            data: counts,
+            backgroundColor: "rgba(75, 192, 192, 0.6)",
+          },
+        ],
+      });
+    });
+  }, []);
+
+  return <Bar data={data} />;
+};
+
+export default Dashboard;
+
+	3.	Start React app:
+
+npm start
+
+Final Thoughts: Why Grafana?
+
+✅ Faster Deployment (No need to build frontend from scratch).
+✅ Built-in Oracle DB Support.
+✅ Easier Authentication & Security.
+✅ Better Alerting & Monitoring.
+
+Would you like help setting up alerts or deploying the dashboard via Helm?
