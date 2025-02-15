@@ -1,0 +1,172 @@
+Goal:
+
+After updating a JIRA comment from the interactive service, we want the HTML template (template.html) and Flask backend (routes.py) to dynamically fetch and display the latest comments on the corresponding JIRA issue list.
+
+🔹 Changes in routes.py
+	1.	Add an API endpoint /get_issue_comments to fetch updated JIRA comments for a specific issue.
+	2.	Modify the /interactive_jira endpoint to return updated issue details.
+	3.	Ensure CORS is enabled for frontend communication.
+
+Updated routes.py
+
+from flask import Flask, request, render_template, jsonify
+from flask_cors import CORS
+import requests
+
+app = Flask(__name__)
+CORS(app, supports_credentials=True)  # Enable CORS for cross-origin requests
+
+JIRA_BASE_URL = "https://your-jira-instance.com"
+JIRA_API_TOKEN = "your_api_token"
+HEADERS = {
+    "Authorization": f"Bearer {JIRA_API_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+# Route to fetch JIRA issues and display on UI
+@app.route('/interactive_jira', methods=['GET'])
+def interactive_jira():
+    filter_id = request.args.get('filter_id')
+
+    if not filter_id:
+        return jsonify({"error": "Filter ID is required"}), 400
+
+    jira_url = f"{JIRA_BASE_URL}/rest/api/2/search?jql=filter={filter_id}"
+    response = requests.get(jira_url, headers=HEADERS)
+
+    if response.status_code == 200:
+        issues = response.json().get('issues', [])
+        return render_template('template.html', issues=issues)
+    else:
+        return jsonify({"error": "Failed to fetch issues"}), response.status_code
+
+
+# API to update a JIRA comment
+@app.route('/update_comment', methods=['POST'])
+def update_comment():
+    data = request.json
+    issue_id = data.get("issue_id")
+    comment = data.get("comment")
+
+    if not issue_id or not comment:
+        return jsonify({"error": "Issue ID and comment are required"}), 400
+
+    jira_url = f"{JIRA_BASE_URL}/rest/api/2/issue/{issue_id}/comment"
+    response = requests.post(jira_url, json={"body": comment}, headers=HEADERS)
+
+    if response.status_code == 201:
+        return jsonify({"message": "Comment added successfully!"})
+    else:
+        return jsonify({"error": "Failed to add comment"}), response.status_code
+
+
+# API to fetch updated comments for a JIRA issue
+@app.route('/get_issue_comments', methods=['GET'])
+def get_issue_comments():
+    issue_id = request.args.get('issue_id')
+
+    if not issue_id:
+        return jsonify({"error": "Issue ID is required"}), 400
+
+    jira_url = f"{JIRA_BASE_URL}/rest/api/2/issue/{issue_id}/comment"
+    response = requests.get(jira_url, headers=HEADERS)
+
+    if response.status_code == 200:
+        comments = response.json().get('comments', [])
+        formatted_comments = [comment['body'] for comment in comments]  # Extract comment text
+        return jsonify({"comments": formatted_comments})
+    else:
+        return jsonify({"error": "Failed to fetch comments"}), response.status_code
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
+🔹 Changes in template.html
+	1.	Render JIRA issues dynamically.
+	2.	Allow users to add comments and update JIRA via /update_comment API.
+	3.	Fetch and refresh comments dynamically after updating a comment.
+
+Updated template.html
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive JIRA</title>
+    <script>
+        async function updateComment(issueId) {
+            const comment = document.getElementById(`comment_${issueId}`).value;
+
+            const response = await fetch("/update_comment", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ issue_id: issueId, comment: comment })
+            });
+
+            const result = await response.json();
+            alert(result.message || result.error);
+
+            if (response.ok) {
+                refreshComments(issueId);
+            }
+        }
+
+        async function refreshComments(issueId) {
+            const response = await fetch(`/get_issue_comments?issue_id=${issueId}`);
+            const data = await response.json();
+
+            if (response.ok) {
+                const commentsDiv = document.getElementById(`comments_${issueId}`);
+                commentsDiv.innerHTML = data.comments.map(comment => `<p>${comment}</p>`).join("");
+            } else {
+                alert("Failed to fetch comments.");
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Interactive JIRA Issues</h1>
+    
+    {% for issue in issues %}
+        <div>
+            <h2>{{ issue.key }} - {{ issue.fields.summary }}</h2>
+            <p><strong>Status:</strong> {{ issue.fields.status.name }}</p>
+
+            <h3>Comments:</h3>
+            <div id="comments_{{ issue.key }}">
+                {% for comment in issue.fields.comment.comments %}
+                    <p>{{ comment.body }}</p>
+                {% endfor %}
+            </div>
+
+            <input type="text" id="comment_{{ issue.key }}" placeholder="Enter your comment">
+            <button onclick="updateComment('{{ issue.key }}')">Update Comment</button>
+        </div>
+        <hr>
+    {% endfor %}
+</body>
+</html>
+
+🔹 How This Works
+	1.	Render Issues
+	•	When the user opens /interactive_jira?filter_id=12345, it fetches and displays JIRA issues.
+	2.	Update Comment
+	•	User enters a comment in the input field and clicks “Update Comment.”
+	•	Calls /update_comment, updates JIRA, and alerts the user.
+	3.	Refresh Comments
+	•	After a successful comment update, it fetches updated comments from /get_issue_comments.
+	•	Updates the comments section dynamically without reloading the page.
+
+✅ Features Implemented
+
+✔ Fetch and display JIRA issues dynamically.
+✔ Update JIRA comments via an interactive button.
+✔ Automatically refresh comments in real-time.
+✔ CORS enabled for external frontend access.
+✔ No page refresh needed after updating comments.
+
+Now your interactive JIRA service will display real-time updated comments dynamically in the UI! 🚀
