@@ -1,3 +1,97 @@
+
+Complete cURL & Python Code to PUT Custom Fields (String & Key-Value Array) and Change Status to Resolved in JIRA
+
+🔹 1. cURL Example (Key-Value Array)
+
+curl -X PUT -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_JIRA_API_TOKEN" \
+     --data '{
+         "fields": {
+             "customfield_10001": "Custom String Value",
+             "customfield_10010": [
+                 {"key": "Option1", "value": "Description1"},
+                 {"key": "Option2", "value": "Description2"}
+             ] # Array with Key-Value pairs
+         }
+     }' \
+     https://your-jira-instance.atlassian.net/rest/api/2/issue/ISSUE-123
+
+# Transition issue to Resolved (assuming transition ID is 31)
+curl -X POST -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_JIRA_API_TOKEN" \
+     --data '{
+         "transition": {
+             "id": "31"
+         }
+     }' \
+     https://your-jira-instance.atlassian.net/rest/api/2/issue/ISSUE-123/transitions
+
+💡 Replace:
+	•	customfield_10001: Custom string field
+	•	customfield_10010: Array with key-value pairs
+	•	"id": "31": Transition ID for “Resolved”
+
+🔹 2. Python Code
+
+import requests
+
+JIRA_URL = "https://your-jira-instance.atlassian.net"
+ISSUE_KEY = "ISSUE-123"
+JIRA_API_TOKEN = "your_jira_api_token"
+
+headers = {
+    "Authorization": f"Bearer {JIRA_API_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+# Step 1: Update Custom Fields
+update_fields_payload = {
+    "fields": {
+        "customfield_10001": "Custom String Value",
+        "customfield_10010": [  # Array with Key-Value pairs
+            {"key": "Option1", "value": "Description1"},
+            {"key": "Option2", "value": "Description2"}
+        ]
+    }
+}
+
+update_response = requests.put(f"{JIRA_URL}/rest/api/2/issue/{ISSUE_KEY}", headers=headers, json=update_fields_payload)
+
+if update_response.status_code == 204:
+    print("✅ Custom fields updated successfully!")
+else:
+    print(f"❌ Failed to update fields: {update_response.text}")
+
+# Step 2: Change Status to "Resolved"
+transition_payload = {
+    "transition": {
+        "id": "31"  # Replace with actual "Resolved" transition ID
+    }
+}
+
+transition_response = requests.post(f"{JIRA_URL}/rest/api/2/issue/{ISSUE_KEY}/transitions", headers=headers, json=transition_payload)
+
+if transition_response.status_code == 204:
+    print("✅ Issue transitioned to Resolved!")
+else:
+    print(f"❌ Failed to transition issue: {transition_response.text}")
+
+🔹 How to Find Your Transition ID for “Resolved”?
+
+curl -X GET -H "Authorization: Bearer YOUR_JIRA_API_TOKEN" \
+     -H "Content-Type: application/json" \
+     https://your-jira-instance.atlassian.net/rest/api/2/issue/ISSUE-123/transitions
+
+Then, look for the "Resolved" transition and note the "id".
+
+✅ Summary
+	1.	Update Custom Fields (1 String, 1 Array with Key-Value Pairs)
+	2.	Transition Issue to “Resolved”
+	3.	Find Transition ID if needed
+
+🚀 Now you can update JIRA fields with key-value arrays and resolve issues with a single script!
+
+=#=#
 Complete cURL & Python Code to PUT Custom Fields (String & Array) and Change Status to Resolved in JIRA
 
 🔹 1. cURL Example
