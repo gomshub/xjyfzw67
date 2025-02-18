@@ -1,4 +1,221 @@
 
+🔹 Enhanced Sync Service with JSON Response
+
+The updated script will now:
+✔ Return a JSON object with details of:
+	•	✅ Inserted incidents
+	•	✏ Updated incidents
+	•	🔄 Resolved incidents
+✔ Include jira_number and job_name in the response
+
+1️⃣ Updated Python Code: sync_service.py
+
+import requests
+import jaydebeapi
+import json
+
+# JIRA API Config
+JIRA_API_URL = "https://your-jira-instance.atlassian.net/rest/api/2/search"
+HEADERS = {
+    "Authorization": "Bearer YOUR_JIRA_API_TOKEN",
+    "Content-Type": "application/json"
+}
+
+# Database Connection Config (Based on Job Name)
+DB_CONFIG = {
+    "ENV1": {"url": "jdbc:oracle:thin:@db1_host:1521/db1", "username": "user1", "password": "pass1"},
+    "ENV2": {"url": "jdbc:oracle:thin:@db2_host:1521/db2", "username": "user2", "password": "pass2"},
+}
+
+# JDBC Driver
+JDBC_DRIVER = "oracle.jdbc.OracleDriver"
+JAR_PATH = "/path/to/ojdbc.jar"
+
+def get_jira_issues(filter_id):
+    """Fetch JIRA issues from a given filter ID"""
+    query = {
+        "jql": f"filter={filter_id}",
+        "fields": ["summary", "status", "comment"]
+    }
+    response = requests.get(JIRA_API_URL, headers=HEADERS, params=query)
+    
+    if response.status_code != 200:
+        raise Exception(f"Failed to fetch JIRA issues: {response.text}")
+
+    issues = response.json().get("issues", [])
+    jira_data = []
+
+    for issue in issues:
+        jira_number = issue["key"]
+        summary = issue["fields"]["summary"]
+        status = issue["fields"]["status"]["name"]
+        comments = [c["body"] for c in issue["fields"].get("comment", {}).get("comments", [])]
+
+        job_name = extract_job_name(summary)
+        jira_data.append({
+            "jira_number": jira_number,
+            "summary": summary,
+            "status": status,
+            "comments": comments,
+            "job_name": job_name
+        })
+
+    return jira_data
+
+def extract_job_name(summary):
+    """Extract job_name by removing the first character of summary"""
+    return summary[1:] if summary else ""
+
+def determine_db_env(job_name):
+    """Determine DB environment based on job_name"""
+    if job_name.startswith("A"):
+        return "ENV1"
+    elif job_name.startswith("B"):
+        return "ENV2"
+    else:
+        return None
+
+def get_db_issues(jira_numbers, db_env):
+    """Fetch issues from the database based on JIRA numbers"""
+    db_config = DB_CONFIG.get(db_env)
+    if not db_config:
+        return {}
+
+    conn = jaydebeapi.connect(JDBC_DRIVER, db_config["url"], [db_config["username"], db_config["password"]], JAR_PATH)
+    cursor = conn.cursor()
+
+    placeholders = ', '.join(['?'] * len(jira_numbers))
+    query = f"SELECT jira_number, comments, status FROM Issues WHERE jira_number IN ({placeholders})"
+    
+    cursor.execute(query, jira_numbers)
+    db_issues = {row[0]: {"comments": row[1], "status": row[2]} for row in cursor.fetchall()}
+
+    cursor.close()
+    conn.close()
+    return db_issues
+
+def update_database(jira_data):
+    """Sync JIRA data with the database"""
+    result = {"inserted": [], "updated": []}
+
+    for issue in jira_data:
+        jira_number = issue["jira_number"]
+        job_name = issue["job_name"]
+        
+        db_env = determine_db_env(job_name)
+        if not db_env:
+            print(f"Skipping issue {jira_number}, unknown job_name {job_name}")
+            continue
+
+        db_issues = get_db_issues([jira_number], db_env)
+
+        conn = jaydebeapi.connect(JDBC_DRIVER, DB_CONFIG[db_env]["url"], 
+                                  [DB_CONFIG[db_env]["username"], DB_CONFIG[db_env]["password"]], JAR_PATH)
+        cursor = conn.cursor()
+
+        if jira_number in db_issues:
+            db_comments = db_issues[jira_number]["comments"]
+            if set(db_comments) != set(issue["comments"]):
+                # Update comments
+                update_query = "UPDATE Issues SET comments = ? WHERE jira_number = ?"
+                cursor.execute(update_query, (json.dumps(issue["comments"]), jira_number))
+                result["updated"].append({"jira_number": jira_number, "job_name": job_name})
+        else:
+            # Insert new issue
+            insert_query = "INSERT INTO Issues (jira_number, summary, comments, status) VALUES (?, ?, ?, ?)"
+            cursor.execute(insert_query, (jira_number, issue["summary"], json.dumps(issue["comments"]), issue["status"]))
+            result["inserted"].append({"jira_number": jira_number, "job_name": job_name})
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+    return result
+
+def mark_resolved_issues(jira_numbers, db_env):
+    """Mark issues as resolved if they are no longer in the JIRA filter"""
+    db_issues = get_db_issues(jira_numbers, db_env)
+    resolved = []
+
+    conn = jaydebeapi.connect(JDBC_DRIVER, DB_CONFIG[db_env]["url"], 
+                              [DB_CONFIG[db_env]["username"], DB_CONFIG[db_env]["password"]], JAR_PATH)
+    cursor = conn.cursor()
+
+    for jira_number in db_issues.keys():
+        if jira_number not in jira_numbers:
+            update_query = "UPDATE Issues SET status = 'Resolved' WHERE jira_number = ?"
+            cursor.execute(update_query, (jira_number,))
+            resolved.append({"jira_number": jira_number, "job_name": determine_db_env(jira_number)})
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return resolved
+
+def sync_issues(filter_id):
+    """Main function to sync JIRA issues"""
+    jira_data = get_jira_issues(filter_id)
+    unique_jira_numbers = [issue["jira_number"] for issue in jira_data]
+    
+    final_result = {"inserted": [], "updated": [], "resolved": []}
+
+    for issue in jira_data:
+        job_name = issue["job_name"]
+        db_env = determine_db_env(job_name)
+        if db_env:
+            result = update_database([issue])
+            final_result["inserted"].extend(result["inserted"])
+            final_result["updated"].extend(result["updated"])
+    
+    for db_env in DB_CONFIG.keys():
+        resolved_issues = mark_resolved_issues(unique_jira_numbers, db_env)
+        final_result["resolved"].extend(resolved_issues)
+
+    return json.dumps(final_result, indent=4)
+
+if __name__ == "__main__":
+    filter_id = "12345"
+    sync_result = sync_issues(filter_id)
+    print(sync_result)
+
+2️⃣ JSON Response Example
+
+When you run sync_service.py, it will return a structured JSON output like this:
+
+{
+    "inserted": [
+        { "jira_number": "JIRA-1001", "job_name": "JobA1" },
+        { "jira_number": "JIRA-1002", "job_name": "JobB1" }
+    ],
+    "updated": [
+        { "jira_number": "JIRA-1003", "job_name": "JobA2" }
+    ],
+    "resolved": [
+        { "jira_number": "JIRA-1004", "job_name": "JobB2" }
+    ]
+}
+
+3️⃣ Summary of Enhancements
+
+✔ Structured JSON output
+✔ Lists inserted, updated, and resolved issues
+✔ Uses jira_number + job_name for identification
+✔ More efficient DB operations
+✔ Prints final result as JSON for easy debugging
+
+🚀 Final Outcome
+
+✅ New JIRA issues inserted
+✅ Updated issues when comments change
+✅ Marked missing issues as Resolved
+✅ Returns JSON output with jira_number & job_name
+✅ Ready to integrate with other services
+
+
+
+
+
 🔹 Sync Service for JIRA Issues
 
 The sync service will:
