@@ -1,4 +1,72 @@
 
+✅ How to Update a JIRA Multi-Select Group Field Using cURL
+
+If the JIRA UI shows the field as JIRA Group[01fct], it likely expects an array of group IDs.
+To update such a group picker custom field using cURL, pass an array with the group name or ID.
+
+🔹 cURL Example
+
+curl -X PUT -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_JIRA_API_TOKEN" \
+     --data '{
+         "fields": {
+             "customfield_10010": [
+                 {"name": "01fct"}  # Replace with the actual group ID or name
+             ]
+         }
+     }' \
+     https://your-jira-instance.atlassian.net/rest/api/2/issue/ISSUE-123
+
+🔹 Explanation
+	•	"customfield_10010" → Replace with the correct custom field ID for the JIRA Group Picker field.
+	•	{"name": "01fct"} → Pass group name or group ID (Check in UI or API).
+
+🔹 How to Verify Available Groups via API?
+
+If you’re unsure of the correct group name or ID, fetch available groups:
+
+curl -X GET -H "Authorization: Bearer YOUR_JIRA_API_TOKEN" \
+     -H "Content-Type: application/json" \
+     "https://your-jira-instance.atlassian.net/rest/api/2/groups/picker?query="
+
+This will return a list of available groups. Use the correct name in your PUT request.
+
+🔹 Python Equivalent Code
+
+import requests
+
+JIRA_URL = "https://your-jira-instance.atlassian.net"
+ISSUE_KEY = "ISSUE-123"
+JIRA_API_TOKEN = "your_jira_api_token"
+
+headers = {
+    "Authorization": f"Bearer {JIRA_API_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+# Updating the group field with a single group
+update_payload = {
+    "fields": {
+        "customfield_10010": [{"name": "01fct"}]  # Use correct group name
+    }
+}
+
+response = requests.put(f"{JIRA_URL}/rest/api/2/issue/{ISSUE_KEY}", headers=headers, json=update_payload)
+
+if response.status_code == 204:
+    print("✅ JIRA group updated successfully!")
+else:
+    print(f"❌ Failed to update: {response.text}")
+
+✅ Summary
+	1.	Find available groups → Use /rest/api/2/groups/picker
+	2.	Update the issue → Use PUT request with {"name": "group_name"}
+	3.	Ensure the correct field ID (customfield_10010 is an example; replace as needed)
+
+This method correctly updates a JIRA group picker field using cURL or Python. 🚀
+
+
+=#==
 Complete cURL & Python Code to PUT Custom Fields (String & Key-Value Array) and Change Status to Resolved in JIRA
 
 🔹 1. cURL Example (Key-Value Array)
