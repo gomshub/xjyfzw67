@@ -1,3 +1,166 @@
+
+🔹 Updating Comments in Interactive JIRA Service
+
+After updating a comment in JIRA, the interactive service should fetch the latest comments and dynamically update the HTML table (td) for comments and recent comment using JavaScript without refreshing the page.
+
+🔹 Steps to Implement
+	1.	Update Comment in JIRA API (Backend)
+	2.	Fetch Latest Comments After Update
+	3.	Modify HTML Table Using JavaScript (fetch API)
+	4.	Use JavaScript to Update the Table in Real-time
+
+1️⃣ Backend: Update Comment and Fetch Latest Comments
+
+routes.py - Update JIRA Comment and Return Latest Comments
+
+from flask import Flask, request, jsonify, render_template
+import requests
+
+app = Flask(__name__)
+
+JIRA_API_URL = "https://your-jira-instance.atlassian.net/rest/api/2/issue"
+HEADERS = {
+    "Authorization": "Bearer YOUR_JIRA_API_TOKEN",
+    "Content-Type": "application/json"
+}
+
+@app.route('/update_comment', methods=['POST'])
+def update_comment():
+    """ Update a comment in JIRA and return the latest comments """
+    data = request.json
+    jira_id = data.get("jira_id")
+    new_comment = data.get("comment")
+
+    if not jira_id or not new_comment:
+        return jsonify({"error": "Missing JIRA ID or comment"}), 400
+
+    # Add new comment to JIRA
+    comment_payload = {"body": new_comment}
+    response = requests.post(f"{JIRA_API_URL}/{jira_id}/comment", json=comment_payload, headers=HEADERS)
+
+    if response.status_code != 201:
+        return jsonify({"error": "Failed to update comment", "details": response.text}), 500
+
+    # Fetch the updated comments
+    comments_response = requests.get(f"{JIRA_API_URL}/{jira_id}/comment", headers=HEADERS)
+    if comments_response.status_code != 200:
+        return jsonify({"error": "Failed to fetch updated comments"}), 500
+
+    comments = comments_response.json()["comments"]
+    latest_comment = comments[-1]["body"] if comments else ""
+
+    return jsonify({"comments": [c["body"] for c in comments], "latest_comment": latest_comment})
+
+2️⃣ Frontend: Modify HTML to Support Dynamic Updates
+
+Modify the HTML template to include:
+	•	A table (<td>) for comments
+	•	A JavaScript function to update the table dynamically
+	•	A button to trigger comment updates
+
+templates/interactive_jira.html
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive JIRA</title>
+    <script>
+        function updateComment(jiraId) {
+            let newComment = document.getElementById(`comment_input_${jiraId}`).value;
+            
+            fetch('/update_comment', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ jira_id: jiraId, comment: newComment })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert("Error: " + data.error);
+                } else {
+                    document.getElementById(`comments_${jiraId}`).innerHTML = data.comments.join("<br>");
+                    document.getElementById(`latest_comment_${jiraId}`).innerHTML = data.latest_comment;
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+    </script>
+</head>
+<body>
+    <h2>JIRA Issues</h2>
+    <table border="1">
+        <thead>
+            <tr>
+                <th>JIRA ID</th>
+                <th>Summary</th>
+                <th>Comments</th>
+                <th>Recent Comment</th>
+                <th>Update Comment</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in issues %}
+            <tr>
+                <td>{{ issue.jira_id }}</td>
+                <td>{{ issue.summary }}</td>
+                <td id="comments_{{ issue.jira_id }}">{{ issue.comments | join("<br>") }}</td>
+                <td id="latest_comment_{{ issue.jira_id }}">{{ issue.latest_comment }}</td>
+                <td>
+                    <input type="text" id="comment_input_{{ issue.jira_id }}" placeholder="Enter comment">
+                    <button onclick="updateComment('{{ issue.jira_id }}')">Update</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
+
+3️⃣ Explanation of the Code
+
+Backend (Flask)
+
+✔ Updates JIRA comment via API
+✔ Fetches updated comments after posting
+✔ Returns all comments and latest comment
+
+Frontend (HTML + JavaScript)
+
+✔ Displays JIRA issues in a table
+✔ JavaScript function (updateComment)
+	•	Calls /update_comment API
+	•	Updates comments <td> dynamically without refreshing
+✔ Uses JavaScript fetch API for AJAX calls
+
+4️⃣ Expected Behavior
+
+✅ When a user enters a comment and clicks “Update”:
+✔ New comment is posted to JIRA
+✔ Latest comments are fetched
+✔ HTML table updates dynamically
+
+5️⃣ Running the Service
+
+Start Flask App
+
+python3 app.py
+
+Access in Browser
+
+http://localhost:5000/interactive_jira
+
+🚀 Final Outcome
+
+✅ Real-time updates of comments after posting
+✅ No page refresh required
+✅ Works in Interactive JIRA service
+
+
+
 Goal:
 
 After updating a JIRA comment from the interactive service, we want the HTML template (template.html) and Flask backend (routes.py) to dynamically fetch and display the latest comments on the corresponding JIRA issue list.
