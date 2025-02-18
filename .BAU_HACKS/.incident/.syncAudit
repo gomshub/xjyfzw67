@@ -1,0 +1,185 @@
+🔹 JIRA Sync Service Using JayDeBeAPI (Oracle DB)
+
+This implementation connects to an Oracle Database using JayDeBeAPI to:
+	1.	Insert new JIRA issues from the filter list.
+	2.	Update existing issues if comments have changed.
+	3.	Mark issues as “Resolved” if they are no longer in the JIRA filter.
+	4.	Determine the database dynamically based on the job name extracted from the issue summary.
+	5.	Do not delete any issues.
+
+🔹 Dependencies
+
+Ensure you have jaydebeapi installed and an OJDBC jar for Oracle.
+
+pip install jaydebeapi
+
+🔹 Fetch Issues from JIRA API
+
+import requests
+import json
+
+JIRA_URL = "https://your-jira-instance.atlassian.net/rest/api/2/search"
+JIRA_FILTER_ID = "12345"
+HEADERS = {
+    "Authorization": "Bearer YOUR_JIRA_API_TOKEN",
+    "Content-Type": "application/json"
+}
+
+def get_jira_issues():
+    params = {
+        "jql": f"filter={JIRA_FILTER_ID}",
+        "fields": ["summary", "status", "comment"]
+    }
+    response = requests.get(JIRA_URL, headers=HEADERS, params=params)
+    
+    if response.status_code == 200:
+        return response.json().get("issues", [])
+    else:
+        print(f"Error fetching JIRA issues: {response.text}")
+        return []
+
+🔹 Determine Database Based on Job Name
+
+Extract job name from summary and select the appropriate Oracle Database.
+
+import jaydebeapi
+
+DB_MAPPING = {
+    "JobA": {
+        "url": "jdbc:oracle:thin:@//db-a.example.com:1521/service_name",
+        "user": "user_a",
+        "password": "password_a",
+        "driver": "oracle.jdbc.driver.OracleDriver",
+        "jar_path": "/app/utils/lib/ojdbc6.jar"
+    },
+    "JobB": {
+        "url": "jdbc:oracle:thin:@//db-b.example.com:1521/service_name",
+        "user": "user_b",
+        "password": "password_b",
+        "driver": "oracle.jdbc.driver.OracleDriver",
+        "jar_path": "/app/utils/lib/ojdbc6.jar"
+    }
+}
+
+def get_db_connection(job_name):
+    """ Connect to Oracle DB based on job name """
+    db_config = DB_MAPPING.get(job_name, None)
+    if not db_config:
+        print(f"No database mapping found for job: {job_name}")
+        return None
+    
+    conn = jaydebeapi.connect(
+        db_config["driver"],
+        db_config["url"],
+        [db_config["user"], db_config["password"]],
+        db_config["jar_path"]
+    )
+    return conn
+
+🔹 Sync JIRA Issues with Oracle DB
+	•	Compare JIRA issues with database records.
+	•	Insert new issues.
+	•	Update comments if changed.
+	•	Mark missing issues as “Resolved”.
+
+def extract_job_name(summary):
+    """ Extract job name by removing first character """
+    return summary[1:] if summary else None
+
+def sync_issues():
+    jira_issues = get_jira_issues()
+    jira_keys = set()
+
+    # Group issues by job_name for database selection
+    db_issues_by_job = {}
+
+    for issue in jira_issues:
+        issue_key = issue["key"]
+        summary = issue["fields"]["summary"]
+        comments = issue["fields"]["comment"]["comments"]
+        last_comment = comments[-1]["body"] if comments else None
+        status = issue["fields"]["status"]["name"]
+        job_name = extract_job_name(summary)
+
+        jira_keys.add(issue_key)
+
+        if job_name not in db_issues_by_job:
+            db_issues_by_job[job_name] = []
+
+        db_issues_by_job[job_name].append((issue_key, summary, last_comment, status))
+
+    # Process each job_name and update corresponding database
+    for job_name, issues in db_issues_by_job.items():
+        conn = get_db_connection(job_name)
+        if not conn:
+            continue
+
+        cursor = conn.cursor()
+        
+        # Get existing issues from DB
+        cursor.execute("SELECT jira_number, comments FROM Issues")
+        existing_issues = {row[0]: row[1] for row in cursor.fetchall()}
+
+        for issue_key, summary, last_comment, status in issues:
+            if issue_key in existing_issues:
+                # Update if comments have changed
+                if last_comment != existing_issues[issue_key]:
+                    cursor.execute("""
+                        UPDATE Issues 
+                        SET comments = ?, status = ?
+                        WHERE jira_number = ?
+                    """, (last_comment, status, issue_key))
+            else:
+                # Insert new issue
+                cursor.execute("""
+                    INSERT INTO Issues (jira_number, summary, comments, status)
+                    VALUES (?, ?, ?, ?)
+                """, (issue_key, summary, last_comment, status))
+
+        # Mark missing issues as "Resolved"
+        for existing_issue in existing_issues.keys():
+            if existing_issue not in jira_keys:
+                cursor.execute("""
+                    UPDATE Issues 
+                    SET status = 'Resolved' 
+                    WHERE jira_number = ?
+                """, (existing_issue,))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+🔹 Automate the Sync with a Shell Script
+	•	Runs every 30 minutes via cron job.
+	•	Logs sync results.
+
+#!/bin/bash
+
+LOG_FILE="/var/log/jira_sync.log"
+
+echo "Starting JIRA Sync - $(date)" >> $LOG_FILE
+
+# Run Python script
+python3 /app/jira_sync.py >> $LOG_FILE 2>&1
+
+echo "JIRA Sync Completed - $(date)" >> $LOG_FILE
+
+🔹 Schedule via Cron Job
+
+Run every 30 minutes:
+
+crontab -e
+
+Add the following:
+
+*/30 * * * * /bin/bash /app/jira_sync.sh
+
+🔹 Summary
+
+✅ Fetch JIRA issues from API
+✅ Connect to Oracle DB dynamically using JayDeBeAPI
+✅ Insert/update issues based on latest JIRA data
+✅ Mark missing issues as “Resolved” without deleting them
+✅ Run automatically every 30 minutes
+
+This ensures real-time JIRA synchronization into the Oracle DB efficiently. 🚀
