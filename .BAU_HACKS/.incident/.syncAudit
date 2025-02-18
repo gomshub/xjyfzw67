@@ -1,4 +1,42 @@
 
+def mark_resolved_issues(jira_numbers_from_filter, db_env):
+    """
+    Mark issues as resolved if they exist in the database for the given environment,
+    have a status that is not already 'Resolved', and are no longer returned by the JIRA filter.
+    
+    :param jira_numbers_from_filter: List of jira_numbers that are returned by the JIRA filter.
+    :param db_env: The database environment key (e.g., "ENV1" or "ENV2").
+    :return: List of dictionaries with 'jira_number' and 'job_name' for issues marked as resolved.
+    """
+    # Fetch all issues in the DB for this environment
+    db_config = DB_CONFIG.get(db_env)
+    if not db_config:
+        print(f"No DB configuration for environment {db_env}")
+        return []
+    
+    conn = jaydebeapi.connect(JDBC_DRIVER, db_config["url"],
+                              [db_config["username"], db_config["password"]], JAR_PATH)
+    cursor = conn.cursor()
+    
+    # Fetch all issues from the DB with status not equal to 'Resolved'
+    cursor.execute("SELECT jira_number, status FROM Issues WHERE status <> 'Resolved'")
+    issues_in_db = {row[0]: row[1] for row in cursor.fetchall()}
+    
+    resolved = []
+    for jira_number, status in issues_in_db.items():
+        if jira_number not in jira_numbers_from_filter:
+            # Mark this issue as Resolved because it is not in the JIRA filter
+            cursor.execute("UPDATE Issues SET status = 'Resolved' WHERE jira_number = ?", (jira_number,))
+            resolved.append({"jira_number": jira_number})
+            print(f"Marked {jira_number} as Resolved")
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return resolved
+
+
+
 import jaydebeapi
 import json
 
