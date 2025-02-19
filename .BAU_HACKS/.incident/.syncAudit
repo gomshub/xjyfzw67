@@ -1,4 +1,271 @@
 
+import requests
+import jaydebeapi
+import json
+
+# -------------------------
+# CONFIGURATION
+# -------------------------
+
+# JIRA API configuration
+JIRA_API_URL = "https://your-jira-instance.atlassian.net/rest/api/2/search"
+JIRA_FILTER_ID = "12345"
+JIRA_API_TOKEN = "YOUR_JIRA_API_TOKEN"
+HEADERS = {
+    "Authorization": f"Bearer {JIRA_API_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+# Database configuration mapping based on job name (example: job names starting with A go to ENV1, with B go to ENV2)
+DB_CONFIG = {
+    "ENV1": {
+        "url": "jdbc:oracle:thin:@//db1_host:1521/db1",
+        "username": "user1",
+        "password": "pass1"
+    },
+    "ENV2": {
+        "url": "jdbc:oracle:thin:@//db2_host:1521/db2",
+        "username": "user2",
+        "password": "pass2"
+    }
+}
+
+JDBC_DRIVER = "oracle.jdbc.driver.OracleDriver"
+JAR_PATH = "/app/utils/lib/ojdbc6.jar"
+
+# -------------------------
+# HELPER FUNCTIONS
+# -------------------------
+
+def get_jira_issues(filter_id):
+    """
+    Fetch JIRA issues using a JQL filter and return a list of issue dictionaries.
+    Each dictionary contains:
+      - jira_number (the issue key)
+      - summary
+      - status
+      - comments (list of comment bodies)
+      - job_name (extracted from summary by removing the first character)
+    """
+    params = {
+        "jql": f"filter={filter_id}",
+        "fields": ["summary", "status", "comment"]
+    }
+    response = requests.get(JIRA_API_URL, headers=HEADERS, params=params)
+    if response.status_code != 200:
+        raise Exception(f"Error fetching JIRA issues: {response.text}")
+    
+    issues = response.json().get("issues", [])
+    jira_data = []
+    for issue in issues:
+        jira_number = issue.get("key")
+        summary = issue["fields"].get("summary", "")
+        status = issue["fields"]["status"].get("name", "")
+        # Extract comment bodies from the comments field, if present
+        comments = []
+        comment_field = issue["fields"].get("comment", {})
+        if "comments" in comment_field:
+            comments = [c.get("body", "") for c in comment_field["comments"]]
+        job_name = extract_job_name(summary)
+        jira_data.append({
+            "jira_number": jira_number,
+            "summary": summary,
+            "status": status,
+            "comments": comments,
+            "job_name": job_name
+        })
+    return jira_data
+
+def extract_job_name(summary):
+    """
+    Extract the job name from the summary by removing the first character.
+    Returns an empty string if summary is empty.
+    """
+    return summary[1:] if summary else ""
+
+def determine_db_env(job_name):
+    """
+    Determine the database environment based on the job_name.
+    For example, if job_name starts with "A", return "ENV1"; if it starts with "B", return "ENV2".
+    """
+    if job_name.startswith("A"):
+        return "ENV1"
+    elif job_name.startswith("B"):
+        return "ENV2"
+    else:
+        return None
+
+def get_db_issues(jira_numbers, db_env):
+    """
+    Connects to the Oracle database for the specified environment and fetches records
+    for the provided jira_numbers.
+    Returns a dictionary keyed by jira_number with the stored comments (decoded from JSON)
+    and status.
+    """
+    if not jira_numbers:
+        return {}
+    
+    db_conf = DB_CONFIG.get(db_env)
+    if not db_conf:
+        raise Exception(f"Invalid DB environment: {db_env}")
+    
+    conn = jaydebeapi.connect(
+        JDBC_DRIVER,
+        db_conf["url"],
+        [db_conf["username"], db_conf["password"]],
+        JAR_PATH
+    )
+    cursor = conn.cursor()
+
+    placeholders = ", ".join(["?"] * len(jira_numbers))
+    query = f"SELECT jira_number, comments, status FROM Issues WHERE jira_number IN ({placeholders})"
+    cursor.execute(query, jira_numbers)
+    
+    db_issues = {}
+    for row in cursor.fetchall():
+        jira_num, comments_json, status = row
+        try:
+            comments = json.loads(comments_json)
+        except Exception:
+            comments = []
+        db_issues[jira_num] = {"comments": comments, "status": status}
+    
+    cursor.close()
+    conn.close()
+    return db_issues
+
+# -------------------------
+# MAIN SYNC FUNCTIONS
+# -------------------------
+
+def update_database(jira_data):
+    """
+    Inserts new issues into the database or updates existing issues if the comments have changed.
+    Uses jira_number as the unique key.
+    Returns a dictionary with lists of inserted and updated issues, each containing the jira_number and job_name.
+    """
+    result = {"inserted": [], "updated": []}
+
+    # Group issues by DB environment (determined by job_name)
+    issues_by_env = {}
+    for issue in jira_data:
+        db_env = determine_db_env(issue["job_name"])
+        if not db_env:
+            print(f"Skipping issue {issue['jira_number']} due to unknown job name: {issue['job_name']}")
+            continue
+        issues_by_env.setdefault(db_env, []).append(issue)
+
+    for db_env, issues in issues_by_env.items():
+        # Extract jira_numbers for these issues
+        jira_nums = [issue["jira_number"] for issue in issues]
+        db_issues = get_db_issues(jira_nums, db_env)
+        db_conf = DB_CONFIG[db_env]
+        conn = jaydebeapi.connect(
+            JDBC_DRIVER,
+            db_conf["url"],
+            [db_conf["username"], db_conf["password"]],
+            JAR_PATH
+        )
+        cursor = conn.cursor()
+        
+        for issue in issues:
+            jira_num = issue["jira_number"]
+            job_name = issue["job_name"]
+            new_comments = issue["comments"]
+            new_comments_json = json.dumps(new_comments)
+            
+            if jira_num in db_issues:
+                # Compare stored comments with new comments (order-independent)
+                stored_comments = db_issues[jira_num]["comments"]
+                if set(stored_comments) != set(new_comments):
+                    update_query = "UPDATE Issues SET comments = ? WHERE jira_number = ?"
+                    cursor.execute(update_query, (new_comments_json, jira_num))
+                    result["updated"].append({"jira_number": jira_num, "job_name": job_name})
+            else:
+                insert_query = """
+                    INSERT INTO Issues (jira_number, summary, comments, status, job_name)
+                    VALUES (?, ?, ?, ?, ?)
+                """
+                cursor.execute(insert_query, (jira_num, issue["summary"], new_comments_json, issue["status"], job_name))
+                result["inserted"].append({"jira_number": jira_num, "job_name": job_name})
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+    
+    return result
+
+def mark_resolved_issues(jira_numbers_in_filter, db_env):
+    """
+    For the given database environment, mark issues as "Resolved" if:
+      - They exist in the DB (by jira_number)
+      - They are not present in the JIRA filter result
+      - Their current status is not already "Resolved"
+    Returns a list of issues (with jira_number and job_name) that were marked as resolved.
+    """
+    db_conf = DB_CONFIG.get(db_env)
+    if not db_conf:
+        raise Exception(f"Invalid DB environment: {db_env}")
+    
+    conn = jaydebeapi.connect(
+        JDBC_DRIVER,
+        db_conf["url"],
+        [db_conf["username"], db_conf["password"]],
+        JAR_PATH
+    )
+    cursor = conn.cursor()
+    
+    # Fetch issues in DB that are not marked as "Resolved"
+    cursor.execute("SELECT jira_number, job_name, status FROM Issues WHERE status <> 'Resolved'")
+    issues_in_db = {row[0]: {"job_name": row[1], "status": row[2]} for row in cursor.fetchall()}
+    
+    resolved = []
+    for jira_num, data in issues_in_db.items():
+        if jira_num not in jira_numbers_in_filter:
+            update_query = "UPDATE Issues SET status = 'Resolved' WHERE jira_number = ?"
+            cursor.execute(update_query, (jira_num,))
+            resolved.append({"jira_number": jira_num, "job_name": data["job_name"]})
+            print(f"Marked {jira_num} as Resolved")
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return resolved
+
+def sync_issues(filter_id):
+    """
+    Main function to sync JIRA issues:
+      - Fetches JIRA issues from the API using the filter ID.
+      - For each issue, either updates or inserts into the DB based on jira_number.
+      - For each DB environment, marks issues as "Resolved" if they are not present in the JIRA filter result.
+      - Returns a JSON response with lists for inserted, updated, and resolved issues.
+    """
+    # Fetch issues from JIRA API
+    jira_data = get_jira_issues(filter_id)
+    jira_numbers_in_filter = [issue["jira_number"] for issue in jira_data]
+    
+    # Update or insert issues into the DB
+    update_result = update_database(jira_data)
+    
+    # Mark missing issues as Resolved across each DB environment
+    resolved_total = []
+    for db_env in DB_CONFIG.keys():
+        resolved = mark_resolved_issues(jira_numbers_in_filter, db_env)
+        resolved_total.extend(resolved)
+    
+    final_result = {
+        "inserted": update_result.get("inserted", []),
+        "updated": update_result.get("updated", []),
+        "resolved": resolved_total
+    }
+    return final_result
+
+if __name__ == "__main__":
+    filter_id = "12345"  # Example filter ID
+    result = sync_issues(filter_id)
+    print(json.dumps(result, indent=4))
+
+=#=##
 
 Below is a complete, self‐contained Python example for your sync service. This service:
 	1.	Fetches JIRA issues from an API (assumed already fetched into a list).
