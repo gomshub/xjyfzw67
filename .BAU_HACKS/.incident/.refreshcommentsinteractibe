@@ -1,3 +1,203 @@
+Below is an example of a simplified solution where the list service fetches JIRA issues (including comments) directly from the JIRA API (via jira_ops.py) and renders an HTML table (list_jira.html) that displays each issue along with its comments. In the Comments column, each comment is shown as a collapsible element that displays the comment’s order, date, and comment text (without using the database).
+
+1. jira_ops.py
+
+This module contains a function to call the JIRA API using a given filter and return a list of issues. Each issue includes its key, summary, status, and comments. For each comment we add an “order” (based on its index), the “created” timestamp (as date/time), and the “body” (as the comment text).
+
+# jira_ops.py
+import requests
+import logging
+
+JIRA_API_URL = "https://your-jira-instance.atlassian.net/rest/api/2/search"
+JIRA_FILTER_ID = "12345"
+JIRA_API_TOKEN = "YOUR_JIRA_API_TOKEN"
+
+HEADERS = {
+    "Authorization": f"Bearer {JIRA_API_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+def fetch_jira_issues(filter_id=JIRA_FILTER_ID):
+    """
+    Fetches JIRA issues using the specified filter.
+    Returns a list of dictionaries. Each dictionary includes:
+      - jira_number: Issue key
+      - summary: Issue summary
+      - status: Issue status name
+      - comments: List of dictionaries, each with:
+             order, date_time, comment
+      - job_name: Derived from summary by removing the first character
+    """
+    params = {
+        "jql": f"filter={filter_id}",
+        "fields": ["summary", "status", "comment"]
+    }
+    response = requests.get(JIRA_API_URL, headers=HEADERS, params=params)
+    if response.status_code != 200:
+        raise Exception(f"Error fetching JIRA issues: {response.text}")
+    
+    issues = response.json().get("issues", [])
+    jira_data = []
+    for issue in issues:
+        jira_number = issue.get("key")
+        summary = issue["fields"].get("summary", "")
+        status = issue["fields"]["status"].get("name", "")
+        # Extract comments from the API response
+        comments = []
+        comment_field = issue["fields"].get("comment", {})
+        if "comments" in comment_field:
+            for idx, comment in enumerate(comment_field["comments"], start=1):
+                comments.append({
+                    "order": idx,
+                    "date_time": comment.get("created", ""),
+                    "comment": comment.get("body", "")
+                })
+        # Derive job_name from summary by removing the first character (adjust as needed)
+        job_name = summary[1:] if summary else ""
+        jira_data.append({
+            "jira_number": jira_number,
+            "summary": summary,
+            "status": status,
+            "comments": comments,
+            "job_name": job_name
+        })
+    return jira_data
+
+2. routes.py
+
+This file defines a Flask route for the list service. When the endpoint is accessed (e.g. via GET /list_jira?filter_id=12345), it calls the jira_ops function to fetch issues from JIRA and then renders the HTML template.
+
+# routes.py
+from flask import Flask, render_template, request, jsonify
+from jira_ops import fetch_jira_issues
+import logging
+
+app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+
+@app.route('/list_jira', methods=['GET'])
+def list_jira():
+    """
+    List service:
+      - Fetches JIRA issues (including comments) directly from the JIRA API.
+      - Renders a table view using the list_jira.html template.
+    """
+    filter_id = request.args.get("filter_id", "12345")
+    try:
+        issues = fetch_jira_issues(filter_id)
+        return render_template("list_jira.html", issues=issues)
+    except Exception as e:
+        logging.error(f"Error in list_jira: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=5000, debug=True)
+
+3. list_jira.html
+
+This HTML template displays the issues in a table. In the Comments column, each comment is rendered as a collapsible element. When collapsed, it shows the comment’s order, date/time, and when expanded, it reveals the full comment text.
+
+<!-- templates/list_jira.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JIRA Issues List</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; vertical-align: top; text-align: left; }
+    th { background-color: #f2f2f2; }
+    .collapsible {
+      background-color: #eee;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      width: 100%;
+      text-align: left;
+      font-size: 13px;
+      margin-bottom: 2px;
+      outline: none;
+    }
+    .collapsible:after {
+      content: '\002B'; /* plus sign */
+      float: right;
+      margin-left: 5px;
+    }
+    .collapsible.active:after {
+      content: "\2212"; /* minus sign */
+    }
+    .content {
+      display: none;
+      padding: 4px;
+      background-color: #f9f9f9;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+  </style>
+  <script>
+    document.addEventListener("DOMContentLoaded", function(){
+      var coll = document.getElementsByClassName("collapsible");
+      for (var i = 0; i < coll.length; i++) {
+        coll[i].addEventListener("click", function() {
+          this.classList.toggle("active");
+          var content = this.nextElementSibling;
+          if (content.style.display === "block") {
+            content.style.display = "none";
+          } else {
+            content.style.display = "block";
+          }
+        });
+      }
+    });
+  </script>
+</head>
+<body>
+  <h1>JIRA Issues List</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>JIRA Number</th>
+        <th>Summary</th>
+        <th>Status</th>
+        <th>Job Name</th>
+        <th>Comments</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for issue in issues %}
+      <tr>
+        <td>{{ issue.jira_number }}</td>
+        <td>{{ issue.summary }}</td>
+        <td>{{ issue.status }}</td>
+        <td>{{ issue.job_name }}</td>
+        <td>
+          {% for comment in issue.comments %}
+            <button type="button" class="collapsible">
+              {{ comment.order }}. {{ comment.date_time }}
+            </button>
+            <div class="content">
+              <p>{{ comment.comment }}</p>
+            </div>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
+
+Summary of the Implementation
+	•	jira_ops.py
+Fetches issues from JIRA using a JQL filter. For each issue, it extracts the key, summary, status, and comments. Each comment is given an order number (based on its position), along with the date/time (from the “created” field) and the comment text (from “body”). The job name is derived from the summary by removing its first character.
+	•	routes.py
+Defines a /list_jira endpoint that retrieves issues via fetch_jira_issues() and renders the list_jira.html template.
+The template is provided with a list of issue dictionaries.
+	•	list_jira.html
+Displays the issues in a table. In the Comments column, each comment is rendered as a collapsible element. The header of each collapsible button shows the comment order and date/time; when expanded, the full comment text is shown.
+
+This solution fetches JIRA issues directly from the API (including comment details) and lists them in a legible, collapsible table format—all without relying on a database for the list view. Let me know if you need any further modifications or additional features!
 
 Below is an updated version of the list‐service HTML template that displays each issue in a table. In the Comments column, each comment is shown in a collapsible section that, when collapsed, displays only the comment’s order, author, and date/time; when expanded, it reveals the full comment text.
 
