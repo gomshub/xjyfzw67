@@ -1,4 +1,198 @@
 
+Below is an updated version of the list‐service HTML template that displays each issue in a table. In the Comments column, each comment is shown in a collapsible section that, when collapsed, displays only the comment’s order, author, and date/time; when expanded, it reveals the full comment text.
+
+In addition, the corresponding Flask route and a minimal db_ops snippet (for fetching issue details) are provided so that the interactive service can render these details.
+
+1. routes.py (List Service Endpoint)
+
+This route retrieves all issues (with their ordered comments) from the database and renders the list_jira.html template.
+
+from flask import Flask, render_template, jsonify
+from db_ops import get_all_issues
+import logging
+
+app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+
+@app.route('/list_jira', methods=['GET'])
+def list_jira():
+    """
+    List service: Retrieves all issues (with comments) from the DB
+    and renders the list_jira.html template.
+    """
+    try:
+        issues = get_all_issues()  # Returns a list of issue dictionaries
+        return render_template("list_jira.html", issues=issues)
+    except Exception as e:
+        logging.error(f"Error listing issues: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=5000, debug=True)
+
+2. db_ops.py (Fetching Issues with Comments)
+
+This snippet shows how to fetch all issues (and their comments) from the database. Adjust the connection details and SQL as needed.
+
+import jaydebeapi
+import json
+from config import DB_CONFIG, JDBC_DRIVER, JAR_PATH
+
+def get_db_connection(env):
+    db_conf = DB_CONFIG.get(env)
+    if not db_conf:
+        raise Exception(f"No DB config for environment: {env}")
+    conn = jaydebeapi.connect(
+        JDBC_DRIVER,
+        db_conf["url"],
+        [db_conf["username"], db_conf["password"]],
+        JAR_PATH
+    )
+    return conn
+
+def get_all_issues():
+    """
+    Fetches all issues (with comments) from all configured DB environments.
+    Returns a list of issues. Each issue is a dict with keys:
+       - jira_number, summary, status, job_name, env
+       - comments: ordered list of dicts {order, author, date_time, comment}
+    """
+    all_issues = []
+    for env in DB_CONFIG.keys():
+        conn = get_db_connection(env)
+        cursor = conn.cursor()
+        cursor.execute("SELECT jira_number, summary, status, job_name FROM Issues")
+        issues = cursor.fetchall()
+        for row in issues:
+            jira_number, summary, status, job_name = row
+            cursor.execute(
+                "SELECT comment_order, author, date_time, comment FROM Issue_Comments WHERE jira_number = ? ORDER BY comment_order",
+                (jira_number,)
+            )
+            comments = [{"order": r[0], "author": r[1], "date_time": r[2], "comment": r[3]} for r in cursor.fetchall()]
+            all_issues.append({
+                "jira_number": jira_number,
+                "summary": summary,
+                "status": status,
+                "job_name": job_name,
+                "env": env,
+                "comments": comments
+            })
+        cursor.close()
+        conn.close()
+    return all_issues
+
+3. list_jira.html (HTML Template with Collapsible Comments)
+
+This template displays issues in a table. In the Comments column, each comment is rendered as a collapsible section that shows only the comment order, author, and date/time initially. When clicked, it expands to reveal the full comment text.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JIRA Issues List</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; vertical-align: top; text-align: left; }
+    th { background-color: #f2f2f2; }
+    .collapsible {
+      background-color: #eee;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      width: 100%;
+      text-align: left;
+      font-size: 13px;
+      margin-bottom: 2px;
+      outline: none;
+    }
+    .collapsible:after {
+      content: '\002B'; /* plus sign */
+      float: right;
+      margin-left: 5px;
+    }
+    .collapsible.active:after {
+      content: "\2212"; /* minus sign */
+    }
+    .content {
+      display: none;
+      padding: 4px;
+      background-color: #f9f9f9;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+  </style>
+  <script>
+    document.addEventListener("DOMContentLoaded", function(){
+      var coll = document.getElementsByClassName("collapsible");
+      for (var i = 0; i < coll.length; i++) {
+        coll[i].addEventListener("click", function() {
+          this.classList.toggle("active");
+          var content = this.nextElementSibling;
+          if (content.style.display === "block") {
+            content.style.display = "none";
+          } else {
+            content.style.display = "block";
+          }
+        });
+      }
+    });
+  </script>
+</head>
+<body>
+  <h1>JIRA Issues List</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>JIRA Number</th>
+        <th>Summary</th>
+        <th>Status</th>
+        <th>Job Name</th>
+        <th>Comments</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for issue in issues %}
+      <tr>
+        <td>{{ issue.jira_number }}</td>
+        <td>{{ issue.summary }}</td>
+        <td>{{ issue.status }}</td>
+        <td>{{ issue.job_name }}</td>
+        <td>
+          {% for comment in issue.comments %}
+            <button type="button" class="collapsible">
+              {{ comment.order }}. {{ comment.author }} - {{ comment.date_time }}
+            </button>
+            <div class="content">
+              <p>{{ comment.comment }}</p>
+            </div>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
+
+Summary of Workflow
+	1.	routes.py (/list_jira):
+	•	Retrieves all issues (with comments) via get_all_issues() from db_ops.py.
+	•	Renders the list_jira.html template.
+	2.	db_ops.py:
+	•	Connects to each configured Oracle DB (via jaydebeapi) based on environment.
+	•	Fetches all issues from the Issues table and their ordered comments from Issue_Comments.
+	•	Returns a list of issue dictionaries.
+	3.	list_jira.html:
+	•	Displays a table of issues.
+	•	In the Comments column, each comment is displayed as a collapsible panel that initially shows the comment order, author, and date/time.
+	•	When clicked, the panel expands to show the full comment text.
+
+This solution provides a clear, legible list view of JIRA issues with a collapsible comments display, ensuring that each comment is shown in the order received, with author and date/time details. Let me know if you need further adjustments or clarifications!
+
+
+
 Below is a complete example showing how to build an interactive service that—after updating a comment—allows the user to refresh the comments section on the page. In this example, comments are displayed in a table cell as a series of collapsible panels showing the author and date in the collapsed state (and the full comment when expanded). The refresh button calls a new endpoint that returns the current ordered comments for the issue as JSON, and the JavaScript updates the DOM accordingly.
 
 Project Structure
