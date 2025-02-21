@@ -1,3 +1,121 @@
+
+When embedding the list_jiras.html page inside index.html, there might be conflicts in JavaScript or CSS, causing the collapsible comments section to stop working.
+
+Possible Issues & Fixes
+	1.	Multiple JavaScript Loads:
+	•	If both index.html and list_jiras.html have separate JavaScript files, event listeners may not attach properly.
+	•	Fix: Ensure event handlers are re-attached dynamically after loading the page.
+	2.	CSS Conflicts:
+	•	Different styles from index.html might override the collapsible button styles.
+	•	Fix: Use more specific CSS selectors.
+	3.	JavaScript Timing Issue:
+	•	If list_jiras.html loads dynamically via AJAX, event handlers may not bind properly.
+	•	Fix: Use $(document).on("click", ".collapsible", function() {...}) to attach event handlers dynamically.
+
+🔹 Fixing JavaScript in index.html
+
+Modify the existing script inside index.html to handle collapsible buttons properly.
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+    $(document).ready(function() {
+        // Attach collapsible event to dynamically loaded elements
+        $(document).on("click", ".collapsible", function() {
+            $(this).next(".content").toggle();
+        });
+
+        // Function to refresh JIRA table inside index.html
+        function refreshJiraTable() {
+            $.ajax({
+                url: "/refresh_jira_table",
+                type: "GET",
+                success: function(data) {
+                    $("#jira-table-container").html(data);
+                    attachEventHandlers(); // Reattach event handlers after AJAX refresh
+                },
+                error: function() {
+                    alert("Failed to refresh JIRA data.");
+                }
+            });
+        }
+
+        function attachEventHandlers() {
+            $(".collapsible").off("click").on("click", function() {
+                $(this).next(".content").toggle();
+            });
+        }
+
+        attachEventHandlers(); // Initial call on page load
+    });
+</script>
+
+🔹 Fixing list_jiras.html
+
+Ensure that collapsible buttons are properly structured.
+
+<table>
+  <thead>
+    <tr>
+      <th>JIRA Number</th>
+      <th>Summary</th>
+      <th>Comments</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for issue in issues %}
+    <tr>
+      <td>{{ issue.jira_number }}</td>
+      <td>{{ issue.summary }}</td>
+      <td>
+        {% for comment in issue.comments %}
+          <button class="collapsible">
+            {{ comment.date_time }} - {{ comment.author }}
+          </button>
+          <div class="content" style="display: none;">
+            <p>{{ comment.comment }}</p>
+          </div>
+        {% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+🔹 Fixing CSS Conflict
+
+Add specific styling inside list_jiras.html.
+
+<style>
+  .collapsible {
+      background-color: #eee;
+      cursor: pointer;
+      padding: 5px;
+      border: none;
+      text-align: left;
+      width: 100%;
+      font-weight: bold;
+  }
+
+  .content {
+      display: none;
+      padding: 5px;
+      background-color: #f9f9f9;
+  }
+</style>
+
+✅ Final Fix Checklist
+	•	Ensure jQuery is only loaded once in index.html.
+	•	Use $(document).on() instead of .click() for collapsible buttons.
+	•	Use AJAX to refresh tables & reattach handlers.
+	•	Ensure collapsible styles are not overridden by index.html styles.
+
+💡 Try This
+	1.	Refresh index.html.
+	2.	Click collapsible buttons inside list_jiras.html.
+	3.	If they still don’t work, check browser console (F12 > Console tab) for JavaScript errors.
+
+Let me know if collapsible comments still don’t work!
+
 Below is a complete example with three modules—routes.py, jira_ops.py, and db_ops.py—that implement the following functionality:
 	•	Fetch JIRA issues from a filter (including comments, with each comment’s author, date/time, and text in order).
 	•	Synchronize those issues with the database using jaydebeapi:
