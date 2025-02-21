@@ -1,3 +1,138 @@
+Below is an updated version of the interactive HTML template that prompts the user for confirmation before sending an update or resolve request. In this example, we use JavaScript’s built‑in confirm() function so that when a user clicks the “Update Comment” or “Resolve Status” button, a pop-up confirmation dialog appears. If the user confirms, the AJAX request is sent; otherwise, the request is canceled.
+
+Updated interactive_jira.html
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive JIRA Issue</title>
+  <style>
+    .comment { margin-bottom: 8px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #f9f9f9; }
+  </style>
+  <script>
+    async function updateComment(jiraNumber) {
+      // Confirmation prompt before updating the comment
+      if (!confirm("Are you sure you want to update the comment for issue " + jiraNumber + "?")) {
+        return; // User canceled, so exit the function
+      }
+      
+      let newComment = document.getElementById("comment_input_" + jiraNumber).value;
+      if (!newComment) {
+        alert("Please enter a comment.");
+        return;
+      }
+      
+      try {
+        const response = await fetch("/update_comment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jira_id: jiraNumber, comment: newComment })
+        });
+        const result = await response.json();
+        alert(result.message || result.error);
+        if (response.ok) {
+          refreshComments(jiraNumber);
+        }
+      } catch (error) {
+        console.error("Error updating comment:", error);
+        alert("Error updating comment: " + error);
+      }
+    }
+
+    async function resolveStatus(jiraNumber) {
+      // Confirmation prompt before resolving the issue
+      if (!confirm("Are you sure you want to mark issue " + jiraNumber + " as Resolved?")) {
+        return; // User canceled, so exit the function
+      }
+      
+      try {
+        const response = await fetch("/resolve_status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jira_id: jiraNumber })
+        });
+        const result = await response.json();
+        alert(result.message || result.error);
+        if (response.ok) {
+          refreshComments(jiraNumber);
+        }
+      } catch (error) {
+        console.error("Error resolving status:", error);
+        alert("Error resolving status: " + error);
+      }
+    }
+
+    async function refreshComments(jiraNumber) {
+      try {
+        const response = await fetch(`/get_issue_comments?jira_number=${jiraNumber}`);
+        const data = await response.json();
+        if (response.ok) {
+          let commentsHtml = "";
+          data.comments.forEach(comment => {
+            commentsHtml += `<div class="comment"><strong>${comment.order}. ${comment.author}</strong> (${comment.date_time})<br>${comment.comment}</div>`;
+          });
+          document.getElementById("comments_container_" + jiraNumber).innerHTML = commentsHtml;
+        } else {
+          alert("Failed to refresh comments.");
+        }
+      } catch (error) {
+        console.error("Error refreshing comments:", error);
+      }
+    }
+  </script>
+</head>
+<body>
+  <h1>Interactive JIRA Issue</h1>
+  <p><strong>JIRA Number:</strong> {{ issue.jira_number }}</p>
+  <p><strong>Summary:</strong> {{ issue.summary }}</p>
+  <p><strong>Status:</strong> {{ issue.status }}</p>
+  <p><strong>Job Name:</strong> {{ issue.job_name }}</p>
+
+  <h2>Comments</h2>
+  <div id="comments_container_{{ issue.jira_number }}">
+    {% for comment in issue.comments %}
+      <div class="comment">
+        <strong>{{ comment.order }}. {{ comment.author }}</strong> ({{ comment.date_time }})<br>
+        {{ comment.comment }}
+      </div>
+    {% endfor %}
+  </div>
+
+  <h3>Update Comment</h3>
+  <textarea id="comment_input_{{ issue.jira_number }}" rows="4" cols="50" placeholder="Enter your comment"></textarea>
+  <br>
+  <button onclick="updateComment('{{ issue.jira_number }}')">Update Comment</button>
+  <button onclick="resolveStatus('{{ issue.jira_number }}')">Resolve Status</button>
+</body>
+</html>
+
+Explanation:
+	1.	Confirmation Prompts:
+	•	In both updateComment() and resolveStatus(), we use:
+
+if (!confirm("...")) { return; }
+
+This displays a confirmation dialog. If the user clicks “Cancel”, the function returns immediately, and no request is sent.
+
+	2.	AJAX Requests:
+	•	After confirmation, the script sends a POST request via the Fetch API to either update the comment or mark the issue as resolved.
+	•	Upon a successful response, it calls refreshComments(jiraNumber) to update the comment display.
+	3.	Dynamic Comment Refresh:
+	•	The refreshComments() function fetches the updated comments (using a GET request to /get_issue_comments?jira_number=...) and updates the HTML content of the comments container.
+	4.	HTML Template:
+	•	Each issue is displayed with its details.
+	•	A text area and two buttons are provided for updating comments or resolving the issue.
+	•	The comments container is uniquely identified with an ID that includes the jira_number.
+
+This approach prevents accidental clicks by requiring user confirmation and then dynamically updating the interactive page with the latest comments and status.
+
+
+
 Below is one complete solution that ties together three services—a sync service, a list service, and an interactive service—that work together to:
 	•	Fetch JIRA issues from the API.
 	•	Insert new issues into the database (and their comments into an Issue_Comments table) or update existing ones if the comments have changed.
