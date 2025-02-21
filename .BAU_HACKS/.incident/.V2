@@ -1,3 +1,592 @@
+Below is a complete example with three modules—routes.py, jira_ops.py, and db_ops.py—that implement the following functionality:
+	•	Fetch JIRA issues from a filter (including comments, with each comment’s author, date/time, and text in order).
+	•	Synchronize those issues with the database using jaydebeapi:
+	•	Insert new issues if they do not exist.
+	•	Update the Issue_Comments table if the comments have changed.
+	•	Mark issues as “Resolved” (by updating their status) if an issue exists in the DB but is not returned by the JIRA filter and its status is not already “Resolved.”
+	•	Return a JSON response that lists, for each issue (using its unique key, jira_number), its corresponding job_name along with lists of inserted, updated, and resolved issues.
+	•	Provide two HTML templates:
+	•	list_jira.html: Displays all issues in a table format with a “Comments” column showing comments in a legible, collapsible view (each comment shows author and date in the collapsed state and expands to show the full comment).
+	•	interactive_jira.html: Displays details for a single issue with a similar collapsible view for comments and buttons to update a comment.
+
+You can adjust the database connection details and the extraction logic for job_name as needed.
+
+Project Structure
+
+/jira_service
+ ├── routes.py         # Flask API endpoints
+ ├── jira_ops.py       # Functions to fetch/process JIRA issues
+ ├── db_ops.py         # Database operations using jaydebeapi
+ ├── config.py         # Contains DB_CONFIG dictionary
+ ├── templates/
+ │      ├── list_jira.html
+ │      └── interactive_jira.html
+ ├── requirements.txt  # flask, requests, jaydebeapi, etc.
+
+1. config.py
+
+This file contains your database configurations (example for two environments):
+
+# config.py
+DB_CONFIG = {
+    "ENV1": {
+        "url": "jdbc:oracle:thin:@//db1_host:1521/db1",
+        "username": "user1",
+        "password": "pass1"
+    },
+    "ENV2": {
+        "url": "jdbc:oracle:thin:@//db2_host:1521/db2",
+        "username": "user2",
+        "password": "pass2"
+    }
+}
+
+2. jira_ops.py
+
+This module fetches issues from JIRA and extracts required fields including comments.
+
+# jira_ops.py
+import requests
+import logging
+
+JIRA_API_URL = "https://your-jira-instance.atlassian.net/rest/api/2/search"
+JIRA_FILTER_ID = "12345"
+JIRA_API_TOKEN = "YOUR_JIRA_API_TOKEN"
+
+HEADERS = {
+    "Authorization": f"Bearer {JIRA_API_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+def fetch_jira_issues(filter_id):
+    """
+    Fetch JIRA issues using the given filter ID.
+    Returns a list of dictionaries, each containing:
+      - jira_number (issue key)
+      - summary
+      - status
+      - comments: list of dicts {author, created, body} (in the order received)
+      - job_name: extracted from summary by removing the first character
+    """
+    params = {
+        "jql": f"filter={filter_id}",
+        "fields": ["summary", "status", "comment"]
+    }
+    response = requests.get(JIRA_API_URL, headers=HEADERS, params=params)
+    if response.status_code != 200:
+        raise Exception(f"Error fetching JIRA issues: {response.text}")
+    
+    issues = response.json().get("issues", [])
+    jira_data = []
+    for issue in issues:
+        jira_number = issue.get("key")
+        summary = issue["fields"].get("summary", "")
+        status = issue["fields"]["status"].get("name", "")
+        # Extract comments in order
+        comments = []
+        comment_field = issue["fields"].get("comment", {})
+        if "comments" in comment_field:
+            for comment in comment_field["comments"]:
+                comments.append({
+                    "author": comment["author"].get("displayName", "Unknown"),
+                    "created": comment.get("created", ""),
+                    "body": comment.get("body", "")
+                })
+        # Derive job_name from summary by removing first character (adjust logic as needed)
+        job_name = summary[1:] if summary else ""
+        jira_data.append({
+            "jira_number": jira_number,
+            "summary": summary,
+            "status": status,
+            "comments": comments,
+            "job_name": job_name
+        })
+    return jira_data
+
+3. db_ops.py
+
+This module uses jaydebeapi to interact with Oracle. It inserts or updates issues and comments and marks issues as resolved if they are missing from the latest JIRA filter.
+
+# db_ops.py
+import jaydebeapi
+import json
+import logging
+from config import DB_CONFIG
+
+JDBC_DRIVER = "oracle.jdbc.driver.OracleDriver"
+JAR_PATH = "/app/utils/lib/ojdbc6.jar"
+
+def get_db_connection(env):
+    db_conf = DB_CONFIG.get(env)
+    if not db_conf:
+        raise Exception(f"No DB config for environment: {env}")
+    conn = jaydebeapi.connect(
+        JDBC_DRIVER,
+        db_conf["url"],
+        [db_conf["username"], db_conf["password"]],
+        JAR_PATH
+    )
+    return conn
+
+def determine_db_env(job_name):
+    """
+    Determine the DB environment based on job_name.
+    For example: if job_name starts with 'A', use ENV1; if with 'B', use ENV2.
+    """
+    if job_name.startswith("A"):
+        return "ENV1"
+    elif job_name.startswith("B"):
+        return "ENV2"
+    else:
+        return None
+
+def get_issue_details(jira_number, env):
+    """
+    Retrieve an issue and its comments from the DB for a given jira_number in a specified environment.
+    Returns a dictionary with keys: jira_number, summary, status, job_name, and comments (ordered list).
+    """
+    conn = get_db_connection(env)
+    cursor = conn.cursor()
+    cursor.execute("SELECT jira_number, summary, status, job_name FROM Issues WHERE jira_number = ?", (jira_number,))
+    row = cursor.fetchone()
+    if not row:
+        cursor.close()
+        conn.close()
+        return None
+    issue = {
+        "jira_number": row[0],
+        "summary": row[1],
+        "status": row[2],
+        "job_name": row[3],
+        "comments": []
+    }
+    cursor.execute("SELECT comment_order, author, date_time, comment FROM Issue_Comments WHERE jira_number = ? ORDER BY comment_order", (jira_number,))
+    comments = []
+    for r in cursor.fetchall():
+        comments.append({
+            "order": r[0],
+            "author": r[1],
+            "date_time": r[2],
+            "comment": r[3]
+        })
+    issue["comments"] = comments
+    cursor.close()
+    conn.close()
+    return issue
+
+def get_db_issues_by_jira(jira_numbers, env):
+    """
+    Fetches issues from the database for a list of jira_numbers in the specified environment.
+    Returns a dict keyed by jira_number with stored comments (as a list) and status.
+    """
+    conn = get_db_connection(env)
+    cursor = conn.cursor()
+    placeholders = ", ".join(["?"] * len(jira_numbers))
+    query = f"SELECT jira_number, comments, status FROM Issues WHERE jira_number IN ({placeholders})"
+    cursor.execute(query, jira_numbers)
+    db_issues = {}
+    for row in cursor.fetchall():
+        jira_num = row[0]
+        try:
+            comments = json.loads(row[1])
+        except Exception:
+            comments = []
+        db_issues[jira_num] = {"comments": comments, "status": row[2]}
+    cursor.close()
+    conn.close()
+    return db_issues
+
+def update_database(jira_data):
+    """
+    For each issue in jira_data:
+      - If not in DB, insert the issue into Issues table and all its comments into Issue_Comments table.
+      - If in DB, compare Issue_Comments; if comments have changed (order-sensitive), update them.
+    Returns a dictionary with lists of inserted and updated issues.
+    """
+    result = {"inserted": [], "updated": []}
+    # Group issues by DB environment based on job_name
+    issues_by_env = {}
+    for issue in jira_data:
+        env = determine_db_env(issue["job_name"])
+        if not env:
+            logging.warning(f"Skipping issue {issue['jira_number']}: unknown DB environment for job_name {issue['job_name']}")
+            continue
+        issues_by_env.setdefault(env, []).append(issue)
+    
+    for env, issues in issues_by_env.items():
+        for issue in issues:
+            jira_number = issue["jira_number"]
+            job_name = issue["job_name"]
+            # Format comments: assign order numbers based on API order
+            formatted_comments = []
+            for idx, comment in enumerate(issue["comments"], start=1):
+                formatted_comments.append({
+                    "order": idx,
+                    "author": comment["author"],
+                    "date_time": comment["created"],
+                    "comment": comment["body"]
+                })
+            new_comments_json = json.dumps(formatted_comments)
+            
+            conn = get_db_connection(env)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM Issues WHERE jira_number = ?", (jira_number,))
+            exists = cursor.fetchone()[0] > 0
+            
+            if exists:
+                # Check if comments have changed by fetching Issue_Comments from DB
+                cursor.execute("SELECT comment_order, author, date_time, comment FROM Issue_Comments WHERE jira_number = ? ORDER BY comment_order", (jira_number,))
+                db_comments = [{"order": r[0], "author": r[1], "date_time": r[2], "comment": r[3]} for r in cursor.fetchall()]
+                if db_comments != formatted_comments:
+                    # Update Issue_Comments: delete old comments then insert new ones
+                    cursor.execute("DELETE FROM Issue_Comments WHERE jira_number = ?", (jira_number,))
+                    for comment in formatted_comments:
+                        cursor.execute(
+                            """INSERT INTO Issue_Comments (jira_number, comment_order, author, date_time, comment)
+                               VALUES (?, ?, ?, ?, ?)""",
+                            (jira_number, comment["order"], comment["author"], comment["date_time"], comment["comment"])
+                        )
+                    result["updated"].append({"jira_number": jira_number, "job_name": job_name})
+            else:
+                # Insert new issue into Issues table
+                cursor.execute(
+                    "INSERT INTO Issues (jira_number, summary, status, job_name) VALUES (?, ?, ?, ?)",
+                    (jira_number, issue["summary"], issue["status"], job_name)
+                )
+                # Insert comments into Issue_Comments table
+                for comment in formatted_comments:
+                    cursor.execute(
+                        """INSERT INTO Issue_Comments (jira_number, comment_order, author, date_time, comment)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (jira_number, comment["order"], comment["author"], comment["date_time"], comment["comment"])
+                    )
+                result["inserted"].append({"jira_number": jira_number, "job_name": job_name})
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+    
+    return result
+
+def mark_resolved_issues(jira_numbers_in_filter, env):
+    """
+    Marks issues as "Resolved" in the DB for a given environment if they are not present
+    in the jira_numbers_in_filter and their current status is not already "Resolved".
+    Returns a list of issues (with jira_number and job_name) that were marked as resolved.
+    """
+    conn = get_db_connection(env)
+    cursor = conn.cursor()
+    cursor.execute("SELECT jira_number, job_name, status FROM Issues WHERE status <> 'Resolved'")
+    issues_in_db = {row[0]: {"job_name": row[1], "status": row[2]} for row in cursor.fetchall()}
+    resolved = []
+    for jira_number, data in issues_in_db.items():
+        if jira_number not in jira_numbers_in_filter:
+            cursor.execute("UPDATE Issues SET status = 'Resolved' WHERE jira_number = ?", (jira_number,))
+            resolved.append({"jira_number": jira_number, "job_name": data["job_name"]})
+            logging.info(f"Marked {jira_number} as Resolved in {env}")
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return resolved
+
+def sync_issues(filter_id):
+    """
+    Main sync function:
+      - Fetches JIRA issues from the API.
+      - Inserts new issues or updates Issue_Comments if comments have changed.
+      - For each DB environment, marks issues as "Resolved" if they are not present in the JIRA filter.
+      - Returns a JSON-compatible dictionary with keys: "inserted", "updated", "resolved".
+    """
+    # Fetch JIRA issues from API (jira_ops.py provides this function)
+    from jira_ops import fetch_jira_issues
+    jira_data = fetch_jira_issues(filter_id)
+    jira_numbers_in_filter = {issue["jira_number"] for issue in jira_data}
+    
+    update_result = update_database(jira_data)
+    
+    resolved_total = []
+    for env in DB_CONFIG.keys():
+        resolved = mark_resolved_issues(jira_numbers_in_filter, env)
+        resolved_total.extend(resolved)
+    
+    final_result = {
+        "inserted": update_result.get("inserted", []),
+        "updated": update_result.get("updated", []),
+        "resolved": resolved_total
+    }
+    return final_result
+
+def get_all_issues():
+    """
+    Fetches all issues (with comments) from all DB environments.
+    Returns a list of issues, each a dictionary containing issue details and ordered comments.
+    """
+    all_issues = []
+    for env in DB_CONFIG.keys():
+        conn = get_db_connection(env)
+        cursor = conn.cursor()
+        cursor.execute("SELECT jira_number, summary, status, job_name FROM Issues")
+        issues = cursor.fetchall()
+        for row in issues:
+            jira_number, summary, status, job_name = row
+            cursor.execute("SELECT comment_order, author, date_time, comment FROM Issue_Comments WHERE jira_number = ? ORDER BY comment_order", (jira_number,))
+            comments = [{"order": r[0], "author": r[1], "date_time": r[2], "comment": r[3]} for r in cursor.fetchall()]
+            all_issues.append({
+                "jira_number": jira_number,
+                "summary": summary,
+                "status": status,
+                "job_name": job_name,
+                "comments": comments,
+                "env": env
+            })
+        cursor.close()
+        conn.close()
+    return all_issues
+
+4. HTML Templates
+
+A. list_jira.html
+
+<!-- templates/list_jira.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JIRA Issues List</title>
+  <style>
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top; }
+    th { background-color: #f2f2f2; }
+    .comment { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <h1>JIRA Issues List</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>JIRA Number</th>
+        <th>Summary</th>
+        <th>Status</th>
+        <th>Job Name</th>
+        <th>Comments</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for issue in issues %}
+      <tr>
+        <td>{{ issue.jira_number }}</td>
+        <td>{{ issue.summary }}</td>
+        <td>{{ issue.status }}</td>
+        <td>{{ issue.job_name }}</td>
+        <td>
+          {% for comment in issue.comments %}
+            <div class="comment">
+              <strong>{{ comment.order }}. {{ comment.author }}</strong> ({{ comment.date_time }})<br>
+              {{ comment.comment }}
+            </div>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
+
+B. interactive_jira.html
+
+<!-- templates/interactive_jira.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Interactive JIRA Issue</title>
+  <style>
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top; }
+    th { background-color: #f2f2f2; }
+    .collapsible {
+      background-color: #eee;
+      border: none;
+      padding: 5px;
+      width: 100%;
+      text-align: left;
+      cursor: pointer;
+      margin-bottom: 2px;
+      font-size: 14px;
+    }
+    .collapsible:after {
+      content: '\002B';
+      float: right;
+      margin-left: 5px;
+    }
+    .collapsible.active:after {
+      content: "\2212";
+    }
+    .content {
+      display: none;
+      padding: 5px;
+      background-color: #f9f9f9;
+      margin-bottom: 5px;
+      font-size: 13px;
+    }
+  </style>
+  <script>
+    document.addEventListener("DOMContentLoaded", function(){
+      var coll = document.getElementsByClassName("collapsible");
+      for (var i = 0; i < coll.length; i++) {
+        coll[i].addEventListener("click", function() {
+          this.classList.toggle("active");
+          var content = this.nextElementSibling;
+          if (content.style.display === "block") {
+            content.style.display = "none";
+          } else {
+            content.style.display = "block";
+          }
+        });
+      }
+    });
+
+    async function updateComment() {
+      const jiraNumber = document.getElementById("jira_number").value;
+      const newComment = document.getElementById("new_comment").value;
+      const response = await fetch("/update_comment", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({jira_id: jiraNumber, comment: newComment})
+      });
+      const data = await response.json();
+      alert(data.message || data.error);
+      if (response.ok) {
+          refreshComments(jiraNumber);
+      }
+    }
+
+    async function refreshComments(jiraNumber) {
+      const response = await fetch(`/get_issue_comments?jira_number=${jiraNumber}`);
+      const data = await response.json();
+      if (response.ok) {
+          let html = "";
+          data.comments.forEach(function(c) {
+            html += `<button type="button" class="collapsible">${c.order}. ${c.author} - ${c.date_time}</button>`;
+            html += `<div class="content"><p>${c.comment}</p></div>`;
+          });
+          document.getElementById("comments_container").innerHTML = html;
+          // Reattach event listeners for new collapsible elements
+          var coll = document.getElementsByClassName("collapsible");
+          for (var i = 0; i < coll.length; i++) {
+            coll[i].addEventListener("click", function() {
+              this.classList.toggle("active");
+              var content = this.nextElementSibling;
+              if (content.style.display === "block") {
+                content.style.display = "none";
+              } else {
+                content.style.display = "block";
+              }
+            });
+          }
+      } else {
+          alert("Failed to fetch comments.");
+      }
+    }
+  </script>
+</head>
+<body>
+  <h1>Interactive JIRA Issue</h1>
+  <table>
+    <tr>
+      <th>JIRA Number</th>
+      <td><input type="hidden" id="jira_number" value="{{ issue.jira_number }}">{{ issue.jira_number }}</td>
+    </tr>
+    <tr>
+      <th>Summary</th>
+      <td>{{ issue.summary }}</td>
+    </tr>
+    <tr>
+      <th>Status</th>
+      <td>{{ issue.status }}</td>
+    </tr>
+    <tr>
+      <th>Job Name</th>
+      <td>{{ issue.job_name }}</td>
+    </tr>
+    <tr>
+      <th>Comments</th>
+      <td id="comments_container">
+        {% for comment in issue.comments %}
+          <button type="button" class="collapsible">
+            {{ comment.order }}. {{ comment.author }} - {{ comment.date_time }}
+          </button>
+          <div class="content">
+            <p>{{ comment.comment }}</p>
+          </div>
+        {% endfor %}
+      </td>
+    </tr>
+  </table>
+  <h3>Update Comment</h3>
+  <textarea id="new_comment" rows="4" cols="50" placeholder="Enter your comment"></textarea><br>
+  <button onclick="updateComment()">Update Comment</button>
+</body>
+</html>
+
+5. Additional API Endpoint in routes.py for Comments
+
+To support refreshing comments dynamically in the interactive view, add an endpoint that returns comments for a given jira_number.
+
+# In routes.py (append below existing routes)
+from db_ops import get_issue_details
+
+@app.route('/get_issue_comments', methods=['GET'])
+def get_issue_comments():
+    jira_number = request.args.get("jira_number")
+    if not jira_number:
+        return jsonify({"error": "jira_number parameter is required"}), 400
+    # Determine DB env by iterating over environments (assuming issue exists in one env)
+    issue = None
+    for env in DB_CONFIG.keys():
+        issue = get_issue_details(jira_number, env)
+        if issue:
+            break
+    if not issue:
+        return jsonify({"error": "Issue not found"}), 404
+    return jsonify({"comments": issue["comments"]})
+
+6. Final JSON Response from Sync Service (For Reference)
+
+When the sync service is run (via /sync endpoint), it returns a JSON object such as:
+
+{
+    "inserted": [
+        { "jira_number": "JIRA-1001", "job_name": "A1" },
+        { "jira_number": "JIRA-1002", "job_name": "B1" }
+    ],
+    "updated": [
+        { "jira_number": "JIRA-1003", "job_name": "A2" }
+    ],
+    "resolved": [
+        { "jira_number": "JIRA-1004", "job_name": "B2" }
+    ]
+}
+
+Summary
+	•	routes.py defines three endpoints:
+	•	/sync: Synchronizes JIRA issues with the database.
+	•	/list_jira: Renders a table view of all issues.
+	•	/interactive_jira: Renders an interactive view of a single issue with collapsible comment sections and update functionality.
+	•	/get_issue_comments: Returns JSON with the latest comments for a given issue (used to refresh the interactive view).
+	•	jira_ops.py fetches JIRA issues from the API and processes them (including extracting comments and job_name).
+	•	db_ops.py uses jaydebeapi to:
+	•	Insert new issues,
+	•	Update the Issue_Comments table if comments have changed (storing order, author, date_time, comment),
+	•	Mark issues as “Resolved” if they no longer appear in the JIRA filter.
+	•	HTML Templates are designed to present issue details and comments in a legible table format with collapsible sections for each comment.
+
+This complete solution meets the requirements for synchronizing JIRA issues and displaying them interactively with detailed, ordered comments. Let me know if you need further modifications or clarifications!
+
+=#=#
+
 Below is an updated version of the interactive HTML template that prompts the user for confirmation before sending an update or resolve request. In this example, we use JavaScript’s built‑in confirm() function so that when a user clicks the “Update Comment” or “Resolve Status” button, a pop-up confirmation dialog appears. If the user confirms, the AJAX request is sent; otherwise, the request is canceled.
 
 Updated interactive_jira.html
