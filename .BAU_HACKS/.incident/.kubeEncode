@@ -1,0 +1,111 @@
+Yes, on Windows, the file user_auth_tokens.json should be in the same directory where you execute the command. If it’s located elsewhere, you need to specify the full path.
+
+Step 1: Write JSON String to a File (Python)
+
+If you have JSON data in Python and want to save it to a file before encoding:
+
+import json
+
+data = {
+    "username": "john_doe",
+    "api_token": "abcd1234"
+}
+
+# Write to a JSON file
+with open("user_auth_tokens.json", "w") as file:
+    json.dump(data, file, indent=4)
+
+This creates a user_auth_tokens.json file.
+
+Step 2: Encode the File in Base64 (Windows & Linux)
+
+Windows PowerShell Command:
+
+[Convert]::ToBase64String([System.IO.File]::ReadAllBytes("user_auth_tokens.json"))
+
+Linux/macOS Command:
+
+base64 -w 0 user_auth_tokens.json
+
+Step 3: Create Kubernetes Secret YAML
+
+Once you have the Base64-encoded content, insert it into your sealed-secret.yaml file:
+
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: user-auth-tokens
+  namespace: default
+spec:
+  encryptedData:
+    user_auth_tokens.json: "<BASE64_ENCODED_STRING_HERE>"
+
+Replace <BASE64_ENCODED_STRING_HERE> with the actual encoded string.
+
+Step 4: Deploy the Sealed Secret
+
+Run:
+
+kubectl apply -f sealed-secret.yaml
+
+Verify:
+
+kubectl get secret user-auth-tokens -o yaml
+
+Step 5: Link Secret in Deployment
+
+Modify deployment.yaml to mount the secret:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  template:
+    spec:
+      volumes:
+        - name: user-auth-secret
+          secret:
+            secretName: user-auth-tokens
+      containers:
+        - name: my-container
+          image: my-image
+          volumeMounts:
+            - name: user-auth-secret
+              mountPath: "/app/secrets"
+              readOnly: true
+
+This will mount the secret inside the pod at /app/secrets/user_auth_tokens.json.
+
+Step 6: Read Secret File in settings.py
+
+Now, in your Django Flask/FastAPI settings, read the secret file:
+
+import json
+
+SECRET_FILE_PATH = "/app/secrets/user_auth_tokens.json"
+
+try:
+    with open(SECRET_FILE_PATH, "r") as file:
+        secrets = json.load(file)
+
+    JIRA_USERNAME = secrets.get("username")
+    JIRA_API_TOKEN = secrets.get("api_token")
+
+except Exception as e:
+    print(f"Error reading secret file: {e}")
+    JIRA_USERNAME = None
+    JIRA_API_TOKEN = None
+
+Final Summary
+	1.	Write JSON to a file (user_auth_tokens.json).
+	2.	Base64 encode the file (base64 -w 0 user_auth_tokens.json or PowerShell equivalent).
+	3.	Create sealed-secret.yaml with the encoded data.
+	4.	Apply it to Kubernetes (kubectl apply -f sealed-secret.yaml).
+	5.	Mount the secret in deployment.yaml.
+	6.	Read the secret file in settings.py.
+
+This ensures secure storage and retrieval of API tokens in Kubernetes.
+
+Let me know if you need any modifications! 🚀
