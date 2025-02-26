@@ -1,0 +1,90 @@
+Issue: Helm Push Appending /v2 to Registry Path
+
+When pushing a Helm chart to an OCI-compliant registry, Helm uses the Docker distribution API, which follows the /v2/ path convention.
+
+Why is /v2/ Appended?
+	•	Helm 3+ uses OCI registries (like Docker registries) that are built on the Docker Distribution API.
+	•	Docker-based registries (e.g., Harbor, Artifactory, AWS ECR, etc.) expect images to be accessed via the /v2/ path.
+	•	Helm automatically appends /v2/ to maintain compatibility with OCI registries.
+
+How to Fix?
+
+You need to explicitly enable OCI support before pushing the chart:
+	1.	Ensure Helm OCI support is enabled:
+
+export HELM_EXPERIMENTAL_OCI=1
+
+
+	2.	Login to the registry:
+
+helm registry login cr.example.com --username myuser --password mypass
+
+
+	3.	Push with OCI-compatible syntax:
+
+helm push mychart.tgz oci://cr.example.com/test/helm-charts
+
+
+
+✅ This will ensure Helm correctly recognizes the registry without forcing /v2/.
+
+Overriding user_auth_token in ArgoCD values.yaml
+
+Yes, you can override values in ArgoCD just like you override the Docker image version.
+
+Method 1: Override in argocd-source.yaml
+
+In your ArgoCD Application YAML, override the user_auth_token value inside the values section:
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: argocd
+spec:
+  source:
+    repoURL: https://my-helm-repo.example.com
+    targetRevision: main
+    chart: my-helm-chart
+    helm:
+      values: |
+        user_auth_token: "new-token-value"
+
+🔹 This will replace user_auth_token from values.yaml in the Helm chart.
+
+Method 2: Use valueFiles to Override from Another YAML
+
+If you have a separate values file (e.g., overrides.yaml), you can include it:
+
+spec:
+  source:
+    helm:
+      valueFiles:
+        - values.yaml
+        - overrides.yaml
+
+Where overrides.yaml contains:
+
+user_auth_token: "new-secret-token"
+
+Method 3: Pass as a Helm Parameter
+
+You can also override directly in the helm.parameters section:
+
+spec:
+  source:
+    helm:
+      parameters:
+        - name: "user_auth_token"
+          value: "new-secret-token"
+
+Final Summary
+	1.	Fix Helm Push Issue:
+	•	Enable OCI support (export HELM_EXPERIMENTAL_OCI=1).
+	•	Use oci:// in helm push to avoid /v2/ issues.
+	2.	Override user_auth_token in ArgoCD:
+	•	Use values: in argocd-source.yaml.
+	•	Use valueFiles: to load from overrides.yaml.
+	•	Use helm.parameters to pass it directly.
+
+Let me know if you need more clarification! 🚀
