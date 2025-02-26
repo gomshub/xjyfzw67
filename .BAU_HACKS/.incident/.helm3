@@ -1,0 +1,63 @@
+Yes! If export HELM_EXPERIMENTAL_OCI=1 does not persist in a shell script, you can set it inline while running the Helm command or configure it permanently.
+
+Option 1: Set Inline While Running the Command
+
+Instead of using export, set the variable just for that command:
+
+HELM_EXPERIMENTAL_OCI=1 helm push mychart.tgz oci://cr.example.com/test/helm-charts
+
+✅ This applies only to the single command execution.
+
+Option 2: Set in the Script Without export
+
+Modify your shell script to define the variable before running the command:
+
+#!/bin/bash
+HELM_EXPERIMENTAL_OCI=1
+helm push mychart.tgz oci://cr.example.com/test/helm-charts
+
+✅ This applies within the script without needing export.
+
+Option 3: Configure Helm Permanently in the System
+
+To avoid setting it every time, add it to your shell profile:
+
+For Bash (~/.bashrc or ~/.bash_profile)
+
+echo 'export HELM_EXPERIMENTAL_OCI=1' >> ~/.bashrc
+source ~/.bashrc
+
+For Zsh (~/.zshrc)
+
+echo 'export HELM_EXPERIMENTAL_OCI=1' >> ~/.zshrc
+source ~/.zshrc
+
+✅ This makes Helm OCI support permanent for all future sessions.
+
+Option 4: Use a Helm Environment File
+
+If running inside a script or CI/CD pipeline, create a separate env file:
+	1.	Create an .env file:
+
+HELM_EXPERIMENTAL_OCI=1
+
+
+	2.	Load the environment variables in your script:
+
+#!/bin/bash
+set -a  # Automatically export all variables
+source .env
+set +a  # Stop exporting variables
+helm push mychart.tgz oci://cr.example.com/test/helm-charts
+
+
+
+✅ This ensures Helm always runs with OCI support in your script.
+
+Best Approach?
+	•	✅ For one-time use → Use inline: HELM_EXPERIMENTAL_OCI=1 helm push ...
+	•	✅ For a shell script → Define the variable before running Helm inside the script.
+	•	✅ For permanent usage → Add export HELM_EXPERIMENTAL_OCI=1 to ~/.bashrc or ~/.zshrc.
+	•	✅ For CI/CD → Use an .env file and source it.
+
+Let me know if you need further tweaks! 🚀
