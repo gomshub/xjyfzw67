@@ -1,3 +1,71 @@
+
+You can use cURL to delete a Docker image or Helm chart from Artifactory using the Artifactory REST API.
+
+⸻
+
+1. Delete Docker Image from Artifactory
+
+Use the Artifactory API to delete an image from the Docker registry.
+
+Command:
+
+curl -u <username>:<api-token> -X DELETE "https://artifactory-test.example.com/artifactory/my-docker-repo/my-app/1.0.0"
+
+Example:
+
+curl -u myuser:AKCp8hJr9ex...myAPItoken -X DELETE "https://artifactory-test.example.com/artifactory/docker-local/my-app/1.0.0"
+
+✅ This deletes the entire image tag (1.0.0) from the repository.
+✅ If you want to delete all versions of an image, use a loop or DELETE /my-app.
+
+⸻
+
+2. Delete Helm Chart from Artifactory
+
+Helm charts are stored as .tgz files in Artifactory. To delete a Helm chart version:
+
+Command:
+
+curl -u <username>:<api-token> -X DELETE "https://artifactory-test.example.com/artifactory/helm-repo/my-helm-chart-1.0.0.tgz"
+
+Example:
+
+curl -u myuser:AKCp8hJr9ex...myAPItoken -X DELETE "https://artifactory-test.example.com/artifactory/helm-local/my-helm-chart-1.0.0.tgz"
+
+✅ This removes the Helm chart package (.tgz) from Artifactory.
+
+⸻
+
+3. Verify Deletion
+
+After deletion, check if the artifact is gone:
+
+For Docker Image:
+
+curl -u <username>:<api-token> -X GET "https://artifactory-test.example.com/artifactory/my-docker-repo/my-app/"
+
+If the version is deleted, you won’t see it in the response.
+
+For Helm Chart:
+
+helm repo update
+helm search repo my-helm-chart
+
+If the chart is deleted, it won’t appear in search results.
+
+⸻
+
+Summary
+
+Action	Command
+Delete Docker Image	curl -u <user>:<token> -X DELETE "https://artifactory-test/artifactory/docker-local/my-app/1.0.0"
+Delete Helm Chart	curl -u <user>:<token> -X DELETE "https://artifactory-test/artifactory/helm-local/my-chart-1.0.0.tgz"
+Verify Docker Deletion	curl -u <user>:<token> -X GET "https://artifactory-test/artifactory/docker-local/my-app/"
+Verify Helm Deletion	helm repo update && helm search repo my-helm-chart
+
+Let me know if you need more details! 🚀
+
+
 I see the exact issue now. You’re dealing with two conflicting requirements in ArgoCD:
 	1.	Helm chart packaging includes a values.yaml, but you want ArgoCD to use its own values.yaml when deploying. However, by default, ArgoCD is still referring to the packaged values.yaml.
 	2.	You need to override only the Docker image version dynamically, without modifying values.yaml manually or in Git every time.
