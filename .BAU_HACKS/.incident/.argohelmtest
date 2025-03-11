@@ -1,0 +1,107 @@
+Got it! Below is a shell script that automates the process of:
+	1.	Fetching ArgoCD values using its REST API.
+	2.	Downloading the Helm chart from Artifactory (requires username & token).
+	3.	Simulating deployment locally using Helm with the extracted values.
+
+⸻
+
+Prerequisites
+	•	curl, jq, helm installed on your system.
+	•	ArgoCD API token.
+	•	Artifactory username & token.
+	•	Artifactory Helm repository URL.
+
+⸻
+
+Shell Script: check_argo_helm.sh
+
+#!/bin/bash
+
+# Set variables
+ARGOCD_SERVER="https://your-argocd-server"
+ARGOCD_TOKEN="your-argocd-token"
+APP_NAME="your-app-name"
+
+ARTIFACTORY_URL="https://artifactory-test.example.com/artifactory"
+ARTIFACTORY_REPO="helm-repo"
+ARTIFACTORY_USER="your-artifactory-username"
+ARTIFACTORY_TOKEN="your-artifactory-token"
+
+# Fetch values.yaml reference from ArgoCD
+echo "Fetching ArgoCD application values..."
+VALUE_FILES=$(curl -s -k -H "Authorization: Bearer $ARGOCD_TOKEN" \
+    "$ARGOCD_SERVER/api/v1/applications/$APP_NAME" | jq -r '.spec.source.helm.valueFiles[]')
+
+echo "Values files used in ArgoCD:"
+echo "$VALUE_FILES"
+
+# Extract chart name & version from ArgoCD
+CHART_NAME=$(curl -s -k -H "Authorization: Bearer $ARGOCD_TOKEN" \
+    "$ARGOCD_SERVER/api/v1/applications/$APP_NAME" | jq -r '.spec.source.chart')
+
+CHART_VERSION=$(curl -s -k -H "Authorization: Bearer $ARGOCD_TOKEN" \
+    "$ARGOCD_SERVER/api/v1/applications/$APP_NAME" | jq -r '.spec.source.targetRevision')
+
+echo "Helm Chart: $CHART_NAME"
+echo "Chart Version: $CHART_VERSION"
+
+# Download Helm chart from Artifactory
+echo "Downloading Helm chart from Artifactory..."
+helm pull oci://$ARTIFACTORY_URL/$ARTIFACTORY_REPO/$CHART_NAME --version $CHART_VERSION \
+    --username "$ARTIFACTORY_USER" --password "$ARTIFACTORY_TOKEN"
+
+# Extract the downloaded chart filename
+CHART_TGZ="$CHART_NAME-$CHART_VERSION.tgz"
+
+# Check if the chart was downloaded
+if [ ! -f "$CHART_TGZ" ]; then
+    echo "Failed to download the Helm chart!"
+    exit 1
+fi
+
+# Simulate Helm template rendering with the retrieved values
+for FILE in $VALUE_FILES; do
+    echo "Rendering Helm template with values from: $FILE"
+    helm template my-app ./$CHART_TGZ -f $FILE
+done
+
+echo "Helm simulation completed."
+
+
+
+⸻
+
+How to Use
+	1.	Save the script as check_argo_helm.sh.
+	2.	Make it executable:
+
+chmod +x check_argo_helm.sh
+
+
+	3.	Run the script:
+
+./check_argo_helm.sh
+
+
+
+⸻
+
+What This Script Does
+
+✅ Fetches which values.yaml files are used in ArgoCD.
+✅ Fetches the Helm chart name & version from ArgoCD.
+✅ Pulls the Helm chart from Artifactory (requires username & token).
+✅ Simulates the Helm deployment with the exact values.yaml used in ArgoCD.
+
+⸻
+
+Next Steps
+	•	If you get an authentication error from Artifactory, verify your username & token.
+	•	If the values files are missing, check if they exist in your ArgoCD Git repo.
+	•	Want to deploy after testing? Run:
+
+helm upgrade --install my-app ./$CHART_TGZ -f values-ctlq.yaml
+
+
+
+Let me know if you need any modifications! 🚀
