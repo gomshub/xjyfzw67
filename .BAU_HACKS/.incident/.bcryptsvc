@@ -1,3 +1,134 @@
+
+Since USER_TOKENS is loaded from an environment variable containing a JSON string, let’s focus on correctly decoding it and ensuring bcrypt hashes are properly stored and compared.
+
+⸻
+
+🔍 Common Causes of bcrypt.checkpw Failure & Fixes
+
+Since the token storage is in an environment variable, the issues might stem from:
+	1.	Incorrect JSON parsing from environment variable
+	2.	Encoding issues when storing/retrieving bcrypt hash
+	3.	bcrypt hash was mistakenly base64-encoded
+	4.	Different Python versions or bcrypt library versions
+
+⸻
+
+✅ 1. Correctly Parse USER_TOKENS JSON From Env Variable
+
+Modify your load_user_tokens() to ensure proper JSON parsing:
+
+import os
+import json
+import bcrypt
+
+def load_user_tokens():
+    """
+    Loads the user tokens from an environment variable containing a JSON string.
+    """
+    token_data = os.getenv("USER_TOKENS", "{}")  # Default to empty JSON if not set
+    try:
+        user_tokens = json.loads(token_data)  # Parse JSON string
+        return {user: data["secret"] for user, data in user_tokens.items()}  # Extract only the hashed secrets
+    except json.JSONDecodeError as e:
+        print(f"Error parsing USER_TOKENS env variable: {e}")
+        return {}
+
+# Load tokens on service startup
+USER_TOKENS = load_user_tokens()
+
+📌 Why this fix?
+	•	Ensures the JSON string is properly parsed.
+	•	Extracts only the hashed passwords (not the API token).
+	•	If the JSON is malformed, logs an error instead of crashing.
+
+⸻
+
+✅ 2. Ensure bcrypt Hashes Are NOT Base64 Encoded
+
+Check your hashing service (/hash_credentials).
+	•	Do NOT base64-encode bcrypt hashes.
+	•	Only base64-encode the JIRA API token.
+
+@app.route('/hash_credentials', methods=['POST'])
+def hash_credentials():
+    data = request.json
+    password = data.get("password")
+    jira_api_token = data.get("jira_api_token")
+
+    if not password or not jira_api_token:
+        return jsonify({"error": "Both password and JIRA API token are required"}), 400
+
+    # ✅ Hash the password using bcrypt (WITHOUT base64 encoding)
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    # ✅ Base64 encode ONLY the JIRA API token, NOT the bcrypt password hash
+    encoded_jira_token = base64.b64encode(jira_api_token.encode('utf-8')).decode('utf-8')
+
+    return jsonify({
+        "hashed_password": hashed_password,  # Store as plain bcrypt hash, NOT base64
+        "encoded_jira_api_token": encoded_jira_token  # Only encode API token
+    })
+
+📌 Why this fix?
+	•	bcrypt hashes should NEVER be base64-encoded.
+	•	Only the JIRA API token should be base64-encoded.
+
+⸻
+
+✅ 3. Fix verify_token() Encoding Issues
+
+Modify verify_token() to handle encoding properly:
+
+def verify_token(username, provided_token):
+    """
+    Verifies that the provided plaintext token matches the stored bcrypt hash.
+    """
+    stored_hash = USER_TOKENS.get(username)  # Retrieve hashed password from env
+
+    if not stored_hash:
+        app.logger.warning(f"Token not found for user: {username}")
+        return False
+
+    try:
+        # ✅ Ensure both inputs are properly encoded before checking
+        return bcrypt.checkpw(provided_token.encode("utf-8"), stored_hash.encode("utf-8"))
+    except Exception as e:
+        app.logger.error(f"Error verifying token for {username}: {e}")
+        return False
+
+📌 Why this fix?
+	•	Ensures both provided_token and stored_hash are UTF-8 encoded before comparison.
+	•	Prevents encoding mismatches between environments.
+
+⸻
+
+✅ 4. Verify Python & bcrypt Versions in Kubernetes
+
+Different bcrypt versions or Python versions can cause issues.
+
+Check Python version inside the Kubernetes pod:
+
+kubectl exec -it <pod-name> -- python --version
+
+If the versions differ across environments, force a fixed version in Dockerfile:
+
+FROM python:3.9
+RUN pip install bcrypt==4.0.1
+
+📌 Why this fix?
+	•	Ensures bcrypt behaves consistently across Kubernetes environments.
+
+⸻
+
+🚀 Final Fix Summary
+
+✅ Ensure USER_TOKENS env variable is properly parsed.
+✅ Store bcrypt hashes as-is (without base64 encoding).
+✅ Encode passwords correctly before checking (.encode("utf-8")).
+✅ Verify Python & bcrypt versions across environments.
+
+After applying these fixes, bcrypt.checkpw should work consistently in all Kubernetes deployments! 🚀
+
 Here’s an updated Flask bcrypt encoding service that takes both a password and a JIRA API token, hashes the password using bcrypt, base64 encodes the JIRA API token, and returns them as a JSON response.
 
 Installation Requirements
