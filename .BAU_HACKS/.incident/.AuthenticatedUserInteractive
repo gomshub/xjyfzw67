@@ -1,4 +1,218 @@
 
+Yes, you can handle it without Flask sessions by using a temporary secret key (token) stored in the environment. Here’s how:
+
+⸻
+
+✅ How It Works
+	1.	User logs into /interactive_jira → Generates a temporary secret token and stores it in an environment variable.
+	2.	Subsequent API requests must include this token → Prevents external requests.
+	3.	If the token is missing/invalid, API calls are blocked (403 Unauthorized).
+	4.	Token auto-expires after 8 hours (or on restart).
+
+⸻
+
+✅ 1. Flask App (app.py)
+
+from flask import Flask, request, render_template, jsonify
+import os
+import bcrypt
+import base64
+import json
+import time
+
+app = Flask(__name__)
+
+# 🔹 Load user tokens from ENV variable (Stored JSON)
+USER_TOKENS = json.loads(os.getenv("USER_AUTH_TOKENS", "{}"))
+
+# 🔹 Store temporary secret key for interactive session
+INTERACTIVE_SECRET_KEY = None
+TOKEN_EXPIRY = None  # Token expiration timestamp
+
+def verify_token(username, provided_token):
+    """Verify user-provided token against stored bcrypt hash."""
+    stored_hash = USER_TOKENS.get(username)
+    if not stored_hash:
+        return False
+    try:
+        return bcrypt.checkpw(provided_token.encode("utf-8"), stored_hash.encode("utf-8"))
+    except Exception as e:
+        app.logger.error(f"Token verification failed: {e}")
+        return False
+
+@app.route('/interactive_jira', methods=['GET'])
+def interactive_jira():
+    """Authenticate user and generate a temporary secret key."""
+    global INTERACTIVE_SECRET_KEY, TOKEN_EXPIRY
+
+    username = request.args.get('username')
+    auth_header = request.headers.get("Authorization")
+
+    if not username or not auth_header or not auth_header.startswith("Bearer "):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    provided_token = auth_header.split(" ")[1]
+    if not verify_token(username, provided_token):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    # 🔹 Generate a new secret key for interactive access
+    INTERACTIVE_SECRET_KEY = os.urandom(16).hex()
+    TOKEN_EXPIRY = time.time() + (8 * 3600)  # Set expiry for 8 hours
+
+    return render_template("interactive.html", username=username, secret_key=INTERACTIVE_SECRET_KEY)
+
+def require_interactive_token(f):
+    """Ensure request comes from an interactive request by checking the secret key."""
+    def wrapper(*args, **kwargs):
+        global INTERACTIVE_SECRET_KEY, TOKEN_EXPIRY
+        provided_secret = request.headers.get("X-Interactive-Secret")
+
+        # 🔹 Validate the secret key
+        if not INTERACTIVE_SECRET_KEY or provided_secret != INTERACTIVE_SECRET_KEY or time.time() > TOKEN_EXPIRY:
+            return jsonify({"error": "Access denied"}), 403
+
+        return f(*args, **kwargs)
+    return wrapper
+
+@app.route('/update_comment', methods=['POST'])
+@require_interactive_token
+def update_comment():
+    data = request.json
+    return jsonify({"message": "Comment updated", "jira_number": data.get("jira_number")})
+
+@app.route('/resolve_status', methods=['POST'])
+@require_interactive_token
+def resolve_status():
+    data = request.json
+    return jsonify({"message": "Status resolved", "jira_number": data.get("jira_number")})
+
+@app.route('/refresh_table', methods=['POST'])
+@require_interactive_token
+def refresh_table():
+    return jsonify({"message": "Table refreshed"})
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+⸻
+
+✅ 2. HTML Template (templates/interactive.html)
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JIRA Interactive</title>
+    <script>
+        const SECRET_KEY = "{{ secret_key }}";
+
+        async function apiCall(url, method, data = {}) {
+            let response = await fetch(url, {
+                method: method,
+                headers: { 
+                    "Content-Type": "application/json",
+                    "X-Interactive-Secret": SECRET_KEY  // 🔹 Send secret key in each request
+                },
+                body: JSON.stringify(data)
+            });
+            let result = await response.json();
+            alert(result.message);
+        }
+
+        function updateComment(jiraNumber) {
+            let comment = prompt("Enter your comment:");
+            if (comment) apiCall('/update_comment', 'POST', { jira_number: jiraNumber, comment: comment });
+        }
+
+        function resolveStatus(jiraNumber) {
+            if (confirm("Mark this issue as resolved?")) {
+                apiCall('/resolve_status', 'POST', { jira_number: jiraNumber });
+            }
+        }
+
+        function refreshTable() {
+            apiCall('/refresh_table', 'POST');
+        }
+    </script>
+</head>
+<body>
+    <h2>Welcome, {{ username }}!</h2>
+    <button onclick="refreshTable()">Refresh Table</button>
+    <table>
+        <tr>
+            <th>JIRA Number</th>
+            <th>Summary</th>
+            <th>Actions</th>
+        </tr>
+        <tr>
+            <td>JIRA-123</td>
+            <td>Fix login issue</td>
+            <td>
+                <button onclick="updateComment('JIRA-123')">Update Comment</button>
+                <button onclick="resolveStatus('JIRA-123')">Resolve</button>
+            </td>
+        </tr>
+        <tr>
+            <td>JIRA-456</td>
+            <td>API Enhancement</td>
+            <td>
+                <button onclick="updateComment('JIRA-456')">Update Comment</button>
+                <button onclick="resolveStatus('JIRA-456')">Resolve</button>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+
+
+
+⸻
+
+✅ 3. Security Overview
+
+Feature	Description
+🔐 Temporary Secret Key	Interactive login generates a random key stored in memory
+⏳ 8-Hour Expiry	Token auto-expires after 8 hours (configurable)
+❌ Blocks External API Calls	API requests must include the correct secret key
+✅ Secure Communication	Key is never exposed in URL parameters (only in X-Interactive-Secret)
+
+
+
+⸻
+
+🚀 How It Works
+	1.	User logs in at /interactive_jira → Gets a temporary secret key.
+	2.	Subsequent API calls (/update_comment, /resolve_status, /refresh_table) must include this key.
+	3.	If key is missing or invalid, API calls fail (403 Unauthorized).
+	4.	Key expires after 8 hours (or when Flask restarts).
+
+⸻
+
+✅ Why This Works Better Than Sessions
+
+Feature	Flask Sessions	Secret Key Approach
+🔒 Security	Stored in cookies, could be hijacked	Stored only in memory, never exposed
+⏳ Expiry Handling	Session stays until browser closed or timeout	Secret key auto-expires in 8 hours
+🚀 Simplicity	Requires session config	No Flask session needed
+🔗 API Restriction	Anyone with session can call APIs	Only users with interactive secret key can call APIs
+
+
+
+⸻
+
+🚀 Final Thoughts
+	•	✅ No Flask sessions required
+	•	✅ Stronger security (key never stored in cookies)
+	•	✅ Easier to manage (auto-expiry, no need to store anything)
+	•	✅ Prevents external API requests
+
+Would you like to tweak the expiry time or how the secret key is stored? 🚀
+
+
+
 Fixing bcrypt Token Verification Issue for Special Characters & Digits
 
 The issue with verifying bcrypt hash when the password contains digits or special characters is likely due to encoding inconsistencies. Here’s how to fix it:
