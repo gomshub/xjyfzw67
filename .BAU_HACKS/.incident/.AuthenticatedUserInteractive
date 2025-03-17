@@ -1,4 +1,312 @@
 
+Below is a complete example where an interactive secret token is generated on a per‑user basis (and never expires) and is used to authorize subsequent API calls. Only users who access the interactive service (via the rendered HTML page) will receive this token. All later API calls (update comment, resolve status, refresh table) must include both the username and the secret token in headers.
+
+If an external caller tries to invoke these endpoints without the correct token (or without having first accessed the interactive page), the request is rejected.
+
+⸻
+
+1. Flask App (app.py)
+
+from flask import Flask, request, render_template, jsonify
+import os
+import bcrypt
+import json
+from functools import wraps
+
+app = Flask(__name__)
+app.secret_key = os.urandom(24)
+
+# Load user tokens from an environment variable (JSON string)
+# Example env variable USER_AUTH_TOKENS:
+# {
+#    "user1": { "secret": "$2b$12$abc...", "api_token": "token1" },
+#    "user2": { "secret": "$2b$12$def...", "api_token": "token2" }
+# }
+USER_TOKENS = json.loads(os.getenv("USER_AUTH_TOKENS", "{}"))
+
+# Global dictionary to store interactive secret tokens per user.
+INTERACTIVE_SECRETS = {}  # key: username, value: secret token (hex string)
+
+def verify_token(username, provided_token):
+    """
+    Verify the provided plaintext token against the stored bcrypt hash.
+    The stored hash is expected to be the value of "secret" for the user.
+    """
+    # Extract only the stored bcrypt hash for this user
+    user_data = USER_TOKENS.get(username)
+    if not user_data:
+        app.logger.warning(f"Token not found for user: {username}")
+        return False
+    stored_hash = user_data.get("secret")
+    try:
+        return bcrypt.checkpw(provided_token.encode("utf-8"), stored_hash.encode("utf-8"))
+    except Exception as e:
+        app.logger.error(f"Error verifying token for {username}: {e}")
+        return False
+
+@app.route('/interactive_jira', methods=['GET'])
+def interactive_jira():
+    """
+    Interactive service endpoint.
+    Expects a query parameter 'username' and an Authorization header in the form:
+       Bearer <plaintext_password>
+    If the provided password verifies against the stored bcrypt hash,
+    then a user-specific interactive secret token is generated (if not already) and
+    the interactive HTML page is rendered with that token.
+    """
+    username = request.args.get('username')
+    auth_header = request.headers.get("Authorization")
+    
+    if not username or not auth_header or not auth_header.startswith("Bearer "):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    provided_token = auth_header.split(" ")[1]
+    if not verify_token(username, provided_token):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    # Generate a user-specific interactive secret token (valid forever) if not exists.
+    if username not in INTERACTIVE_SECRETS:
+        INTERACTIVE_SECRETS[username] = os.urandom(16).hex()
+    interactive_token = INTERACTIVE_SECRETS[username]
+
+    return render_template("interactive.html", username=username, secret_key=interactive_token)
+
+def require_interactive_token(f):
+    """
+    Decorator that ensures subsequent API calls include:
+      - X-Interactive-User header (username)
+      - X-Interactive-Secret header matching the token generated for that user.
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        username = request.headers.get("X-Interactive-User")
+        provided_secret = request.headers.get("X-Interactive-Secret")
+        if not username or username not in INTERACTIVE_SECRETS:
+            return jsonify({"error": "Access denied: Missing user identifier"}), 403
+        if provided_secret != INTERACTIVE_SECRETS[username]:
+            return jsonify({"error": "Access denied: Invalid interactive token"}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+@app.route('/update_comment', methods=['POST'])
+@require_interactive_token
+def update_comment():
+    data = request.json
+    jira_number = data.get("jira_number")
+    comment = data.get("comment")
+    # Here you'd call your update_comment logic (e.g., update in JIRA/DB)
+    return jsonify({"message": f"Comment updated successfully for {jira_number}."}), 200
+
+@app.route('/resolve_status', methods=['POST'])
+@require_interactive_token
+def resolve_status():
+    data = request.json
+    jira_number = data.get("jira_number")
+    # Here you'd call your resolve_status logic (e.g., update in JIRA/DB)
+    return jsonify({"message": f"Issue {jira_number} resolved successfully."}), 200
+
+@app.route('/refresh_table', methods=['POST'])
+@require_interactive_token
+def refresh_table():
+    # Here you'd fetch the latest table data (e.g., from JIRA or DB)
+    # For demonstration, we return a dummy message.
+    return jsonify({"message": "Table refreshed successfully."}), 200
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    """
+    Logs out the interactive session for the user.
+    Expects X-Interactive-User header to identify which user's token to remove.
+    """
+    username = request.headers.get("X-Interactive-User")
+    if username in INTERACTIVE_SECRETS:
+        del INTERACTIVE_SECRETS[username]
+    return jsonify({"message": "Logged out successfully."}), 200
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+⸻
+
+2. HTML Template (templates/interactive.html)
+
+This template is rendered when the user accesses /interactive_jira?username=... after successful authentication. It includes buttons for updating comments, resolving issues, and refreshing the table. Each subsequent API call includes the interactive secret token and the username in headers.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>JIRA Interactive Service</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        button { margin: 5px; padding: 5px 10px; }
+        .collapsible {
+            background-color: #eee;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            width: 100%;
+            text-align: left;
+            font-size: 13px;
+            margin-bottom: 2px;
+            outline: none;
+        }
+        .collapsible:after {
+            content: '\002B';
+            float: right;
+            margin-left: 5px;
+        }
+        .collapsible.active:after {
+            content: "\2212";
+        }
+        .content {
+            display: none;
+            padding: 4px;
+            background-color: #f9f9f9;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+    </style>
+    <script>
+        // Store interactive secret token and username (passed from Flask)
+        const SECRET_KEY = "{{ secret_key }}";
+        const USERNAME = "{{ username }}";
+
+        async function apiCall(endpoint, data = {}) {
+            try {
+                const response = await fetch(endpoint, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-Interactive-User": USERNAME,
+                        "X-Interactive-Secret": SECRET_KEY
+                    },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                alert(result.message);
+                if (response.ok) {
+                    // Reload page to fetch updated data
+                    window.location.reload();
+                }
+            } catch (error) {
+                alert("Error: " + error);
+            }
+        }
+
+        function updateComment(jiraNumber) {
+            const comment = prompt("Enter your comment for " + jiraNumber + ":");
+            if (comment) {
+                apiCall("/update_comment", { jira_number: jiraNumber, comment: comment });
+            }
+        }
+
+        function resolveStatus(jiraNumber) {
+            if (confirm("Are you sure you want to resolve " + jiraNumber + "?")) {
+                apiCall("/resolve_status", { jira_number: jiraNumber });
+            }
+        }
+
+        function refreshTable() {
+            apiCall("/refresh_table");
+        }
+
+        // Collapsible behavior for comment sections
+        document.addEventListener("DOMContentLoaded", function(){
+            var coll = document.getElementsByClassName("collapsible");
+            for (var i = 0; i < coll.length; i++) {
+                coll[i].addEventListener("click", function() {
+                    this.classList.toggle("active");
+                    var content = this.nextElementSibling;
+                    if (content.style.display === "block") {
+                        content.style.display = "none";
+                    } else {
+                        content.style.display = "block";
+                    }
+                });
+            }
+        });
+    </script>
+</head>
+<body>
+    <h2>Welcome, {{ username }}!</h2>
+    <!-- Refresh button to reload the page and update the table -->
+    <button onclick="refreshTable()">Refresh Table</button>
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Summary</th>
+                <th>Actions</th>
+                <th>Comments</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Example hardcoded rows; in practice, generate rows dynamically -->
+            <tr>
+                <td>JIRA-123</td>
+                <td>Fix login issue</td>
+                <td>
+                    <button onclick="updateComment('JIRA-123')">Update Comment</button>
+                    <button onclick="resolveStatus('JIRA-123')">Resolve Status</button>
+                </td>
+                <td>
+                    <!-- Collapsible comment section -->
+                    <button type="button" class="collapsible">1. 2023-07-01 10:00 - Alice</button>
+                    <div class="content">
+                        <p>Initial comment text.</p>
+                    </div>
+                    <button type="button" class="collapsible">2. 2023-07-01 11:00 - Bob</button>
+                    <div class="content">
+                        <p>Follow-up comment text.</p>
+                    </div>
+                </td>
+            </tr>
+            <!-- Additional rows as needed -->
+        </tbody>
+    </table>
+</body>
+</html>
+
+
+
+⸻
+
+How It Works
+	1.	Login and Interactive Page Rendering:
+	•	A user accesses /interactive_jira?username=user1 with an Authorization header:
+Authorization: Bearer <plaintext_password>.
+	•	The app verifies the password against the bcrypt hash stored in the environment variable and, if valid, generates a user‑specific interactive secret token (stored in the global dictionary INTERACTIVE_SECRETS).
+	•	The interactive HTML page is rendered with {{ username }} and {{ secret_key }} passed in as template variables.
+	2.	Subsequent API Calls:
+	•	When the user clicks Update Comment, Resolve Status, or Refresh Table, the JavaScript function apiCall is invoked.
+	•	This function sends a POST request to the appropriate endpoint and includes two custom headers:
+	•	X-Interactive-User: The username
+	•	X-Interactive-Secret: The secret token generated during login
+	•	The decorator require_interactive_token checks that the provided secret matches the one stored in INTERACTIVE_SECRETS for that user. If it matches, the request is processed.
+	3.	No Session Expiration:
+	•	The token is generated once per user and is valid indefinitely (i.e. “valid for ever” as requested), until the server restarts or the user logs out.
+	4.	Logout:
+	•	A logout endpoint clears the token for that user.
+
+⸻
+
+Security Considerations
+	•	This approach relies on the secure distribution of the interactive secret token.
+	•	It is recommended to serve the app over HTTPS so that the secret token is transmitted securely.
+	•	In production, consider storing tokens in a persistent store (or use JWTs) if long-term validity is required.
+
+⸻
+
+This complete response provides the Flask routes, HTML template, and supporting code to enable an interactive service where each user receives their own secret token (valid indefinitely) that must be provided with subsequent API calls. Let me know if you need any further modifications!
+
+
+
 Yes, you can handle it without Flask sessions by using a temporary secret key (token) stored in the environment. Here’s how:
 
 ⸻
