@@ -1,4 +1,63 @@
 
+import requests
+import cx_Oracle
+import json
+from datetime import datetime
+
+# JIRA API Credentials
+JIRA_URL = "https://your-jira-instance.atlassian.net/rest/api/2/issue/"
+JIRA_USER = "your_username"
+JIRA_PASS = "your_password"
+
+# Oracle Database Connection
+DB_USER = "your_db_user"
+DB_PASS = "your_db_password"
+DB_DSN = "your_db_host:your_db_port/your_db_service"
+
+def get_jira_creation_date(issue_key):
+    """Fetch creation date from JIRA API"""
+    url = f"{JIRA_URL}{issue_key}"
+    response = requests.get(url, auth=(JIRA_USER, JIRA_PASS))
+    
+    if response.status_code == 200:
+        data = response.json()
+        created_datetime_str = data["fields"]["created"]
+        created_datetime = datetime.strptime(created_datetime_str, "%Y-%m-%dT%H:%M:%S.%f%z")
+
+        issue_date = created_datetime.date()
+        issue_time = created_datetime.time().strftime("%H:%M:%S")
+        return issue_date, issue_time
+    else:
+        print(f"Failed to fetch JIRA issue: {response.text}")
+        return None, None
+
+def store_creation_date(issue_key, issue_date, issue_time):
+    """Store creation date & time separately in Oracle DB"""
+    try:
+        conn = cx_Oracle.connect(DB_USER, DB_PASS, DB_DSN)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO jira_issues (jira_number, created_date, created_time)
+            VALUES (:1, TO_DATE(:2, 'YYYY-MM-DD'), TO_TIMESTAMP(:3, 'HH24:MI:SS'))
+        """, (issue_key, issue_date.strftime("%Y-%m-%d"), issue_time))
+
+        conn.commit()
+        print(f"Stored JIRA-{issue_key}: Date={issue_date}, Time={issue_time}")
+
+    except cx_Oracle.DatabaseError as e:
+        print("Database error:", e)
+    finally:
+        cursor.close()
+        conn.close()
+
+# Example: Fetch & Store for issue JIRA-123
+issue_key = "JIRA-123"
+date, time = get_jira_creation_date(issue_key)
+if date and time:
+    store_creation_date(issue_key, date, time)
+
+
 Below is a complete example where an interactive secret token is generated on a per‑user basis (and never expires) and is used to authorize subsequent API calls. Only users who access the interactive service (via the rendered HTML page) will receive this token. All later API calls (update comment, resolve status, refresh table) must include both the username and the secret token in headers.
 
 If an external caller tries to invoke these endpoints without the correct token (or without having first accessed the interactive page), the request is rejected.
