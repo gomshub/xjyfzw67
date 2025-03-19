@@ -1,0 +1,315 @@
+Below is a final solution that uses JWT for interactive authentication without expiration. In this setup, when a user logs into the interactive service, a new JWT is generated for that user (without an expiration field), and this token is used on subsequent AJAX calls. In your Kubernetes Deployment, you simply need to provide the JWT secret as an environment variable.
+
+⸻
+
+1. Flask App (app.py)
+
+import os
+import json
+import bcrypt
+import jwt  # PyJWT
+from flask import Flask, request, render_template, jsonify
+from functools import wraps
+
+app = Flask(__name__)
+app.secret_key = os.urandom(24)  # Not used for JWT, but required for sessions if needed
+
+# Load user tokens (hashed passwords and API tokens) from an environment variable.
+# Expected format example:
+# {
+#    "user1": { "secret": "$2b$12$abc...", "api_token": "token1" },
+#    "user2": { "secret": "$2b$12$def...", "api_token": "token2" }
+# }
+USER_TOKENS = json.loads(os.getenv("USER_AUTH_TOKENS", "{}"))
+
+# JWT secret (set this in your deployment environment)
+JWT_SECRET = os.getenv("JWT_SECRET", "default_jwt_secret")
+JWT_ALGORITHM = "HS256"
+
+def verify_token(username, provided_token):
+    """
+    Verify that the provided plaintext token matches the stored bcrypt hash.
+    """
+    user_data = USER_TOKENS.get(username)
+    if not user_data:
+        app.logger.warning(f"Token not found for user: {username}")
+        return False
+    stored_hash = user_data.get("secret")
+    try:
+        return bcrypt.checkpw(provided_token.encode("utf-8"), stored_hash.encode("utf-8"))
+    except Exception as e:
+        app.logger.error(f"Error verifying token for {username}: {e}")
+        return False
+
+@app.route('/interactive_jira', methods=['GET'])
+def interactive_jira():
+    """
+    Interactive service endpoint.
+    Expects:
+      - Query parameter 'username'
+      - Authorization header in the form "Bearer <plaintext_password>"
+    If authentication passes, generate a JWT (without expiration) for that user and render the interactive page.
+    """
+    username = request.args.get('username')
+    auth_header = request.headers.get("Authorization")
+
+    if not username or not auth_header or not auth_header.startswith("Bearer "):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    provided_token = auth_header.split(" ")[1]
+    if not verify_token(username, provided_token):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    # Generate a JWT for the user without an expiration (not recommended for production unless you have other measures)
+    payload = {"username": username}
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    # If using PyJWT >= 2.x, token is a string; if bytes, decode it.
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
+
+    return render_template("interactive.html", username=username, secret_token=token)
+
+def require_jwt(f):
+    """
+    Decorator that checks that the request includes a valid JWT in header "X-Interactive-Token"
+    and that the token's username matches the header "X-Interactive-User".
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        username = request.headers.get("X-Interactive-User")
+        token = request.headers.get("X-Interactive-Token")
+        if not username or not token:
+            return jsonify({"error": "Missing interactive authentication headers"}), 403
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            if payload.get("username") != username:
+                return jsonify({"error": "Username mismatch in token"}), 403
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token expired"}), 403
+        except jwt.InvalidTokenError as e:
+            return jsonify({"error": f"Invalid token: {e}"}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+@app.route('/update_comment', methods=['POST', 'OPTIONS'])
+@require_jwt
+def update_comment():
+    data = request.json
+    jira_number = data.get("jira_number")
+    comment = data.get("comment")
+    if not jira_number or not comment:
+        return jsonify({"error": "Missing jira_number or comment"}), 400
+    # Here, add your logic to update comment in JIRA/DB.
+    return jsonify({"message": f"Comment updated for JIRA {jira_number}."}), 200
+
+@app.route('/resolve_status', methods=['POST', 'OPTIONS'])
+@require_jwt
+def resolve_status():
+    data = request.json
+    jira_number = data.get("jira_number")
+    if not jira_number:
+        return jsonify({"error": "Missing jira_number"}), 400
+    # Here, add your logic to resolve the JIRA issue.
+    return jsonify({"message": f"Issue {jira_number} resolved successfully."}), 200
+
+@app.route('/refresh_table', methods=['POST', 'OPTIONS'])
+@require_jwt
+def refresh_table():
+    # Here, add your logic to refresh the table (e.g., fetching latest data)
+    return jsonify({"message": "Table refreshed successfully."}), 200
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    # Since we don't use a session, just instruct the client to discard the token.
+    return jsonify({"message": "Please discard your token to log out."}), 200
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+⸻
+
+2. HTML Template (templates/interactive.html)
+
+This template is rendered after a successful login. It injects the username and the secret token (JWT) into JavaScript variables for subsequent AJAX calls.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>JIRA Interactive Service</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        button { margin: 5px; padding: 5px 10px; }
+        .collapsible {
+            background-color: #eee;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            width: 100%;
+            text-align: left;
+            font-size: 13px;
+            margin-bottom: 2px;
+            outline: none;
+        }
+        .collapsible:after {
+            content: '\002B';
+            float: right;
+            margin-left: 5px;
+        }
+        .collapsible.active:after {
+            content: "\2212";
+        }
+        .content {
+            display: none;
+            padding: 4px;
+            background-color: #f9f9f9;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+    </style>
+    <script>
+        // These values are injected by Flask
+        const SECRET_TOKEN = "{{ secret_token }}";
+        const USERNAME = "{{ username }}";
+
+        async function apiCall(endpoint, data = {}) {
+            try {
+                const response = await fetch(endpoint, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-Interactive-User": USERNAME,
+                        "X-Interactive-Token": SECRET_TOKEN
+                    },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                alert(result.message);
+                if (response.ok) {
+                    window.location.reload();
+                }
+            } catch (error) {
+                alert("Error: " + error);
+            }
+        }
+
+        function updateComment(jiraNumber) {
+            const comment = prompt("Enter your comment for " + jiraNumber + ":");
+            if (comment) {
+                apiCall("/update_comment", { jira_number: jiraNumber, comment: comment });
+            }
+        }
+
+        function resolveStatus(jiraNumber) {
+            if (confirm("Are you sure you want to resolve " + jiraNumber + "?")) {
+                apiCall("/resolve_status", { jira_number: jiraNumber });
+            }
+        }
+
+        function refreshTable() {
+            apiCall("/refresh_table");
+        }
+
+        document.addEventListener("DOMContentLoaded", function(){
+            var coll = document.getElementsByClassName("collapsible");
+            for (let i = 0; i < coll.length; i++) {
+                coll[i].addEventListener("click", function() {
+                    this.classList.toggle("active");
+                    let content = this.nextElementSibling;
+                    content.style.display = content.style.display === "block" ? "none" : "block";
+                });
+            }
+        });
+    </script>
+</head>
+<body>
+    <h2>Welcome, {{ username }}!</h2>
+    <button onclick="refreshTable()">Refresh Table</button>
+    <table>
+        <thead>
+            <tr>
+                <th>JIRA Number</th>
+                <th>Summary</th>
+                <th>Actions</th>
+                <th>Comments</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Example row; in production, rows would be generated dynamically -->
+            <tr>
+                <td>JIRA-123</td>
+                <td>Fix login issue</td>
+                <td>
+                    <button onclick="updateComment('JIRA-123')">Update Comment</button>
+                    <button onclick="resolveStatus('JIRA-123')">Resolve Status</button>
+                </td>
+                <td>
+                    <button class="collapsible">1. 2023-07-01 10:00 - Alice</button>
+                    <div class="content">
+                        <p>Initial comment text.</p>
+                    </div>
+                    <button class="collapsible">2. 2023-07-01 11:00 - Bob</button>
+                    <div class="content">
+                        <p>Follow-up comment text.</p>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>
+
+
+
+⸻
+
+3. Deployment Considerations
+
+In your Kubernetes Deployment YAML, set the environment variables for USER_AUTH_TOKENS and JWT_SECRET. For example:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-interactive
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jira-interactive
+  template:
+    metadata:
+      labels:
+        app: jira-interactive
+    spec:
+      containers:
+        - name: jira-interactive
+          image: yourrepo/jira-interactive:latest
+          env:
+            - name: USER_AUTH_TOKENS
+              value: '{"user1": {"secret": "$2b$12$abc...", "api_token": "token1"}, "user2": {"secret": "$2b$12$def...", "api_token": "token2"}}'
+            - name: JWT_SECRET
+              value: "your_jwt_secret"
+          ports:
+            - containerPort: 5000
+
+
+
+⸻
+
+Summary
+	•	Interactive Login:
+The user logs in via /interactive_jira?username=... with an Authorization header. If authentication passes (via bcrypt), a JWT token (without expiration) is generated and passed to the HTML template.
+	•	Subsequent Requests:
+All subsequent AJAX requests (update_comment, resolve_status, refresh_table) include headers:
+	•	X-Interactive-User: the username
+	•	X-Interactive-Token: the generated JWT token
+The custom decorator (@require_jwt) verifies the token for that user.
+	•	Deployment:
+Set USER_AUTH_TOKENS (a JSON string) and JWT_SECRET as environment variables in your Kubernetes Deployment.
+
+This approach ensures that each user gets their own permanent interactive token without needing Flask sessions, and subsequent requests require the correct token in headers. Let me know if you need further modifications!
