@@ -1,4 +1,146 @@
 
+Yes, environment variables reset when the container restarts. Since you want the interactive user token to persist forever, you need an external storage mechanism.
+
+Solution Options:
+	1.	Store Tokens in a Kubernetes Secret or ConfigMap (Best for Kubernetes)
+	2.	Use a Redis Store (Best for distributed systems)
+	3.	Store in a Database (PostgreSQL/MySQL) (For long-term storage)
+
+⸻
+
+Option 1: Persist in a Kubernetes Secret
+
+Use a Kubernetes Secret to store USER_TOKENS, ensuring it persists even after a restart.
+
+Step 1: Create a Kubernetes Secret
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: user-tokens-secret
+type: Opaque
+data:
+  USER_TOKENS: e30=  # "{}" (empty JSON) base64 encoded
+
+Step 2: Mount Secret in Your Flask Deployment
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interactive-service
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: interactive-service
+          image: your-image:latest
+          env:
+            - name: USER_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: user-tokens-secret
+                  key: USER_TOKENS
+
+Step 3: Update Secret in Flask Code
+
+Modify the Flask app to read and write from this secret:
+
+def load_user_tokens():
+    """Load user tokens from Kubernetes Secret (if available)."""
+    user_tokens_json = os.getenv("USER_TOKENS", "{}")
+    return json.loads(base64.b64decode(user_tokens_json).decode()) if user_tokens_json else {}
+
+def save_user_tokens(tokens):
+    """Update the Kubernetes Secret dynamically."""
+    encoded_tokens = base64.b64encode(json.dumps(tokens).encode()).decode()
+    os.system(f'kubectl patch secret user-tokens-secret --type="merge" -p \'{{"data": {{"USER_TOKENS": "{encoded_tokens}"}}}}\'')
+
+USER_TOKENS = load_user_tokens()
+
+	•	This ensures that tokens persist in Kubernetes Secrets, even after restarts.
+
+⸻
+
+Option 2: Use Redis for Persistent Storage
+
+Instead of using environment variables, store user tokens in Redis.
+
+Install Redis in Kubernetes
+
+helm install redis bitnami/redis --set auth.enabled=false
+
+This deploys a Redis instance without authentication.
+
+Update Flask Code to Use Redis
+
+import redis
+
+redis_client = redis.StrictRedis(host="redis", port=6379, decode_responses=True)
+
+def load_user_tokens():
+    """Load user tokens from Redis."""
+    user_tokens_json = redis_client.get("USER_TOKENS")
+    return json.loads(user_tokens_json) if user_tokens_json else {}
+
+def save_user_tokens(tokens):
+    """Save user tokens in Redis."""
+    redis_client.set("USER_TOKENS", json.dumps(tokens))
+
+	•	Tokens are stored in Redis and persist across container restarts.
+
+⸻
+
+Option 3: Store Tokens in a Database
+
+If you already have PostgreSQL/MySQL, store the tokens in a table.
+
+Create a Table
+
+CREATE TABLE user_tokens (
+    username VARCHAR(255) PRIMARY KEY,
+    token TEXT NOT NULL
+);
+
+Update Flask Code
+
+import psycopg2
+
+conn = psycopg2.connect("dbname=mydb user=myuser password=mypass host=mydb-host")
+cursor = conn.cursor()
+
+def load_user_tokens():
+    """Load user tokens from PostgreSQL."""
+    cursor.execute("SELECT username, token FROM user_tokens")
+    return {row[0]: row[1] for row in cursor.fetchall()}
+
+def save_user_tokens(tokens):
+    """Save user tokens in PostgreSQL."""
+    for user, token in tokens.items():
+        cursor.execute(
+            "INSERT INTO user_tokens (username, token) VALUES (%s, %s) ON CONFLICT (username) DO UPDATE SET token = EXCLUDED.token",
+            (user, token),
+        )
+    conn.commit()
+
+	•	Tokens persist across restarts in PostgreSQL.
+
+⸻
+
+Best Choice?
+
+Storage	Persistence	Scalability	Ease of Use
+Kubernetes Secret	✅ Yes (persists in cluster)	❌ Not scalable	✅ Easy
+Redis	✅ Yes (persists if configured)	✅ Scales well	✅ Medium
+PostgreSQL/MySQL	✅ Yes (persists)	✅ Scales well	❌ More setup
+
+	•	Use Kubernetes Secret → If only needed inside Kubernetes.
+	•	Use Redis → If you want speed and scalability.
+	•	Use PostgreSQL/MySQL → If you already have a DB.
+
+Do you want to go with Kubernetes Secret, Redis, or PostgreSQL?
+
+=#
 If you want to store the user-specific JWT secrets in an environment variable, here’s the best approach:
 
 Solution: Store User Tokens in an Environment Variable
