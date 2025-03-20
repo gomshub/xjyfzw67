@@ -1,3 +1,167 @@
+
+If you want to store the user-specific JWT secrets in an environment variable, here’s the best approach:
+
+Solution: Store User Tokens in an Environment Variable
+
+Since environment variables do not persist across container restarts, you need a way to reload the stored user tokens on startup. We can achieve this by:
+	1.	Storing the user-specific secrets in a single JSON string inside an environment variable (e.g., USER_TOKENS).
+	2.	Updating this variable dynamically when a new user logs in.
+	3.	Ensuring the variable is retained across application restarts using Kubernetes ConfigMap or Secret.
+
+⸻
+
+Updated Flask Code to Use ENV Variable for Tokens
+
+import os
+import jwt
+import json
+import secrets
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+# Default value for user tokens (stored as JSON in ENV variable)
+USER_TOKENS_ENV = os.getenv("USER_TOKENS", "{}")
+
+def load_user_tokens():
+    """Load user-specific secrets from environment variable."""
+    try:
+        return json.loads(USER_TOKENS_ENV)  # Convert JSON string to dict
+    except json.JSONDecodeError:
+        return {}
+
+def save_user_tokens(tokens):
+    """Save user-specific secrets back to environment variable."""
+    os.environ["USER_TOKENS"] = json.dumps(tokens)  # Store as JSON string
+
+USER_TOKENS = load_user_tokens()
+
+@app.route("/generate_token", methods=["POST"])
+def generate_token():
+    data = request.json
+    username = data.get("username")
+
+    if not username:
+        return jsonify({"error": "Username is required"}), 400
+
+    # Generate a unique secret for this user if not already present
+    if username not in USER_TOKENS:
+        USER_TOKENS[username] = secrets.token_hex(32)  # 256-bit random secret
+        save_user_tokens(USER_TOKENS)  # Save to environment variable
+
+    user_secret = USER_TOKENS[username]
+
+    # Generate JWT token with no expiration
+    token = jwt.encode({"username": username}, user_secret, algorithm="HS256")
+
+    return jsonify({"token": token})
+
+@app.route("/verify_token", methods=["POST"])
+def verify_token():
+    data = request.json
+    username = data.get("username")
+    token = data.get("token")
+
+    if not username or not token:
+        return jsonify({"error": "Username and token are required"}), 400
+
+    user_secret = USER_TOKENS.get(username)
+
+    if not user_secret:
+        return jsonify({"error": "User secret not found"}), 403
+
+    try:
+        decoded = jwt.decode(token, user_secret, algorithms=["HS256"])
+        if decoded.get("username") == username:
+            return jsonify({"message": "Token is valid"})
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Invalid token"}), 403
+
+    return jsonify({"error": "Authentication failed"}), 403
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+
+
+⸻
+
+How This Works
+	1.	First Login → Generate Token
+	•	When a user logs in, a unique secret is generated and stored inside the USER_TOKENS environment variable as a JSON string.
+	•	A JWT token is generated using this secret and returned.
+	2.	Subsequent Requests → Validate Token
+	•	The user sends the JWT with each request.
+	•	The server verifies it using the user-specific secret.
+	3.	Token Never Expires
+	•	Since no exp (expiration) is added, the token remains valid indefinitely.
+	4.	Secrets Persist in Kubernetes
+	•	Use a Kubernetes ConfigMap or Secret to store USER_TOKENS persistently.
+
+⸻
+
+Making It Persistent in Kubernetes
+
+Since environment variables reset on pod restarts, you must use a Kubernetes ConfigMap or Secret:
+
+A. Using Kubernetes ConfigMap for Tokens
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-tokens-config
+data:
+  USER_TOKENS: "{}"
+
+B. Mount It in Deployment
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interactive-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: interactive-service
+  template:
+    metadata:
+      labels:
+        app: interactive-service
+    spec:
+      containers:
+      - name: interactive-service
+        image: your-image:latest
+        env:
+        - name: USER_TOKENS
+          valueFrom:
+            configMapKeyRef:
+              name: user-tokens-config
+              key: USER_TOKENS
+
+
+
+⸻
+
+Will It Expire on Container Restart?
+	•	By Default: Yes.
+Since os.environ resets on restart, tokens will be lost.
+	•	Solution: Use Kubernetes ConfigMap or Secret
+	•	If you store USER_TOKENS in a Kubernetes ConfigMap/Secret, it will persist across restarts.
+	•	On restart, Flask loads it back from the ConfigMap.
+
+⸻
+
+Final Notes
+
+✅ Each user gets a unique token
+✅ Tokens survive container restarts (via Kubernetes ConfigMap)
+✅ Session never expires
+✅ Only interactive service can issue tokens
+✅ No need for a global JWT_SECRET
+
+Would you like to store the tokens in an external Redis or database instead of a ConfigMap?
+
 Below is a final solution that uses JWT for interactive authentication without expiration. In this setup, when a user logs into the interactive service, a new JWT is generated for that user (without an expiration field), and this token is used on subsequent AJAX calls. In your Kubernetes Deployment, you simply need to provide the JWT secret as an environment variable.
 
 ⸻
