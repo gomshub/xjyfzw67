@@ -1,4 +1,284 @@
+Here’s everything in one response:
+	•	Flask routes with JWT-based authentication
+	•	Oracle DB configuration
+	•	AJAX-based HTML template for interactive service
 
+⸻
+
+1. Flask Application (routes.py)
+
+from flask import Flask, request, jsonify, render_template
+import jwt
+import jaydebeapi
+import os
+import datetime
+from functools import wraps
+
+app = Flask(__name__)
+
+# Oracle DB Configuration
+DB_CONFIG = {
+    "url": "jdbc:oracle:thin:@<HOST>:<PORT>/<DB_NAME>",
+    "driver": "oracle.jdbc.OracleDriver",
+    "jar_path": "/path/to/ojdbc8.jar",
+    "user": "your_db_user",
+    "password": "your_db_password"
+}
+
+# JWT Secret (generated per user and stored in DB)
+JWT_ALGORITHM = "HS256"
+
+# Connect to Oracle Database
+def get_db_connection():
+    return jaydebeapi.connect(
+        DB_CONFIG["driver"],
+        DB_CONFIG["url"],
+        [DB_CONFIG["user"], DB_CONFIG["password"]],
+        DB_CONFIG["jar_path"]
+    )
+
+# Get stored token from Oracle DB
+def get_stored_token(username):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT jwt_token FROM user_tokens WHERE username = ?", (username,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
+
+# Store generated token in Oracle DB
+def store_token(username, token):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "MERGE INTO user_tokens USING DUAL ON (username = ?) "
+        "WHEN MATCHED THEN UPDATE SET jwt_token = ? "
+        "WHEN NOT MATCHED THEN INSERT (username, jwt_token) VALUES (?, ?)",
+        (username, token, username, token)
+    )
+    conn.commit()
+    conn.close()
+
+# Decorator to require JWT authentication
+def require_jwt(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Missing or invalid Authorization header"}), 401
+
+        token = auth_header.split(" ")[1]
+
+        try:
+            payload = jwt.decode(token, get_stored_token(payload["username"]), algorithms=[JWT_ALGORITHM])
+            return f(*args, **kwargs)
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token expired"}), 403
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid token"}), 403
+
+    return wrapper
+
+# Interactive login to generate a new JWT per user
+@app.route('/interactive_login', methods=['POST'])
+def interactive_login():
+    data = request.json
+    username = data.get("username")
+
+    if not username:
+        return jsonify({"error": "Username required"}), 400
+
+    # Generate JWT
+    payload = {
+        "username": username,
+        "iat": datetime.datetime.utcnow(),
+    }
+    token = jwt.encode(payload, os.urandom(32).hex(), algorithm=JWT_ALGORITHM)
+
+    # Store token in Oracle DB
+    store_token(username, token)
+
+    return jsonify({"token": token})
+
+# Interactive page (renders HTML)
+@app.route('/interactive_service', methods=['GET'])
+def interactive_service():
+    return render_template("interactive.html")
+
+# Protected routes using require_jwt
+@app.route('/update_comment', methods=['POST'])
+@require_jwt
+def update_comment():
+    return jsonify({"message": "Comment updated"})
+
+@app.route('/resolve_status', methods=['POST'])
+@require_jwt
+def resolve_status():
+    return jsonify({"message": "Issue resolved"})
+
+@app.route('/refresh_table', methods=['GET'])
+@require_jwt
+def refresh_table():
+    return jsonify({"message": "Table refreshed"})
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+⸻
+
+2. Database Configuration (db_config.py)
+
+import jaydebeapi
+
+DB_CONFIG = {
+    "url": "jdbc:oracle:thin:@<HOST>:<PORT>/<DB_NAME>",
+    "driver": "oracle.jdbc.OracleDriver",
+    "jar_path": "/path/to/ojdbc8.jar",
+    "user": "your_db_user",
+    "password": "your_db_password"
+}
+
+def get_db_connection():
+    return jaydebeapi.connect(
+        DB_CONFIG["driver"],
+        DB_CONFIG["url"],
+        [DB_CONFIG["user"], DB_CONFIG["password"]],
+        DB_CONFIG["jar_path"]
+    )
+
+def setup_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Create user_tokens table if not exists
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_tokens (
+            username VARCHAR2(255) PRIMARY KEY,
+            jwt_token VARCHAR2(500)
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
+
+if __name__ == "__main__":
+    setup_db()
+
+
+
+⸻
+
+3. HTML Template (templates/interactive.html)
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Interactive Service</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+
+<h2>Interactive Service</h2>
+<button onclick="updateComment()">Update Comment</button>
+<button onclick="resolveStatus()">Resolve Issue</button>
+<button onclick="refreshTable()">Refresh Table</button>
+
+<script>
+    let token = localStorage.getItem("jwt_token");
+
+    function updateComment() {
+        $.ajax({
+            url: "/update_comment",
+            type: "POST",
+            headers: { "Authorization": "Bearer " + token },
+            success: function(response) {
+                alert(response.message);
+            },
+            error: function(xhr) {
+                alert("Error: " + xhr.responseJSON.error);
+            }
+        });
+    }
+
+    function resolveStatus() {
+        $.ajax({
+            url: "/resolve_status",
+            type: "POST",
+            headers: { "Authorization": "Bearer " + token },
+            success: function(response) {
+                alert(response.message);
+            },
+            error: function(xhr) {
+                alert("Error: " + xhr.responseJSON.error);
+            }
+        });
+    }
+
+    function refreshTable() {
+        $.ajax({
+            url: "/refresh_table",
+            type: "GET",
+            headers: { "Authorization": "Bearer " + token },
+            success: function(response) {
+                alert(response.message);
+            },
+            error: function(xhr) {
+                alert("Error: " + xhr.responseJSON.error);
+            }
+        });
+    }
+
+    // Simulate login and store JWT
+    function login() {
+        $.ajax({
+            url: "/interactive_login",
+            type: "POST",
+            contentType: "application/json",
+            data: JSON.stringify({ username: "test_user" }),
+            success: function(response) {
+                localStorage.setItem("jwt_token", response.token);
+                alert("Login successful, token stored!");
+            },
+            error: function(xhr) {
+                alert("Login failed: " + xhr.responseJSON.error);
+            }
+        });
+    }
+
+    login();  // Auto login for testing
+</script>
+
+</body>
+</html>
+
+
+
+⸻
+
+Final Summary
+
+✅ Flask routes:
+	•	/interactive_login: Generates a JWT for each user and stores it in Oracle.
+	•	/interactive_service: Renders an HTML page.
+	•	/update_comment, /resolve_status, /refresh_table: Require JWT authentication.
+
+✅ Database Configuration:
+	•	Oracle DB stores JWT tokens persistently.
+	•	db_config.py ensures the table exists.
+
+✅ Interactive HTML:
+	•	Uses AJAX with JWT in headers for subsequent requests.
+	•	Auto-login for testing.
+
+✅ JWT Persistence:
+	•	Stored in Oracle DB (remains valid even if the container restarts).
+	•	No expiry (unless manually revoked).
+
+Would you like any modifications?
+
+=#=#
 1. Storing JWT Token in Oracle DB via jaydebeapi
 
 Since you want to store JWT tokens persistently in Oracle DB and retrieve them for authentication in subsequent requests, follow these steps.
