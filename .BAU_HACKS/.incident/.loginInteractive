@@ -1,0 +1,451 @@
+
+curl -X POST "http://your-flask-url/generate_token" \
+     -H "Content-Type: application/json" \
+     -d '{"username": "testuser", "password": "testpassword"}'
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Interactive JIRA Service</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+
+    <!-- Login Form -->
+    <div id="login-form">
+        <h2>Login to JIRA Interactive Service</h2>
+        <input type="text" id="username" placeholder="Username">
+        <input type="password" id="password" placeholder="Password">
+        <button onclick="login()">Login</button>
+    </div>
+
+    <!-- Interactive Section (Initially Hidden) -->
+    <div id="interactive-section" style="display: none;">
+        <h2>JIRA Issues Table</h2>
+        <button onclick="refreshTable()">Refresh Table</button>
+        <table border="1">
+            <thead>
+                <tr>
+                    <th>JIRA ID</th>
+                    <th>Summary</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="jira-table-body">
+                <!-- JIRA Issues will be inserted here dynamically -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        function login() {
+            const username = $("#username").val();
+            const password = $("#password").val();
+
+            $.ajax({
+                url: "/generate_token",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ username, password }),
+                success: function(response) {
+                    localStorage.setItem("jwt_token", response.token);
+                    $("#login-form").hide();
+                    $("#interactive-section").show();
+                    refreshTable();  // Load JIRA table immediately after login
+                },
+                error: function(xhr) {
+                    alert("Login failed: " + xhr.responseJSON.error);
+                }
+            });
+        }
+
+        function refreshTable() {
+            const token = localStorage.getItem("jwt_token");
+            if (!token) {
+                alert("Not authenticated!");
+                return;
+            }
+
+            $.ajax({
+                url: "/get_jira_issues",
+                type: "GET",
+                headers: { "Authorization": "Bearer " + token },
+                success: function(response) {
+                    let tableBody = $("#jira-table-body");
+                    tableBody.empty();  // Clear previous data
+
+                    response.issues.forEach(issue => {
+                        tableBody.append(`
+                            <tr>
+                                <td>${issue.jira_id}</td>
+                                <td>${issue.summary}</td>
+                                <td>${issue.status}</td>
+                                <td>
+                                    <button onclick="updateComment('${issue.jira_id}')">Update Comment</button>
+                                    <button onclick="resolveIssue('${issue.jira_id}')">Resolve</button>
+                                </td>
+                            </tr>
+                        `);
+                    });
+                },
+                error: function(xhr) {
+                    alert("Error fetching JIRA issues: " + xhr.responseJSON.error);
+                }
+            });
+        }
+
+        function updateComment(jiraId) {
+            const token = localStorage.getItem("jwt_token");
+            let comment = prompt("Enter your comment:");
+
+            if (!comment) return;
+
+            $.ajax({
+                url: "/update_comment",
+                type: "POST",
+                contentType: "application/json",
+                headers: { "Authorization": "Bearer " + token },
+                data: JSON.stringify({ jira_id: jiraId, comment: comment }),
+                success: function(response) {
+                    alert("Comment updated successfully!");
+                    refreshTable();
+                },
+                error: function(xhr) {
+                    alert("Error updating comment: " + xhr.responseJSON.error);
+                }
+            });
+        }
+
+        function resolveIssue(jiraId) {
+            const token = localStorage.getItem("jwt_token");
+
+            $.ajax({
+                url: "/resolve_issue",
+                type: "POST",
+                contentType: "application/json",
+                headers: { "Authorization": "Bearer " + token },
+                data: JSON.stringify({ jira_id: jiraId }),
+                success: function(response) {
+                    alert("Issue resolved!");
+                    refreshTable();
+                },
+                error: function(xhr) {
+                    alert("Error resolving issue: " + xhr.responseJSON.error);
+                }
+            });
+        }
+
+        // Auto-login if JWT exists
+        $(document).ready(function() {
+            if (localStorage.getItem("jwt_token")) {
+                $("#login-form").hide();
+                $("#interactive-section").show();
+                refreshTable();
+            }
+        });
+    </script>
+
+</body>
+</html>
+
+
+
+
+import os
+import json
+import hmac
+import base64
+import hashlib
+import jwt
+from flask import Flask, request, jsonify, render_template
+
+app = Flask(__name__)
+
+# Configuration
+JWT_ALGORITHM = "HS256"
+HMAC_SECRET = os.getenv("HMAC_SECRET", "default_secret")  # Used for HMAC hashing
+USER_AUTH_TOKENS = json.loads(os.getenv("USER_AUTH_TOKENS", "{}"))  # Stored as Kube Secret
+
+
+def hmac_hash(value):
+    """HMAC-SHA256 hashing"""
+    return hmac.new(HMAC_SECRET.encode(), value.encode(), hashlib.sha256).hexdigest()
+
+
+@app.route("/hash_credentials", methods=["POST"])
+def hash_credentials():
+    """Hashes password and encodes JIRA API token using HMAC and updates the Kube secret"""
+    data = request.json
+    username = data.get("username")
+    password = data.get("password")
+    jira_api_token = data.get("jira_api_token")
+
+    if not username or not password or not jira_api_token:
+        return jsonify({"error": "Username, password, and JIRA API token are required"}), 400
+
+    hashed_password = hmac_hash(password)
+    encoded_jira_token = base64.b64encode(jira_api_token.encode()).decode()
+
+    # Store in Kubernetes secret (simulated here)
+    USER_AUTH_TOKENS[username] = {
+        "hashed_password": hashed_password,
+        "jira_api_token": encoded_jira_token,
+    }
+
+    # Normally, you would update the Kube Secret manually or via API
+    return jsonify({"message": "Credentials stored successfully"})
+
+
+@app.route("/generate_token", methods=["POST"])
+def generate_token():
+    """Generates a JWT token for interactive session"""
+    data = request.json
+    username = data.get("username")
+    password = data.get("password")
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    user_data = USER_AUTH_TOKENS.get(username)
+    if not user_data:
+        return jsonify({"error": "Invalid username"}), 401
+
+    stored_hash = user_data["hashed_password"]
+
+    if hmac_hash(password) != stored_hash:
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    token_payload = {"username": username}
+    token = jwt.encode(token_payload, HMAC_SECRET, algorithm=JWT_ALGORITHM)
+
+    return jsonify({"token": token})
+
+
+def require_jwt(f):
+    """Decorator to enforce JWT authentication"""
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Missing or invalid Authorization header"}), 401
+
+        token = auth_header.split(" ")[1]
+
+        try:
+            decoded = jwt.decode(token, HMAC_SECRET, algorithms=[JWT_ALGORITHM])
+            request.user = decoded["username"]
+            return f(*args, **kwargs)
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token has expired"}), 403
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid token"}), 403
+
+    return wrapper
+
+
+@app.route("/interactive", methods=["GET"])
+@require_jwt
+def interactive_service():
+    """Renders the interactive HTML page"""
+    return render_template("interactive.html")
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+Final Flow with Interactive Login Handling
+
+Since the interactive service is accessed via a curl POST request that returns an HTML page and CORS is enabled for handling static HTML, the login flow should be adjusted as follows:
+
+New Workflow:
+	1.	User accesses /interactive (without authentication initially)
+	•	interactive.html is served.
+	•	It contains a login form (JS triggers login via fetch to /generate_token).
+	•	The user does not need to be redirected away from this page.
+	2.	User logs in from the interactive page (interactive.html):
+	•	A fetch request is sent to /generate_token (POST with username & password).
+	•	If authentication is successful:
+	•	The JWT token is stored in localStorage.
+	•	The page reloads, and all subsequent requests (e.g., fetching JIRA data, updating comments, resolving issues) use this token.
+	3.	Subsequent Requests (require_jwt)
+	•	Every AJAX request made from interactive.html includes the JWT in headers.
+	•	require_jwt ensures that only authenticated users can perform operations.
+
+⸻
+
+Updated Implementation
+
+1️⃣ Flask Routes (routes.py)
+
+from flask import Flask, request, jsonify, render_template
+import os
+import jwt
+import hmac
+import hashlib
+import base64
+import json
+
+app = Flask(__name__)
+
+JWT_SECRET = os.getenv("JWT_SECRET", "default_jwt_secret")
+JWT_ALGORITHM = "HS256"
+USER_AUTH_TOKENS = json.loads(os.getenv("USER_AUTH_TOKENS", "{}"))  # Stored as Kube Secret JSON
+
+def hash_secret(secret):
+    """Generate an HMAC hash of the secret (used for both passwords & API tokens)."""
+    return hmac.new(JWT_SECRET.encode(), secret.encode(), hashlib.sha256).hexdigest()
+
+def verify_secret(provided_secret, stored_hash):
+    """Verify if the provided secret matches the stored hash."""
+    return hmac.compare_digest(stored_hash, hash_secret(provided_secret))
+
+@app.route('/generate_token', methods=['POST'])
+def generate_token():
+    """Authenticate user and generate a JWT token."""
+    data = request.json
+    username = data.get("username")
+    password = data.get("password")
+
+    if username not in USER_AUTH_TOKENS:
+        return jsonify({"error": "User not found"}), 403
+
+    stored_hash = USER_AUTH_TOKENS[username]["secret"]
+    if not verify_secret(password, stored_hash):
+        return jsonify({"error": "Invalid credentials"}), 403
+
+    # Generate JWT
+    token = jwt.encode({"username": username}, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jsonify({"token": token})
+
+def require_jwt(f):
+    """Decorator to ensure requests have a valid JWT."""
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Unauthorized"}), 403
+
+        token = auth_header.split(" ")[1]
+        try:
+            decoded = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            request.username = decoded["username"]
+            return f(*args, **kwargs)
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token expired"}), 403
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid token"}), 403
+
+    return wrapper
+
+@app.route('/interactive', methods=['GET'])
+def interactive_page():
+    """Serve the interactive HTML page."""
+    return render_template('interactive.html')
+
+@app.route('/secure_action', methods=['POST'])
+@require_jwt
+def secure_action():
+    """Example secured route."""
+    return jsonify({"message": f"Action performed by {request.username}"})
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+⸻
+
+2️⃣ Updated HTML Template (templates/interactive.html)
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Service</title>
+    <script>
+        async function login() {
+            const username = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
+
+            const response = await fetch("/generate_token", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, password })
+            });
+
+            const data = await response.json();
+            if (response.ok) {
+                localStorage.setItem("jwt_token", data.token);
+                document.getElementById("login-form").style.display = "none";
+                document.getElementById("content").style.display = "block";
+            } else {
+                alert("Login failed: " + data.error);
+            }
+        }
+
+        async function performSecureAction() {
+            const token = localStorage.getItem("jwt_token");
+            if (!token) {
+                alert("Not authenticated!");
+                return;
+            }
+
+            const response = await fetch("/secure_action", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + token }
+            });
+
+            const data = await response.json();
+            alert(data.message);
+        }
+    </script>
+</head>
+<body>
+    <div id="login-form">
+        <h2>Login</h2>
+        <input type="text" id="username" placeholder="Username">
+        <input type="password" id="password" placeholder="Password">
+        <button onclick="login()">Login</button>
+    </div>
+
+    <div id="content" style="display: none;">
+        <h2>Welcome to the Interactive Service</h2>
+        <button onclick="performSecureAction()">Perform Secure Action</button>
+    </div>
+</body>
+</html>
+
+
+
+⸻
+
+How It Works
+	1.	User opens /interactive
+	•	Login form is displayed (if JWT not in localStorage).
+	2.	User logs in from interactive.html
+	•	Calls /generate_token API.
+	•	If successful:
+	•	Stores JWT in localStorage.
+	•	Hides login form & displays interactive content.
+	3.	Subsequent Requests (require_jwt)
+	•	JWT is included in headers (Authorization: Bearer <token>).
+	•	Secured endpoints validate the token.
+	4.	Token is persistent
+	•	Stored in localStorage, so it remains valid unless the browser clears storage.
+
+⸻
+
+Key Enhancements
+
+✅ No Redirects: Login happens inside interactive.html.
+✅ JWT-Based Authentication: Secure & stateless.
+✅ HMAC for Hashing: Works across all environments (avoids bcrypt issues).
+✅ Kubernetes Secret Storage: All credentials stored securely in env vars, not files.
+✅ No CORS Issues: Since the login API is called from the same page.
+
+⸻
+
+Would you like any further refinements?
+
