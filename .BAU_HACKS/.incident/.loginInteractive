@@ -1,4 +1,63 @@
 
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Interactive Service</title>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+  <h2>Welcome to the Interactive Service</h2>
+  <button onclick="refreshTable()">Refresh Table</button>
+
+  <script>
+    // Call generate_token to get the JWT token for the user
+    function generateTokenAndStore() {
+      $.ajax({
+        url: "/generate_token",
+        type: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({ "username": "example_username", "password": "example_password" }),
+        success: function(response) {
+          // Store the JWT token in localStorage
+          localStorage.setItem("jwt_token", response.token);
+          console.log("Token stored successfully!");
+        },
+        error: function(xhr) {
+          alert("Error: " + xhr.responseJSON.error);
+        }
+      });
+    }
+
+    // Refresh table function using the JWT token
+    function refreshTable() {
+      const TOKEN = localStorage.getItem("jwt_token");
+
+      if (!TOKEN) {
+        alert("JWT token missing. Please log in again.");
+        return;
+      }
+
+      $.ajax({
+        url: "/get_jira_issues",
+        type: "GET",
+        headers: { "Authorization": "Bearer " + TOKEN },
+        success: function(response) {
+          alert("Table refreshed successfully!");
+        },
+        error: function(xhr) {
+          alert("Error: " + xhr.responseJSON.error);
+        }
+      });
+    }
+
+    // Generate token when the page loads
+    generateTokenAndStore();
+  </script>
+</body>
+</html>
+
+
+=#=#
 curl -X POST "http://your-flask-url/generate_token" \
      -H "Content-Type: application/json" \
      -d '{"username": "testuser", "password": "testpassword"}'
