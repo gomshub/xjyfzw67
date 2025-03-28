@@ -1,0 +1,9 @@
+Host gitdomain1
+    HostName gitdomain1.com
+    User git
+    IdentityFile ~/.ssh/id_rsa
+
+Host gitdomain2
+    HostName gitdomain2.com
+    User git
+    IdentityFile ~/.ssh/id_rsa
