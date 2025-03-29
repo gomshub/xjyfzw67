@@ -1,0 +1,285 @@
+
+Got it! Since the arguments for main.py change for each run, you need to pass them dynamically when executing the container.
+
+⸻
+
+Step 1: Build and Push Docker Image to Artifactory
+
+Use the same Dockerfile from before but modify the CMD to allow runtime arguments:
+
+FROM python:3.9  # Change to your required version  
+
+WORKDIR /app  
+
+COPY requirements.txt .  
+RUN pip install --no-cache-dir -r requirements.txt  
+
+COPY . .  
+
+ENTRYPOINT ["python", "main.py"]  # Allows runtime args to be passed
+
+Now, build and push the image:
+
+docker build -t <artifactory-url>/your-repo/python-app:latest .
+docker push <artifactory-url>/your-repo/python-app:latest
+
+
+
+⸻
+
+Step 2: Install Podman on Red Hat Linux
+
+Since Red Hat does not have Docker, install podman:
+
+sudo yum install -y podman
+
+
+
+⸻
+
+Step 3: Pull and Run the Image with Arguments
+	1.	Login to Artifactory (if required):
+
+podman login <artifactory-url> -u <username> -p <password>
+
+
+	2.	Pull the Docker image:
+
+podman pull <artifactory-url>/your-repo/python-app:latest
+
+
+	3.	Run the container with dynamic arguments:
+
+podman run --rm <artifactory-url>/your-repo/python-app:latest arg1 arg2 arg3
+
+Replace arg1 arg2 arg3 with the actual runtime arguments for main.py.
+
+⸻
+
+Example Usage:
+
+If main.py expects a file path and a flag, you can run:
+
+podman run --rm <artifactory-url>/your-repo/python-app:latest /data/input.json --verbose
+
+This ensures that each execution can have different runtime parameters.
+
+Let me know if you need further modifications!
+
+
+===
+Since your Python module uses git.io to download XSD files dynamically, you need to ensure the Red Hat system (where podman is running) can access git.io. Here’s how to do that:
+
+⸻
+
+1. Allow Network Access in Podman
+
+By default, Podman runs containers in a network-isolated environment. You may need to enable internet access.
+
+Solution: Use the Host Network or Ensure External Access
+
+Try running the container with network access:
+
+podman run --rm --net=host <artifactory-url>/your-repo/python-app:latest arg1 arg2
+
+	•	--net=host allows the container to use the host’s network, ensuring it can reach git.io.
+
+If this doesn’t work, check if your firewall is blocking access (see Step 3).
+
+⸻
+
+2. Install git Inside the Container
+
+If your Python module relies on git to download files, ensure git is installed inside the container.
+
+Modify your Dockerfile:
+
+FROM python:3.9
+
+WORKDIR /app
+
+# Install required packages including git
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+ENTRYPOINT ["python", "main.py"]
+
+Rebuild and push:
+
+docker build -t <artifactory-url>/your-repo/python-app:latest .
+docker push <artifactory-url>/your-repo/python-app:latest
+
+
+
+⸻
+
+3. Check Firewall & Proxy Settings on Red Hat
+
+If the container still cannot access git.io, check for firewall restrictions:
+	•	Check firewall rules:
+
+sudo firewall-cmd --list-all
+
+
+	•	Allow HTTP/HTTPS:
+
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --reload
+
+
+
+If your Red Hat system is behind a corporate proxy, set proxy settings inside the container:
+
+podman run --rm -e http_proxy=http://proxy.example.com:port -e https_proxy=http://proxy.example.com:port <artifactory-url>/your-repo/python-app:latest arg1 arg2
+
+
+
+⸻
+
+4. Test Network Connectivity
+
+Before running your Python module, test if the container can reach git.io:
+
+podman run --rm <artifactory-url>/your-repo/python-app:latest curl -I https://git.io
+
+If it fails, the issue is likely network-related (firewall, proxy, DNS, etc.).
+
+⸻
+
+Summary
+	•	Use --net=host in podman run for better network access.
+	•	Install git in the Docker image.
+	•	Check firewall and proxy settings on Red Hat.
+	•	Test connectivity using curl.
+
+Try these steps and let me know what happens!
+
+=====
+Using --net=host in Podman allows the container to use the host’s network stack, meaning it shares the same IP address and network interfaces as the Red Hat system. This is useful when your container needs direct internet access (e.g., downloading XSD files from git.io).
+
+⸻
+
+1. Run Podman with --net=host
+
+podman run --rm --net=host <artifactory-url>/your-repo/python-app:latest arg1 arg2
+
+This allows the container to:
+	•	Access the internet using the host’s network.
+	•	Avoid network isolation issues that might block access to git.io.
+	•	Work without additional network configurations.
+
+⸻
+
+2. Verify Network Access from Inside the Container
+
+Before running your Python module, test if the container can reach git.io:
+
+podman run --rm --net=host <artifactory-url>/your-repo/python-app:latest curl -I https://git.io
+
+If this command succeeds, your container has internet access.
+
+⸻
+
+3. When to Use --net=host?
+
+✅ Use --net=host if:
+	•	Your container needs direct access to external services (git.io, APIs, databases, etc.).
+	•	You are troubleshooting network access issues.
+
+❌ Do NOT use --net=host if:
+	•	Your container should be isolated from the host for security reasons.
+	•	You’re running multiple containers that might conflict on the same ports.
+
+⸻
+
+4. Alternative: Open Firewall Ports
+
+If --net=host isn’t an option due to security policies, try allowing outbound traffic in the Red Hat firewall:
+
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --reload
+
+
+
+⸻
+
+Final Test
+
+After setting up the network, run your container:
+
+podman run --rm --net=host <artifactory-url>/your-repo/python-app:latest arg1 arg2
+
+This ensures main.py can dynamically download XSD files from git.io.
+
+Let me know if you need further troubleshooting!
+
+======
+
+Yes, if firewall rules are managed at the VM level (rather than inside the Red Hat server), and outbound access to git.io is allowed from the VM, then all containers running on the Red Hat server will inherit this access.
+
+Why?
+	•	Podman containers use the host’s network by default (unless explicitly configured otherwise).
+	•	If the VM allows outbound internet access, the host OS (Red Hat) can reach git.io, meaning containers should also be able to reach it.
+
+⸻
+
+How to Test Internet Access from Containers?
+
+Once access is open at the VM level, verify that your Podman containers can reach git.io:
+
+1. Test from the Red Hat Host
+
+Run this command on the Red Hat server (outside any container):
+
+curl -I https://git.io
+
+✅ If you see a response (HTTP/200 or HTTP/301), the host has access to git.io.
+
+2. Test from Inside a Podman Container
+
+Run this in any Podman container:
+
+podman run --rm <artifactory-url>/your-repo/python-app:latest curl -I https://git.io
+
+✅ If this also works, containers have direct access to git.io.
+
+⸻
+
+What If Containers Still Can’t Access git.io?
+
+If containers fail but the host works, check these possible issues:
+	1.	Podman Rootless Mode:
+	•	If you’re running rootless Podman, networking might be restricted. Try running as root:
+
+sudo podman run --rm <image> curl -I https://git.io
+
+
+	2.	Podman’s Network Configuration
+	•	If using a custom Podman network, it may need NAT forwarding:
+
+sudo firewall-cmd --permanent --add-masquerade
+sudo firewall-cmd --reload
+
+
+	3.	Corporate Proxy (If Any)
+	•	If your environment requires a proxy, set it in Podman:
+
+podman run --rm -e http_proxy=http://proxy.example.com:port \
+                -e https_proxy=http://proxy.example.com:port \
+                <image> curl -I https://git.io
+
+
+
+⸻
+
+Final Answer
+
+✅ If the VM firewall allows outbound access to git.io, all containers on the Red Hat server should also have access unless additional network restrictions are applied inside Podman.
+
+Would you like help troubleshooting Podman networking further?
