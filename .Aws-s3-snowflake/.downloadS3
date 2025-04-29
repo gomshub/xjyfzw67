@@ -1,3 +1,118 @@
+
+Here’s the complete solution to return the converted file as a ZIP archive, split into two clean files:
+
+⸻
+
+1. api.py – Converts and zips the file in-memory
+
+# api.py
+
+import boto3
+import os
+import pandas as pd
+import io
+import zipfile
+
+s3 = boto3.client('s3')
+
+def download_and_zip_file(bucket_name, s3_key, as_original=True):
+    # Fetch metadata
+    metadata = s3.head_object(Bucket=bucket_name, Key=s3_key)['Metadata']
+    original_ext = metadata.get('original_extension')
+
+    if not original_ext:
+        raise ValueError("Missing 'original_extension' in metadata")
+
+    base_filename = os.path.basename(s3_key).replace('.parquet', '')
+    parquet_stream = io.BytesIO()
+    s3.download_fileobj(bucket_name, s3_key, parquet_stream)
+    parquet_stream.seek(0)
+
+    # Read parquet into DataFrame
+    df = pd.read_parquet(parquet_stream)
+
+    # Convert based on flag
+    if as_original:
+        ext = original_ext.lower()
+        output_filename = f"{base_filename}.{ext}"
+        content = convert_df_to_bytes(df, ext)
+    else:
+        output_filename = f"{base_filename}.csv"
+        content = df.to_csv(index=False).encode('utf-8')
+
+    # Write content to zip in memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(output_filename, content)
+
+    zip_buffer.seek(0)
+    return zip_buffer, f"{base_filename}.zip"
+
+
+def convert_df_to_bytes(df, ext):
+    if ext == 'csv':
+        return df.to_csv(index=False).encode('utf-8')
+    elif ext == 'xls':
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False)
+        buf.seek(0)
+        return buf.read()
+    elif ext == 'xml':
+        return df.to_xml(index=False).encode('utf-8')
+    elif ext in ['txt', 'out']:
+        return df.to_csv(index=False, sep='\t').encode('utf-8')
+    else:
+        raise ValueError(f"Unsupported original extension: {ext}")
+
+
+
+⸻
+
+2. app.py – Flask API that returns ZIP response
+
+# app.py
+
+from flask import Flask, request, Response, jsonify
+from api import download_and_zip_file
+
+app = Flask(__name__)
+
+@app.route('/download', methods=['GET'])
+def download_file():
+    bucket = request.args.get('bucket')
+    key = request.args.get('key')
+    as_original = request.args.get('as_original', 'true').lower() == 'true'
+
+    if not bucket or not key:
+        return jsonify({"error": "Missing 'bucket' or 'key' parameter"}), 400
+
+    try:
+        zip_buffer, zip_filename = download_and_zip_file(bucket, key, as_original)
+        return Response(
+            zip_buffer.getvalue(),
+            mimetype='application/zip',
+            headers={
+                "Content-Disposition": f"attachment; filename={zip_filename}"
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+⸻
+
+Example Request:
+
+curl "http://localhost:5000/download?bucket=my-bucket&key=abc/29-APR-2025/file1_xml.parquet&as_original=true" --output result.zip
+
+Let me know if you want to support batch downloads or multiple files in one ZIP.
+
+=#=#=#
 Absolutely! Here’s how you can split the code cleanly into app.py and api.py, with no use of send_file(), and using Response to stream the file from memory.
 
 ⸻
