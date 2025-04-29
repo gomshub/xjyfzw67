@@ -1,4 +1,127 @@
 
+Thanks! Here’s the enhanced version that:
+	•	Lists multiple Parquet files from a given S3 prefix.
+	•	Converts each to original file type or CSV.
+	•	Adds each converted file to a single in-memory ZIP.
+	•	Returns the ZIP to the client.
+
+⸻
+
+1. api.py – Multi-file zip from S3 prefix
+
+# api.py
+
+import boto3
+import os
+import pandas as pd
+import io
+import zipfile
+
+s3 = boto3.client('s3')
+
+def list_parquet_files(bucket_name, prefix):
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+    return [obj['Key'] for obj in response.get('Contents', []) if obj['Key'].endswith('.parquet')]
+
+
+def convert_df_to_bytes(df, ext):
+    if ext == 'csv':
+        return df.to_csv(index=False).encode('utf-8')
+    elif ext == 'xls':
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False)
+        buf.seek(0)
+        return buf.read()
+    elif ext == 'xml':
+        return df.to_xml(index=False).encode('utf-8')
+    elif ext in ['txt', 'out']:
+        return df.to_csv(index=False, sep='\t').encode('utf-8')
+    else:
+        raise ValueError(f"Unsupported extension: {ext}")
+
+
+def zip_converted_files(bucket_name, prefix, as_original=True):
+    zip_buffer = io.BytesIO()
+    files = list_parquet_files(bucket_name, prefix)
+
+    if not files:
+        raise Exception(f"No .parquet files found under {prefix}")
+
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for key in files:
+            # Get metadata and read parquet
+            metadata = s3.head_object(Bucket=bucket_name, Key=key)['Metadata']
+            original_ext = metadata.get('original_extension', 'csv').lower()
+
+            base_filename = os.path.basename(key).replace('.parquet', '')
+            filename = f"{base_filename}.{original_ext if as_original else 'csv'}"
+
+            parquet_stream = io.BytesIO()
+            s3.download_fileobj(bucket_name, key, parquet_stream)
+            parquet_stream.seek(0)
+
+            df = pd.read_parquet(parquet_stream)
+
+            if as_original:
+                content = convert_df_to_bytes(df, original_ext)
+            else:
+                content = df.to_csv(index=False).encode('utf-8')
+
+            zipf.writestr(filename, content)
+
+    zip_buffer.seek(0)
+    return zip_buffer, f"{prefix.strip('/').replace('/', '_')}_converted.zip"
+
+
+
+⸻
+
+2. app.py – Accepts S3 prefix and returns zipped result
+
+# app.py
+
+from flask import Flask, request, Response, jsonify
+from api import zip_converted_files
+
+app = Flask(__name__)
+
+@app.route('/download-zip', methods=['GET'])
+def download_zip():
+    bucket = request.args.get('bucket')
+    prefix = request.args.get('prefix')
+    as_original = request.args.get('as_original', 'true').lower() == 'true'
+
+    if not bucket or not prefix:
+        return jsonify({"error": "Missing 'bucket' or 'prefix' parameter"}), 400
+
+    try:
+        zip_buffer, zip_name = zip_converted_files(bucket, prefix, as_original)
+        return Response(
+            zip_buffer.getvalue(),
+            mimetype='application/zip',
+            headers={
+                "Content-Disposition": f"attachment; filename={zip_name}"
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+⸻
+
+Test it like this:
+
+curl "http://localhost:5000/download-zip?bucket=my-bucket&prefix=abc/29-APR-2025/&as_original=true" --output batch.zip
+
+Each .parquet file will be downloaded, converted, and zipped into batch.zip.
+
+Would you like to make this a POST endpoint with JSON body (e.g., to filter or select specific files)?
+
+==#=
 Here’s the complete solution to return the converted file as a ZIP archive, split into two clean files:
 
 ⸻
