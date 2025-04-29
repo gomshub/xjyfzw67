@@ -1,0 +1,115 @@
+Absolutely! Here’s how you can split the code cleanly into app.py and api.py, with no use of send_file(), and using Response to stream the file from memory.
+
+⸻
+
+api.py – Core logic to fetch, convert, and return file content and metadata
+
+# api.py
+
+import boto3
+import os
+import pandas as pd
+
+s3 = boto3.client('s3')
+
+def download_and_convert_file(bucket_name, s3_key, local_dir='/tmp', as_original=True):
+    metadata = s3.head_object(Bucket=bucket_name, Key=s3_key)['Metadata']
+    original_ext = metadata.get('original_extension')
+
+    if not original_ext:
+        raise ValueError("Missing 'original_extension' in metadata")
+
+    base_filename = os.path.basename(s3_key).replace('.parquet', '')
+    parquet_path = os.path.join(local_dir, f"{base_filename}.parquet")
+
+    s3.download_file(bucket_name, s3_key, parquet_path)
+    df = pd.read_parquet(parquet_path)
+
+    # Determine output format and convert
+    if as_original:
+        ext = original_ext.lower()
+        filename = f"{base_filename}.{ext}"
+        output_path = os.path.join(local_dir, filename)
+
+        if ext == 'csv':
+            df.to_csv(output_path, index=False)
+            mimetype = 'text/csv'
+        elif ext == 'xls':
+            df.to_excel(output_path, index=False)
+            mimetype = 'application/vnd.ms-excel'
+        elif ext == 'xml':
+            df.to_xml(output_path, index=False)
+            mimetype = 'application/xml'
+        elif ext in ['txt', 'out']:
+            df.to_csv(output_path, sep='\t', index=False)
+            mimetype = 'text/plain'
+        else:
+            raise ValueError(f"Unsupported extension: {ext}")
+    else:
+        filename = f"{base_filename}.csv"
+        output_path = os.path.join(local_dir, filename)
+        df.to_csv(output_path, index=False)
+        mimetype = 'text/csv'
+
+    # Read file content into memory
+    with open(output_path, 'rb') as f:
+        file_bytes = f.read()
+
+    return file_bytes, filename, mimetype
+
+
+
+⸻
+
+app.py – Flask app that calls the function and returns the response
+
+# app.py
+
+from flask import Flask, request, Response, jsonify
+from api import download_and_convert_file
+
+app = Flask(__name__)
+
+@app.route('/download', methods=['GET'])
+def download_file():
+    bucket = request.args.get('bucket')
+    key = request.args.get('key')
+    as_original = request.args.get('as_original', 'true').lower() == 'true'
+
+    if not bucket or not key:
+        return jsonify({"error": "Missing 'bucket' or 'key' parameter"}), 400
+
+    try:
+        file_bytes, filename, mimetype = download_and_convert_file(bucket, key, as_original=as_original)
+
+        return Response(
+            file_bytes,
+            mimetype=mimetype,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+⸻
+
+To Run:
+
+python app.py
+
+Example API Call:
+
+curl "http://localhost:5000/download?bucket=my-bucket&key=abc/29-APR-2025/file1_xml.parquet&as_original=true" --output file.xml
+
+
+
+⸻
+
+Let me know if you want to make this a POST API instead of GET with query params.
