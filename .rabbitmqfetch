@@ -1,4 +1,140 @@
 
+
+import pika
+import xml.etree.ElementTree as ET
+import hashlib
+import gzip
+from datetime import datetime
+import time
+import argparse
+import signal
+import sys
+
+# =================== CONFIGURABLE PARAMETERS ====================
+RABBITMQ_HOST = 'localhost'
+RABBITMQ_PORT = 5672
+RABBITMQ_USER = 'guest'
+RABBITMQ_PASSWORD = 'guest'
+RABBITMQ_VHOST = '/'
+QUEUE_NAME_PREFIX = 'temp_xml_queue_'  # will be suffixed randomly
+IDLE_TIMEOUT = 10   # seconds to wait before declaring "no more messages"
+POLL_INTERVAL = 0.5 # seconds between polling for messages
+# ===============================================================
+
+# Global state
+connection = None
+channel = None
+queue_name = None
+message_hashes = set()
+messages_root = ET.Element("Messages")
+total_received = 0
+
+def extract_messages_only(body):
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError as e:
+        print(f"Invalid XML, skipping: {e}")
+        return []
+
+    messages = []
+    if root.tag == "Message":
+        messages.append(root)
+    elif root.tag == "Messages":
+        messages.extend(root.findall("Message"))
+    else:
+        messages.extend(root.findall(".//Message"))
+
+    return messages
+
+def get_message_hash(elem):
+    return hashlib.sha256(ET.tostring(elem, encoding='utf-8')).hexdigest()
+
+def consume_messages(max_count=None):
+    global total_received
+    last_message_time = time.time()
+
+    print("\nPolling messages...")
+    while True:
+        method_frame, header_frame, body = channel.basic_get(queue=queue_name, auto_ack=True)
+
+        if method_frame:
+            messages = extract_messages_only(body)
+            for msg in messages:
+                msg_hash = get_message_hash(msg)
+                if msg_hash not in message_hashes:
+                    messages_root.append(msg)
+                    message_hashes.add(msg_hash)
+                    total_received += 1
+                    print(f"[{total_received}] Message ingested.")
+
+            last_message_time = time.time()
+
+            if max_count and total_received >= max_count:
+                print("Reached specified count. Stopping...")
+                break
+        else:
+            if not max_count and (time.time() - last_message_time > IDLE_TIMEOUT):
+                print("No more messages. Ending...")
+                break
+            time.sleep(POLL_INTERVAL)
+
+def compress_and_save_xml():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"messages_{total_received}_msgs_{timestamp}.xml.gz"
+    xml_bytes = ET.tostring(messages_root, encoding="utf-8", xml_declaration=True)
+
+    with gzip.open(filename, "wb") as f:
+        f.write(xml_bytes)
+
+    print(f"\nTotal messages ingested: {total_received}")
+    print(f"Compressed file saved to: {filename}")
+
+def cleanup_and_exit(signum=None, frame=None):
+    print("\nCleaning up...")
+    try:
+        if channel and queue_name:
+            channel.queue_delete(queue=queue_name)
+            print(f"Deleted temporary queue: {queue_name}")
+        if connection:
+            connection.close()
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+    compress_and_save_xml()
+    sys.exit(0)
+
+def main():
+    global connection, channel, queue_name
+
+    parser = argparse.ArgumentParser(description="Consume messages from a RabbitMQ queue and frame into compressed XML.")
+    parser.add_argument('--count', type=int, help="Max number of messages to ingest. Optional.")
+    args = parser.parse_args()
+
+    signal.signal(signal.SIGINT, cleanup_and_exit)
+    signal.signal(signal.SIGTERM, cleanup_and_exit)
+
+    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASSWORD)
+    params = pika.ConnectionParameters(
+        host=RABBITMQ_HOST,
+        port=RABBITMQ_PORT,
+        virtual_host=RABBITMQ_VHOST,
+        credentials=credentials
+    )
+
+    connection = pika.BlockingConnection(params)
+    channel = connection.channel()
+
+    result = channel.queue_declare(queue='', exclusive=True, auto_delete=True)
+    queue_name = result.method.queue
+    print(f"Created temporary queue: {queue_name}")
+
+    consume_messages(max_count=args.count)
+    cleanup_and_exit()
+
+if __name__ == "__main__":
+    main()
+
+
+=#=##
 import pika
 import xml.etree.ElementTree as ET
 from datetime import datetime
