@@ -1,3 +1,123 @@
+
+Great — let’s add compression support so the final XML is written as a .xml.gz file using Gzip.
+
+⸻
+
+Final Script (with .xml.gz compression)
+
+import pika
+import xml.etree.ElementTree as ET
+from datetime import datetime
+import time
+import argparse
+import gzip
+
+# RabbitMQ settings
+RABBITMQ_HOST = 'localhost'
+QUEUE_NAME = 'xml_queue'
+IDLE_TIMEOUT = 10  # seconds
+
+# Root of the output XML
+root = ET.Element("Messages")
+
+def wrap_message_with_metadata(body, routing_key):
+    try:
+        original_xml = ET.fromstring(body)
+    except ET.ParseError as e:
+        print(f"Skipping invalid XML: {e}")
+        return None
+
+    message_elem = ET.Element("Message")
+
+    # Metadata
+    meta = ET.SubElement(message_elem, "Metadata")
+    timestamp = ET.SubElement(meta, "Timestamp")
+    timestamp.text = datetime.utcnow().isoformat() + "Z"
+
+    rk_elem = ET.SubElement(meta, "RoutingKey")
+    rk_elem.text = routing_key or ""
+
+    # Payload
+    payload = ET.SubElement(message_elem, "Payload")
+    payload.append(original_xml)
+
+    return message_elem
+
+def consume_messages(max_count=None):
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+    channel = connection.channel()
+    channel.queue_declare(queue=QUEUE_NAME)
+
+    total_received = 0
+    last_message_time = time.time()
+
+    while True:
+        method_frame, header_frame, body = channel.basic_get(queue=QUEUE_NAME, auto_ack=True)
+
+        if method_frame:
+            routing_key = method_frame.routing_key
+            wrapped = wrap_message_with_metadata(body, routing_key)
+            if wrapped is not None:
+                root.append(wrapped)
+                total_received += 1
+                print(f"Received message #{total_received}")
+            last_message_time = time.time()
+
+            if max_count and total_received >= max_count:
+                print(f"Reached test limit of {max_count} messages.")
+                break
+        else:
+            if not max_count and time.time() - last_message_time > IDLE_TIMEOUT:
+                print("Queue idle. Stopping.")
+                break
+            time.sleep(0.1)
+
+    connection.close()
+    write_to_compressed_file(max_count)
+
+def write_to_compressed_file(count=None):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    mode = f"{count}_messages" if count else "all_messages"
+    filename = f"framed_{mode}_{timestamp}.xml.gz"
+
+    tree = ET.ElementTree(root)
+    xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+    with gzip.open(filename, "wb") as f:
+        f.write(xml_bytes)
+
+    print(f"Compressed XML saved to: {filename}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Consume XML messages from RabbitMQ and frame into compressed XML file.")
+    parser.add_argument('--count', type=int, help="Number of messages to read (test mode). Leave empty to consume all.")
+    args = parser.parse_args()
+
+    consume_messages(max_count=args.count)
+
+
+⸻
+
+Output
+	•	Output files will now be like:
+	•	framed_all_messages_20250513_XXXXXX.xml.gz
+	•	framed_10_messages_20250513_XXXXXX.xml.gz
+
+⸻
+
+Optional Add-ons:
+
+Would you like to:
+	•	Upload the .gz file to S3 automatically?
+	•	Also keep an uncompressed .xml copy for debugging?
+
+Just let me know and I’ll add it!
+
+
+
+=#=#=#
+
+
 Correct — in an init load scenario, your Python script pulls data from the DB, formats each row into XML, and either:
 	1.	Publishes each XML message to RabbitMQ (single-message mode), or
 	2.	Collects multiple rows and writes them into one large XML file (batch mode).
