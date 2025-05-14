@@ -1,0 +1,36 @@
+Yes, the Python code I provided:
+	•	Calculates the total size of the specified folder (prefix).
+	•	Recursively includes all subfolders under that prefix.
+	•	Counts all files (objects) within the folder and its subfolders.
+
+How it works:
+
+The line:
+
+for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+
+ensures that all objects with keys starting with the prefix (i.e., the folder path) are included — effectively covering the folder and all of its subfolders.
+
+⸻
+
+Example:
+
+If you call:
+
+get_folder_size('my-bucket', 'data/')
+
+And your S3 bucket has:
+
+data/file1.csv
+data/file2.csv
+data/subfolder1/file3.csv
+data/subfolder1/nested/file4.csv
+
+The script will:
+	•	Count all 4 files
+	•	Sum their sizes
+	•	Return total size and count
+
+⸻
+
+Would you like a version that dynamically discovers top-level folders in a bucket and prints sizes for each?
