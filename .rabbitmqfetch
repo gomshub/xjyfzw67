@@ -1,4 +1,225 @@
+Here is your complete Python script with:
+	•	Configurable queue name, vhost, host, etc.
+	•	File type (XML or JSON) parsing
+	•	Exchange and queue binding
+	•	Queue arguments (x-consumer, x-version, content-type)
+	•	Deduplication of messages
+	•	Automatic compression of final XML
+	•	Graceful shutdown with cleanup
 
+⸻
+
+✅ Full Script
+
+import pika
+import xml.etree.ElementTree as ET
+import hashlib
+import gzip
+import json
+from datetime import datetime
+import time
+import argparse
+import signal
+import sys
+
+# =================== CONFIGURATION ====================
+RABBITMQ_HOST = 'localhost'
+RABBITMQ_PORT = 5672
+RABBITMQ_USER = 'guest'
+RABBITMQ_PASSWORD = 'guest'
+RABBITMQ_VHOST = '/'
+
+EXCHANGE_NAME = 'my_exchange'
+EXCHANGE_TYPE = 'headers'  # 'direct', 'topic', 'fanout', 'headers'
+ROUTING_KEY = 'my.routing.key'  # Used if not using headers exchange
+
+FILE_TYPE = 'xml'  # 'xml' or 'json'
+IDLE_TIMEOUT = 10  # seconds with no messages to exit
+POLL_INTERVAL = 0.5  # polling interval for new messages
+
+QUEUE_ARGUMENTS = {
+    "x-consumer": "my-consumer",
+    "x-version": "v1.2",
+    "content-type": "application/xml"
+}
+
+BINDING_ARGUMENTS = {
+    "x-match": "all",
+    "x-consumer": "my-consumer",
+    "x-version": "v1.2",
+    "content-type": "application/xml"
+}
+# =======================================================
+
+connection = None
+channel = None
+queue_name = None
+message_hashes = set()
+messages_root = ET.Element("Messages")
+total_received = 0
+
+def extract_from_xml(body):
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError as e:
+        print(f"Invalid XML, skipping: {e}")
+        return []
+
+    messages = []
+    if root.tag == "Message":
+        messages.append(root)
+    elif root.tag == "Messages":
+        messages.extend(root.findall("Message"))
+    else:
+        messages.extend(root.findall(".//Message"))
+    return messages
+
+def extract_from_json(body):
+    try:
+        json_data = json.loads(body)
+    except json.JSONDecodeError as e:
+        print(f"Invalid JSON, skipping: {e}")
+        return []
+
+    content = json_data.get("message") or json_data.get("body") or json_data
+    message_elem = ET.Element("Message")
+    message_elem.text = json.dumps(content) if isinstance(content, (dict, list)) else str(content)
+    return [message_elem]
+
+def get_message_hash(elem):
+    return hashlib.sha256(ET.tostring(elem, encoding='utf-8')).hexdigest()
+
+def consume_messages(max_count=None):
+    global total_received
+    last_message_time = time.time()
+    print("\nPolling messages...")
+
+    while True:
+        method_frame, header_frame, body = channel.basic_get(queue=queue_name, auto_ack=True)
+
+        if method_frame:
+            try:
+                body_str = body.decode('utf-8')
+            except UnicodeDecodeError:
+                print("Non-UTF-8 message, skipping.")
+                continue
+
+            if FILE_TYPE == 'xml':
+                messages = extract_from_xml(body_str)
+            elif FILE_TYPE == 'json':
+                messages = extract_from_json(body_str)
+            else:
+                print(f"Unsupported FILE_TYPE: {FILE_TYPE}")
+                break
+
+            for msg in messages:
+                msg_hash = get_message_hash(msg)
+                if msg_hash not in message_hashes:
+                    messages_root.append(msg)
+                    message_hashes.add(msg_hash)
+                    total_received += 1
+                    print(f"[{total_received}] Message ingested.")
+
+            last_message_time = time.time()
+            if max_count and total_received >= max_count:
+                print("Reached specified count. Stopping...")
+                break
+        else:
+            if not max_count and (time.time() - last_message_time > IDLE_TIMEOUT):
+                print("No more messages. Ending...")
+                break
+            time.sleep(POLL_INTERVAL)
+
+def compress_and_save_xml():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"messages_{total_received}_msgs_{timestamp}.xml.gz"
+    xml_bytes = ET.tostring(messages_root, encoding="utf-8", xml_declaration=True)
+
+    with gzip.open(filename, "wb") as f:
+        f.write(xml_bytes)
+
+    print(f"\nTotal messages ingested: {total_received}")
+    print(f"Compressed file saved to: {filename}")
+
+def cleanup_and_exit(signum=None, frame=None):
+    print("\nCleaning up...")
+    try:
+        if channel and queue_name:
+            channel.queue_delete(queue=queue_name)
+            print(f"Deleted temporary queue: {queue_name}")
+        if connection:
+            connection.close()
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+    compress_and_save_xml()
+    sys.exit(0)
+
+def main():
+    global connection, channel, queue_name
+
+    parser = argparse.ArgumentParser(description="Consume messages from RabbitMQ and convert to compressed XML.")
+    parser.add_argument('--count', type=int, help="Max number of messages to ingest.")
+    args = parser.parse_args()
+
+    signal.signal(signal.SIGINT, cleanup_and_exit)
+    signal.signal(signal.SIGTERM, cleanup_and_exit)
+
+    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASSWORD)
+    params = pika.ConnectionParameters(
+        host=RABBITMQ_HOST,
+        port=RABBITMQ_PORT,
+        virtual_host=RABBITMQ_VHOST,
+        credentials=credentials
+    )
+
+    connection = pika.BlockingConnection(params)
+    channel = connection.channel()
+
+    # Declare exchange
+    channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type=EXCHANGE_TYPE, durable=True)
+
+    # Declare queue with arguments
+    result = channel.queue_declare(queue='', exclusive=True, auto_delete=True, arguments=QUEUE_ARGUMENTS)
+    queue_name = result.method.queue
+
+    # Bind with binding arguments (used in headers exchange)
+    if EXCHANGE_TYPE == "headers":
+        channel.queue_bind(exchange=EXCHANGE_NAME, queue=queue_name, arguments=BINDING_ARGUMENTS)
+    else:
+        channel.queue_bind(exchange=EXCHANGE_NAME, queue=queue_name, routing_key=ROUTING_KEY)
+
+    print(f"Queue '{queue_name}' bound to exchange '{EXCHANGE_NAME}' with routing key or headers.")
+
+    consume_messages(max_count=args.count)
+    cleanup_and_exit()
+
+if __name__ == "__main__":
+    main()
+
+
+⸻
+
+✅ To Run
+
+Basic run (auto-detects end):
+
+python ingest_rabbitmq.py
+
+Test run with count:
+
+python ingest_rabbitmq.py --count 50
+
+
+⸻
+
+Let me know if you want to:
+	•	Save as JSON instead of XML
+	•	Send acknowledgment manually
+	•	Push results to S3 or database after compression
+
+I’m happy to adapt this further!
+
+=#=#=
 
 import pika
 import xml.etree.ElementTree as ET
