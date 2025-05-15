@@ -1,3 +1,98 @@
+Perfect — since you already have a Flask service interacting with S3, you can simply extend it to add an endpoint like /folder-stats that takes a folder path (prefix) and returns:
+	•	Total number of files
+	•	Total size in bytes / MB
+	•	Average size per file
+
+Here’s a Flask method that integrates with Boto3 to get these details:
+
+⸻
+
+Prerequisites
+
+Make sure you already have:
+
+pip install boto3 flask
+
+
+⸻
+
+Flask Method to Get Folder Stats
+
+from flask import Flask, request, jsonify
+import boto3
+import os
+
+app = Flask(__name__)
+
+# Initialize Boto3 S3 client
+s3 = boto3.client('s3')
+
+@app.route('/folder-stats', methods=['GET'])
+def get_folder_stats():
+    bucket = request.args.get('bucket')
+    prefix = request.args.get('prefix')  # e.g., 'folder1/subfolder2/'
+
+    if not bucket or not prefix:
+        return jsonify({'error': 'Missing required query parameters: bucket and prefix'}), 400
+
+    total_size = 0
+    file_count = 0
+
+    paginator = s3.get_paginator('list_objects_v2')
+    pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
+
+    for page in pages:
+        if 'Contents' in page:
+            for obj in page['Contents']:
+                total_size += obj['Size']
+                file_count += 1
+
+    avg_size = total_size / file_count if file_count > 0 else 0
+
+    result = {
+        'bucket': bucket,
+        'prefix': prefix,
+        'file_count': file_count,
+        'total_size_bytes': total_size,
+        'total_size_mb': round(total_size / (1024 * 1024), 2),
+        'average_file_size_bytes': round(avg_size, 2)
+    }
+
+    return jsonify(result), 200
+
+
+⸻
+
+How to Use
+
+Start the Flask app and call:
+
+GET /folder-stats?bucket=my-bucket-name&prefix=my-folder/
+
+Example response:
+
+{
+  "bucket": "my-bucket-name",
+  "prefix": "my-folder/",
+  "file_count": 42,
+  "total_size_bytes": 10485760,
+  "total_size_mb": 10.0,
+  "average_file_size_bytes": 249661.9
+}
+
+
+⸻
+
+Optional Enhancements
+	•	Add recursive=true flag if you want to distinguish top-level vs deep counts
+	•	Add logging, caching, or authentication
+
+Would you like a version that returns sizes grouped by subfolders as well?
+
+
+#=#
+
+
 Yes, the Python code I provided:
 	•	Calculates the total size of the specified folder (prefix).
 	•	Recursively includes all subfolders under that prefix.
