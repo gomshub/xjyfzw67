@@ -1,0 +1,65 @@
+Here’s a single, self-contained Python script that:
+	1.	Reads an XML file with repeated headers.
+	2.	Removes repeated header blocks using regex.
+	3.	Writes the cleaned content to a new file.
+
+⸻
+
+✅ Full Script
+
+import re
+
+INPUT_FILE = "input_file.xml"
+OUTPUT_FILE = "cleaned_output.xml"
+
+def clean_repeated_headers(xml_text):
+    # Regex pattern to match repeated header block
+    pattern = re.compile(
+        r"""
+        <\?xml[^>]*\?>\s*            # <?xml ... ?>
+        <calendars>\s*               # <calendars>
+        <header[^>]*>\s*             # <header ...>
+        <version[^>]*>\s*            # <version ...>
+        <sequence[^>]*>\s*           # <sequence ...>
+        <exportTimestamp[^>]*>\s*    # <exportTimestamp ...>
+        <env[^>]*>\s*                # <env ...>
+        </header>\s*                 # </header>
+        """,
+        re.VERBOSE | re.DOTALL
+    )
+    return re.sub(pattern, "", xml_text).strip()
+
+def main():
+    try:
+        with open(INPUT_FILE, "r", encoding="utf-8") as f:
+            original_xml = f.read()
+
+        cleaned_xml = clean_repeated_headers(original_xml)
+
+        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+            f.write(cleaned_xml)
+
+        print(f"Cleaned XML written to '{OUTPUT_FILE}'")
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+if __name__ == "__main__":
+    main()
+
+
+⸻
+
+To Run:
+	1.	Save the script as clean_xml.py
+	2.	Put your input XML as input_file.xml in the same folder
+	3.	Run:
+
+python clean_xml.py
+
+Result: A cleaned version is saved as cleaned_output.xml.
+
+Let me know if you’d like:
+	•	To preserve one header block
+	•	To gzip the output
+	•	To run it on a folder of files automatically
