@@ -1,0 +1,375 @@
+Gotcha! You want to directly read and parse the output of nfs_utils.sh inside your Python Flask app without running the shell script during runtime.
+
+That means you want to pre-run nfs_utils.sh separately and have its output stored in a file (JSON or text), then your Flask app just loads/parses that file to get NFS sizes and counts.
+
+⸻
+
+Here’s how you can adjust the Flask app to:
+	•	Assume the NFS stats are pre-generated and saved in a JSON file like nfs_stats.json
+	•	The JSON structure maps each NFS subfolder path to { "size_gb": float, "files": int }
+	•	Flask reads that file, filters only selected NFS subfolders, sums sizes/counts, and uses that for calculations
+
+⸻
+
+Example nfs_stats.json content (you generate this separately by running nfs_utils.sh):
+
+{
+  "/mnt/nfs/logs": {"size_gb": 12.5, "files": 2500},
+  "/mnt/nfs/data": {"size_gb": 30.2, "files": 4800},
+  "/mnt/nfs/archive": {"size_gb": 8.1, "files": 1200}
+}
+
+
+⸻
+
+Updated Python snippet to read this JSON instead of running shell:
+
+import json
+
+def get_nfs_subfolder_stats_from_file(selected_folders, stats_file='nfs_stats.json'):
+    """
+    Reads NFS stats from a JSON file and sums up size and file count for selected folders.
+    """
+    try:
+        with open(stats_file, 'r') as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"Error loading NFS stats file: {e}")
+        return 0, 0
+
+    total_size_gb = 0
+    total_files = 0
+
+    for folder in selected_folders:
+        info = data.get(folder)
+        if info:
+            total_size_gb += info.get('size_gb', 0)
+            total_files += info.get('files', 0)
+
+    size_bytes = total_size_gb * (1024 ** 3)  # convert GB to bytes
+    return size_bytes, total_files
+
+
+⸻
+
+Replace this part in your Flask route:
+
+# Old:
+# nfs_size_bytes, nfs_objects = get_nfs_subfolder_stats(selected_nfs_subfolders)
+
+# New:
+nfs_size_bytes, nfs_objects = get_nfs_subfolder_stats_from_file(selected_nfs_subfolders)
+
+
+⸻
+
+Summary:
+	•	Run nfs_utils.sh offline or via a cron job to update nfs_stats.json regularly.
+	•	Flask app just reads nfs_stats.json and sums stats for selected NFS folders — no subprocess calls during request.
+	•	This approach is more efficient, secure, and scalable.
+
+⸻
+
+If you want, I can provide a full updated Flask app including this change. Just say the word!
+
+=#=
+
+Got it! Here’s a complete Flask app module in one single response that supports:
+	•	Multiple buckets (Cloudian and AWS S3 compatible)
+	•	Subfolder selection per bucket
+	•	Lifecycle tiers: Standard, Glacier, and Intelligent-Tiering
+	•	Generates AWS Pricing Calculator compatible JSON including tiered storage classes
+	•	Dashboard with form for selecting buckets, subfolders, and tiers
+	•	NFS support as well with subfolder selection
+	•	Download option for generated JSON
+
+⸻
+
+
+from flask import Flask, request, render_template_string, send_file
+import boto3
+import subprocess
+import json
+import os
+
+app = Flask(__name__)
+
+# Config: buckets and example subfolders
+BUCKETS = {
+    'cloudian-bucket-1': ['logs/', 'exports/', 'images/'],
+    'cloudian-bucket-2': ['backup/', 'archive/'],
+    'aws-s3-bucket': ['prod-data/', 'test-data/']
+}
+
+# Example NFS subfolders
+NFS_FOLDERS = ['/mnt/nfs/logs', '/mnt/nfs/data', '/mnt/nfs/archive']
+
+# AWS pricing tier multipliers (rough estimations for example)
+STORAGE_TIERS = {
+    'STANDARD': 1.0,
+    'GLACIER': 0.04,  # Glacier approx 4% of standard cost
+    'INTELLIGENT_TIERING': 0.9  # example discount multiplier
+}
+
+# -- Utility Functions --
+
+def get_s3_subfolder_stats(bucket, prefixes, endpoint_url=None, aws_access_key_id=None, aws_secret_access_key=None):
+    """
+    For each prefix in prefixes, sum up size and object count.
+    Supports custom endpoint (Cloudian) or None (AWS)
+    """
+    kwargs = {}
+    if endpoint_url:
+        kwargs.update({
+            'endpoint_url': endpoint_url,
+            'aws_access_key_id': aws_access_key_id,
+            'aws_secret_access_key': aws_secret_access_key,
+            'region_name': 'us-east-1'
+        })
+    s3 = boto3.client('s3', **kwargs)
+    
+    total_size = 0
+    object_count = 0
+    
+    for prefix in prefixes:
+        paginator = s3.get_paginator('list_objects_v2')
+        try:
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get('Contents', []):
+                    total_size += obj['Size']
+                    object_count += 1
+        except Exception as e:
+            print(f"Error accessing bucket {bucket} prefix {prefix}: {e}")
+    
+    return total_size, object_count
+
+
+def get_nfs_subfolder_stats(folders):
+    """
+    Call shell script to get total size in bytes and file count for NFS subfolders
+    """
+    if not folders:
+        return 0, 0
+    try:
+        output = subprocess.check_output(['bash', 'nfs_utils.sh'] + folders).decode().strip().split('\n')
+        size_gb = float(output[0])
+        count = int(output[1])
+        size_bytes = size_gb * (1024 ** 3)
+        return size_bytes, count
+    except Exception as e:
+        print(f"NFS stats error: {e}")
+        return 0, 0
+
+def generate_pricing_json(storage_by_tier, total_puts, total_gets):
+    """
+    Generates AWS Pricing Calculator JSON for S3 with tiered storage.
+    storage_by_tier = dict of tier -> size_in_gb, e.g. {'STANDARD': 100, 'GLACIER': 50}
+    """
+    def make_storage_component(tier, size_gb):
+        return {
+            "name": f"Amazon Simple Storage Service (S3) - {tier}",
+            "unit": "GB-Mo",
+            "quantity": size_gb,
+            "attributes": {
+                "storageClass": tier
+            }
+        }
+
+    def make_request_component(name, quantity):
+        return {
+            "name": f"Requests - {name}",
+            "unit": "Requests",
+            "quantity": quantity
+        }
+
+    components = []
+    for tier, size in storage_by_tier.items():
+        if size > 0:
+            components.append(make_storage_component(tier, size))
+
+    if total_puts > 0:
+        components.append(make_request_component("PUT, COPY, POST, LIST", total_puts))
+    if total_gets > 0:
+        components.append(make_request_component("GET, SELECT, and all other Requests", total_gets))
+
+    return {
+        "service": "Amazon Simple Storage Service",
+        "region": "us-east-1",
+        "estimate": {
+            "components": components
+        }
+    }
+
+
+# -- Flask Routes --
+
+HTML_TEMPLATE = """
+<!doctype html>
+<title>S3 Pricing Estimator Dashboard</title>
+<h1>S3 Pricing Estimator</h1>
+
+<form method="POST">
+  <h2>Select Buckets and Subfolders:</h2>
+  {% for bucket, folders in buckets.items() %}
+    <b>{{ bucket }}</b><br>
+    {% for folder in folders %}
+      <input type="checkbox" name="subfolders" value="{{ bucket }}::{{ folder }}"
+      {% if selected_subfolders and (bucket + '::' + folder) in selected_subfolders %} checked {% endif %}>
+      {{ folder }}<br>
+    {% endfor %}
+    <br>
+  {% endfor %}
+
+  <h2>Select NFS Subfolders:</h2>
+  {% for folder in nfs_folders %}
+    <input type="checkbox" name="nfs_subfolders" value="{{ folder }}"
+    {% if selected_nfs_subfolders and folder in selected_nfs_subfolders %} checked {% endif %}>
+    {{ folder }}<br>
+  {% endfor %}
+
+  <h2>Select Storage Tier Distribution (percent):</h2>
+  <label>Standard (%): <input type="number" name="tier_standard" min="0" max="100" value="{{ tiers.get('STANDARD', 100) }}"></label><br>
+  <label>Glacier (%): <input type="number" name="tier_glacier" min="0" max="100" value="{{ tiers.get('GLACIER', 0) }}"></label><br>
+  <label>Intelligent-Tiering (%): <input type="number" name="tier_intelligent" min="0" max="100" value="{{ tiers.get('INTELLIGENT_TIERING', 0) }}"></label><br>
+
+  <br>
+  <input type="submit" value="Generate Estimate">
+</form>
+
+{% if stats %}
+<h2>Estimate Results</h2>
+<p><b>Selected Cloudian/AWS Subfolders:</b> {{ selected_subfolders }}</p>
+<p>Cloudian/AWS Total Size: {{ stats.s3_size_gb }} GB ({{ stats.s3_objects }} objects)</p>
+
+<p><b>Selected NFS Subfolders:</b> {{ selected_nfs_subfolders }}</p>
+<p>NFS Total Size: {{ stats.nfs_size_gb }} GB ({{ stats.nfs_objects }} files)</p>
+
+<p><b>Combined Total Size:</b> {{ stats.total_gb }} GB</p>
+<p><b>PUT Requests:</b> {{ stats.put_requests }}</p>
+<p><b>GET Requests:</b> {{ stats.get_requests }}</p>
+
+<a href="/download-estimate">Download Pricing JSON</a>
+{% endif %}
+"""
+
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    selected_subfolders = []
+    selected_nfs_subfolders = []
+    tiers = {
+        'STANDARD': 100,
+        'GLACIER': 0,
+        'INTELLIGENT_TIERING': 0
+    }
+    stats = None
+
+    if request.method == 'POST':
+        # Collect selected S3/Cloudian subfolders
+        selected_subfolders = request.form.getlist('subfolders')
+        selected_nfs_subfolders = request.form.getlist('nfs_subfolders')
+
+        # Get tier distribution and normalize
+        try:
+            tiers['STANDARD'] = int(request.form.get('tier_standard', 100))
+            tiers['GLACIER'] = int(request.form.get('tier_glacier', 0))
+            tiers['INTELLIGENT_TIERING'] = int(request.form.get('tier_intelligent', 0))
+        except:
+            pass
+        total_percent = sum(tiers.values())
+        if total_percent == 0:
+            total_percent = 100
+            tiers['STANDARD'] = 100
+        for k in tiers:
+            tiers[k] = tiers[k] / total_percent
+
+        # Map subfolders by bucket
+        bucket_prefix_map = {}
+        for sf in selected_subfolders:
+            bucket, prefix = sf.split('::', 1)
+            bucket_prefix_map.setdefault(bucket, []).append(prefix)
+
+        # Fetch S3/Cloudian sizes & counts for selected prefixes
+        total_size_bytes = 0
+        total_objects = 0
+
+        for bucket, prefixes in bucket_prefix_map.items():
+            # For demo: simulate endpoint/keys only for cloudian buckets
+            if bucket.startswith('cloudian'):
+                endpoint_url = 'https://your-cloudian-endpoint.com'
+                aws_key = 'your_key'
+                aws_secret = 'your_secret'
+            else:
+                endpoint_url = None
+                aws_key = None
+                aws_secret = None
+
+            size_bytes, objects = get_s3_subfolder_stats(bucket, prefixes, endpoint_url, aws_key, aws_secret)
+            total_size_bytes += size_bytes
+            total_objects += objects
+
+        # Get NFS stats
+        nfs_size_bytes, nfs_objects = get_nfs_subfolder_stats(selected_nfs_subfolders)
+
+        combined_size_bytes = total_size_bytes + nfs_size_bytes
+        combined_gb = round(combined_size_bytes / (1024 ** 3), 2)
+
+        # Simple estimation for PUT/GET requests - can be adjusted or input by user
+        total_puts = total_objects + nfs_objects
+        total_gets = int(total_puts * 0.5)
+
+        # Distribute storage size by tiers
+        storage_by_tier = {}
+        for tier_name, fraction in tiers.items():
+            storage_by_tier[tier_name] = round(combined_gb * fraction, 2)
+
+        # Generate pricing JSON
+        estimate_json = generate_pricing_json(storage_by_tier, total_puts, total_gets)
+        os.makedirs("output", exist_ok=True)
+        with open("output/s3_estimate.json", "w") as f:
+            json.dump(estimate_json, f, indent=2)
+
+        stats = {
+            's3_size_gb': round(total_size_bytes / (1024 ** 3), 2),
+            's3_objects': total_objects,
+            'nfs_size_gb': round(nfs_size_bytes / (1024 ** 3), 2),
+            'nfs_objects': nfs_objects,
+            'total_gb': combined_gb,
+            'put_requests': total_puts,
+            'get_requests': total_gets
+        }
+
+    return render_template_string(HTML_TEMPLATE,
+                                  buckets=BUCKETS,
+                                  nfs_folders=NFS_FOLDERS,
+                                  stats=stats,
+                                  selected_subfolders=selected_subfolders,
+                                  selected_nfs_subfolders=selected_nfs_subfolders,
+                                  tiers=tiers)
+
+
+@app.route('/download-estimate')
+def download_estimate():
+    path = "output/s3_estimate.json"
+    if os.path.exists(path):
+        return send_file(path, as_attachment=True)
+    else:
+        return "Estimate file not found.", 404
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+
+⸻
+
+Additional notes:
+	•	nfs_utils.sh shell script must be available and executable; it should accept a list of NFS folders and output size in GB and file count (like the earlier example I gave).
+	•	Replace placeholders like 'your-cloudian-endpoint.com', 'your_key', 'your_secret' with your actual Cloudian credentials and endpoint.
+	•	The Flask dashboard lets you select multiple buckets and subfolders, plus NFS folders.
+	•	You specify % distribution of storage into Standard, Glacier, and Intelligent-Tiering (must add up to 100%, normalized automatically).
+	•	The pricing JSON output can be downloaded for import or further processing.
+	•	You can extend generate_pricing_json for more detailed AWS pricing components if needed.
+
+⸻
+
+If you want, I can also help you build the nfs_utils.sh script or a nicer frontend with React/JS or more detailed usage instructions!
