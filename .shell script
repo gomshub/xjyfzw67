@@ -1,4 +1,65 @@
 
+Got it! You want a single line per subfolder showing file type and size pairs, like this:
+
+Subfolder,Details
+/nfs/folder1,xml:120MB,csv:45MB,json:5MB
+/nfs/folder2,xml:80MB,csv:0MB,json:12MB
+
+
+⸻
+
+✅ One-Liner Format Shell Script
+
+#!/bin/bash
+
+# Usage: ./nfs_summary.sh /path/to/root_folder
+
+if [ -z "$1" ]; then
+  echo "Usage: $0 /path/to/root_folder"
+  exit 1
+fi
+
+ROOT_FOLDER="$1"
+FILE_TYPES=("xml" "csv" "json" "xls" "out")
+OUTPUT="nfs_filetype_summary.csv"
+
+# Write CSV header
+echo "Subfolder,Details" > "$OUTPUT"
+
+# Traverse subfolders and summarize file sizes
+find "$ROOT_FOLDER" -type d | while read -r subfolder; do
+  summary=""
+  for ext in "${FILE_TYPES[@]}"; do
+    size=$(find "$subfolder" -type f -iname "*.${ext}" -exec du -cm {} + 2>/dev/null | grep total$ | awk '{print $1}')
+    size=${size:-0}
+    summary+="${ext}:${size}MB,"
+  done
+  # Remove trailing comma
+  summary=${summary%,}
+  echo "$subfolder,$summary" >> "$OUTPUT"
+done
+
+echo "CSV summary created: $OUTPUT"
+
+
+⸻
+
+🔍 Example Output (nfs_filetype_summary.csv):
+
+Subfolder,Details
+/nfs/data/xmls,xml:120MB,csv:0MB,json:0MB,xls:0MB,out:0MB
+/nfs/data/csvs,xml:0MB,csv:50MB,json:0MB,xls:0MB,out:0MB
+
+
+⸻
+
+Let me know if you’d like:
+	•	Human-readable sizes (KB/MB/GB)
+	•	Exclude zero-size types
+	•	Include total size column per folder
+
+
+=#=#
 If the Python code generates an rc value by combining error codes in binary form (like 1, 10, 100, etc.), then converts it to decimal before returning it to the shell script, you can convert this decimal rc back to binary in the shell script and analyze each bit to detect individual errors.
 
 Here’s how to handle this:
