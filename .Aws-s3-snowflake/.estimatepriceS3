@@ -1,0 +1,72 @@
+import boto3
+
+def get_cloudian_client(endpoint_url, access_key, secret_key):
+    session = boto3.session.Session()
+    client = session.client(
+        's3',
+        endpoint_url=endpoint_url,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
+    return client
+
+def list_objects_recursive(client, bucket_name, prefix):
+    paginator = client.get_paginator('list_objects_v2')
+    total_size = 0
+    total_objects = 0
+
+    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+        for obj in page.get('Contents', []):
+            total_size += obj['Size']
+            total_objects += 1
+
+    return total_size, total_objects
+
+def estimate_aws_s3_sync_cost(total_size_bytes, total_objects, duration_months=1,
+                              storage_class='STANDARD'):
+    # Prices per GB per month (update as needed)
+    PRICE_PER_GB_STANDARD = 0.023
+    PRICE_PER_1000_PUT_REQUESTS = 0.005  # approx
+
+    size_gb = total_size_bytes / (1024 ** 3)
+    storage_cost = size_gb * PRICE_PER_GB_STANDARD * duration_months
+
+    put_requests_cost = (total_objects / 1000) * PRICE_PER_1000_PUT_REQUESTS
+
+    total_cost = storage_cost + put_requests_cost
+
+    return {
+        "storage_gb": round(size_gb, 2),
+        "total_objects": total_objects,
+        "storage_cost_usd": round(storage_cost, 2),
+        "put_requests_cost_usd": round(put_requests_cost, 2),
+        "total_cost_usd": round(total_cost, 2)
+    }
+
+if __name__ == "__main__":
+    # Your Cloudian endpoint and credentials
+    CLOUDIAN_ENDPOINT = "https://cloudian.example.com"
+    ACCESS_KEY = "your-access-key"
+    SECRET_KEY = "your-secret-key"
+    BUCKET_NAME = "your-bucket-name"
+    FOLDERS_TO_SYNC = ["folder1/", "folder2/subfolder/"]  # Add trailing slash for prefix
+    
+    client = get_cloudian_client(CLOUDIAN_ENDPOINT, ACCESS_KEY, SECRET_KEY)
+    
+    total_size_bytes = 0
+    total_objects = 0
+
+    for folder_prefix in FOLDERS_TO_SYNC:
+        size, count = list_objects_recursive(client, BUCKET_NAME, folder_prefix)
+        print(f"Folder '{folder_prefix}' total size: {size} bytes, objects: {count}")
+        total_size_bytes += size
+        total_objects += count
+
+    cost_estimate = estimate_aws_s3_sync_cost(total_size_bytes, total_objects)
+
+    print("\nEstimated AWS S3 Sync Costs:")
+    print(f"Storage (GB): {cost_estimate['storage_gb']}")
+    print(f"Number of objects (PUT requests): {cost_estimate['total_objects']}")
+    print(f"Storage cost (USD): ${cost_estimate['storage_cost_usd']}")
+    print(f"PUT requests cost (USD): ${cost_estimate['put_requests_cost_usd']}")
+    print(f"Total estimated cost (USD): ${cost_estimate['total_cost_usd']}")
