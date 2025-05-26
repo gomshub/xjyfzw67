@@ -1,0 +1,50 @@
+Thanks for the clarification — you're almost there.
+
+Based on what you said:
+
+> "DBA shared me a username and password for a new database created inside SQL connection"
+
+This strongly suggests that you're dealing with a **contained database user**, which **does allow** a password to be reset **per database**.
+
+---
+
+## ✅ What You Need to Do in DBeaver
+
+### 🔄 Reset password for a contained database user
+
+1. **Connect** to the SQL Server instance in DBeaver.
+2. In the **Database Navigator**, expand the connection and go to the **new database** (the one the DBA added the user to).
+3. Open a **new SQL Editor** for that database.
+4. Run the following command **in that database**:
+
+   ```sql
+   ALTER USER [YourUsername] WITH PASSWORD = 'NewStrongPasswordHere';
+   ```
+
+   Replace:
+
+   * `[YourUsername]` with the username your DBA gave you.
+   * `'NewStrongPasswordHere'` with the new password you want.
+
+---
+
+## 🧪 Optional: Confirm the user is contained
+
+If you're unsure and want to verify, run:
+
+```sql
+SELECT name, type_desc, authentication_type_desc
+FROM sys.database_principals
+WHERE name = 'YourUsername';
+```
+
+If `authentication_type_desc` returns `PASSWORD`, then it's a contained user — you're good to go.
+
+---
+
+## 🔐 Summary
+
+* You can **reset the password just for that database**, if it's a **contained user**.
+* Use `ALTER USER` — **not** `ALTER LOGIN`.
+
+Let me know the username (or if you want help checking containment mode), and I’ll give you an exact query.
