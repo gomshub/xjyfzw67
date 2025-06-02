@@ -1,3 +1,108 @@
+Here’s a complete Flask service that accepts:
+	•	bucket – Cloudian S3 bucket name
+	•	prefix – folder or subfolder path (with or without trailing slash)
+	•	years – how many years old the files should be (e.g., 3 or 5)
+
+It returns:
+	•	file count
+	•	total size (bytes and GB)
+	•	average file size
+
+⸻
+
+✅ Flask Service Code
+
+from flask import Flask, request, jsonify
+import boto3
+from datetime import datetime, timedelta
+
+app = Flask(__name__)
+
+# Cloudian S3 configuration
+CLOUDIAN_ENDPOINT = "https://cloudian.example.com"  # Replace with your endpoint
+ACCESS_KEY = "your-access-key"
+SECRET_KEY = "your-secret-key"
+
+def get_cloudian_client():
+    session = boto3.session.Session()
+    client = session.client(
+        's3',
+        endpoint_url=CLOUDIAN_ENDPOINT,
+        aws_access_key_id=ACCESS_KEY,
+        aws_secret_access_key=SECRET_KEY
+    )
+    return client
+
+def get_old_files_stats(client, bucket, prefix, older_than_years):
+    cutoff = datetime.utcnow() - timedelta(days=older_than_years * 365)
+    paginator = client.get_paginator('list_objects_v2')
+
+    total_size = 0
+    file_count = 0
+
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get('Contents', []):
+            if obj['LastModified'] < cutoff:
+                total_size += obj['Size']
+                file_count += 1
+
+    avg_size = total_size / file_count if file_count > 0 else 0
+
+    return {
+        "bucket": bucket,
+        "prefix": prefix,
+        "older_than_years": older_than_years,
+        "file_count": file_count,
+        "total_size_bytes": total_size,
+        "total_size_gb": round(total_size / (1024**3), 2),
+        "average_file_size_bytes": round(avg_size, 2),
+        "average_file_size_mb": round(avg_size / (1024**2), 2)
+    }
+
+@app.route('/cloudian/old-file-stats', methods=['GET'])
+def old_file_stats():
+    bucket = request.args.get('bucket')
+    prefix = request.args.get('prefix', '')
+    years = request.args.get('years', type=int)
+
+    if not bucket or years is None:
+        return jsonify({"error": "Missing required parameters: 'bucket' and 'years'"}), 400
+
+    try:
+        client = get_cloudian_client()
+        stats = get_old_files_stats(client, bucket, prefix, years)
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# To run the Flask app
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5001)
+
+
+⸻
+
+✅ Example Call (via curl or browser)
+
+curl "http://localhost:5001/cloudian/old-file-stats?bucket=my-bucket&prefix=data/archive/&years=5"
+
+Or open in browser:
+
+http://localhost:5001/cloudian/old-file-stats?bucket=my-bucket&prefix=data/archive/&years=5
+
+
+⸻
+
+🔒 Notes:
+	•	Your Cloudian bucket user must have s3:ListBucket permissions.
+	•	Use HTTPS + IAM key vault if deploying to prod.
+	•	You can easily export this to a dashboard or store the JSON result for further processing (e.g., pricing estimate, archiving, etc.).
+
+⸻
+
+Would you like a second endpoint that takes this output and estimates AWS S3 cost based on this data too?
+
+=#=#
 import boto3
 
 def get_cloudian_client(endpoint_url, access_key, secret_key):
