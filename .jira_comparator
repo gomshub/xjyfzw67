@@ -1,4 +1,135 @@
 
+Thanks for the clarification!
+
+You want a Bamboo-compatible shell script that:
+
+✅ Inputs:
+	1.	A comma-separated list of service names in a shell variable
+	2.	For each service:
+	•	Fetches intg, ctlq, prod release versions via ArgoCD actuator endpoint
+	•	Runs comparator_jira.jar to get Jira changes between:
+	•	intg → ctlq (for CTLQ release items)
+	•	ctlq → prod (for PROD release items)
+	•	Formats both Jira lists into a single HTML file
+	•	Sends the HTML content via email with:
+	•	Subject: <service_name> : Release Jira items
+
+⸻
+
+✅ Full Shell Script: release_email_pipeline.sh
+
+#!/bin/bash
+set -e
+
+# Define services list (comma separated)
+SERVICES="service-a,service-b,service-c"
+
+# JAR and output setup
+JAR_PATH="comparator_jira.jar"
+OUTPUT_DIR="release_htmls"
+SMTP_FROM="release-bot@example.com"
+
+# JIRA project mappings
+declare -A JIRA_PROJECTS
+JIRA_PROJECTS["service-a"]="PROJA"
+JIRA_PROJECTS["service-b"]="PROJB"
+JIRA_PROJECTS["service-c"]="PROJC"
+
+# Email mappings
+declare -A EMAILS
+EMAILS["service-a"]="team-a@example.com"
+EMAILS["service-b"]="team-b@example.com"
+EMAILS["service-c"]="team-c@example.com"
+
+# ArgoCD actuator base URL pattern (must be customized per org)
+ARGO_URL="https://argocd.example.com/services"
+
+mkdir -p "$OUTPUT_DIR"
+
+# Split services
+IFS=',' read -ra SERVICE_LIST <<< "$SERVICES"
+
+for service in "${SERVICE_LIST[@]}"; do
+  echo "Processing $service..."
+
+  project="${JIRA_PROJECTS[$service]}"
+  email="${EMAILS[$service]}"
+
+  # --- Step 1: Fetch versions from ArgoCD actuator
+  echo "Fetching release versions from ArgoCD for $service..."
+
+  intg_ver=$(curl -s "$ARGO_URL/$service/env/intg/actuator/info" | jq -r '.git.build.version')
+  ctlq_ver=$(curl -s "$ARGO_URL/$service/env/ctlq/actuator/info" | jq -r '.git.build.version')
+  prod_ver=$(curl -s "$ARGO_URL/$service/env/prod/actuator/info" | jq -r '.git.build.version')
+
+  echo "$service versions: INTG=$intg_ver, CTLQ=$ctlq_ver, PROD=$prod_ver"
+
+  # --- Step 2: Run comparators
+  ctlq_json="$OUTPUT_DIR/${service}_ctlq.json"
+  prod_json="$OUTPUT_DIR/${service}_prod.json"
+  html_file="$OUTPUT_DIR/${service}_release_comparison.html"
+
+  java -jar "$JAR_PATH" "$project" "$intg_ver" "$ctlq_ver" > "$ctlq_json"
+  java -jar "$JAR_PATH" "$project" "$ctlq_ver" "$prod_ver" > "$prod_json"
+
+  # --- Step 3: Format HTML
+  {
+    echo "<html><body>"
+    echo "<h2>$service : Release Jira Items</h2>"
+
+    echo "<h3>CTLQ Release Items ($intg_ver → $ctlq_ver)</h3>"
+    echo "<table border='1'><tr><th>Key</th><th>Summary</th><th>Fix Version</th><th>Assignee</th></tr>"
+    jq -r '.[] | "<tr><td><a href=\"" + .url + "\">" + .key + "</a></td><td>" + .summary + "</td><td>" + .fixVersion + "</td><td>" + .assignee + "</td></tr>"' "$ctlq_json"
+    echo "</table>"
+
+    echo "<h3>PROD Release Items ($ctlq_ver → $prod_ver)</h3>"
+    echo "<table border='1'><tr><th>Key</th><th>Summary</th><th>Fix Version</th><th>Assignee</th></tr>"
+    jq -r '.[] | "<tr><td><a href=\"" + .url + "\">" + .key + "</a></td><td>" + .summary + "</td><td>" + .fixVersion + "</td><td>" + .assignee + "</td></tr>"' "$prod_json"
+    echo "</table>"
+
+    echo "</body></html>"
+  } > "$html_file"
+
+  # --- Step 4: Send email
+  {
+    echo "To: $email"
+    echo "Subject: $service : Release Jira items"
+    echo "Content-Type: text/html"
+    echo "From: $SMTP_FROM"
+    echo
+    cat "$html_file"
+  } | sendmail -t
+
+  echo "Email sent to $email for $service."
+done
+
+
+⸻
+
+🛠️ Prerequisites
+	•	comparator_jira.jar must output valid JSON
+	•	jq and curl must be available in the Bamboo agent
+	•	sendmail must be configured on the server (or replace with mailx / SMTP call)
+	•	Update:
+	•	ARGO_URL
+	•	JIRA_PROJECTS[]
+	•	EMAILS[]
+
+⸻
+
+✅ Bamboo Integration
+	1.	Source Checkout
+	2.	Script Task: Run this script
+
+chmod +x release_email_pipeline.sh
+./release_email_pipeline.sh
+
+
+⸻
+
+Would you like an Artifactory upload step for the HTML files as well (e.g. using curl or Maven deploy plugin)?
+
+=#
 Here’s a complete Bamboo automation approach using Maven + shell script to:
 	1.	Run the comparator_jira.jar (assumed to be a Maven-executed JAR).
 	2.	Generate HTML release comparison reports for each service.
