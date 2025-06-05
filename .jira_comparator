@@ -1,0 +1,263 @@
+
+Here’s a complete Bamboo automation approach using Maven + shell script to:
+	1.	Run the comparator_jira.jar (assumed to be a Maven-executed JAR).
+	2.	Generate HTML release comparison reports for each service.
+	3.	Upload HTML to Artifactory.
+	4.	Email the HTML to service-specific recipients.
+	5.	Be fully automated via a Bamboo Plan.
+
+⸻
+
+🗂️ Folder Structure (Example)
+
+bamboo-plan/
+├── comparator_jira.jar  # or a Maven goal that runs it
+├── services-config.csv  # List of services and their versions
+├── release_report.sh    # Shell script to drive the logic
+
+
+⸻
+
+✅ services-config.csv Format
+
+service_name,jira_project_key,current_version,target_version,email
+service-a,PROJA,1.2.0,1.3.0,team-a@example.com
+service-b,PROJB,2.0.0,2.1.0,team-b@example.com
+
+
+⸻
+
+🛠️ Step-by-step: release_report.sh
+
+#!/bin/bash
+set -e
+
+# Configuration
+JAR_PATH="comparator_jira.jar"
+CONFIG_FILE="services-config.csv"
+OUTPUT_DIR="release_htmls"
+ARTIFACTORY_URL="https://your-artifactory.example.com/repo/releases"
+ARTIFACTORY_USER="your_user"
+ARTIFACTORY_TOKEN="your_token"
+SMTP_SERVER="smtp.example.com"
+SENDER_EMAIL="release-bot@example.com"
+
+mkdir -p "$OUTPUT_DIR"
+
+# Read each line of the config (skip header)
+tail -n +2 "$CONFIG_FILE" | while IFS=, read -r service project current target email
+do
+  echo "Generating release notes for $service..."
+
+  # Maven call to run the JAR (make sure it's available in ~/.m2 or install locally)
+  mvn exec:java \
+    -Dexec.mainClass=com.example.ComparatorJiraMain \
+    -Dexec.args="$project $current $target $OUTPUT_DIR/${service}_release_comparison.html" \
+    -Dexec.cleanupDaemonThreads=false \
+    -Dexec.classpathScope=runtime \
+    -f comparator-jira-pom.xml
+
+  # Upload to Artifactory
+  curl -u "${ARTIFACTORY_USER}:${ARTIFACTORY_TOKEN}" -T "$OUTPUT_DIR/${service}_release_comparison.html" \
+    "$ARTIFACTORY_URL/${service}_release_comparison.html"
+
+  # Send email with the HTML body
+  echo "Sending email to $email..."
+  {
+    echo "To: $email"
+    echo "Subject: ${service} Release Notes (${current} → ${target})"
+    echo "Content-Type: text/html"
+    echo "From: ${SENDER_EMAIL}"
+    echo
+    cat "$OUTPUT_DIR/${service}_release_comparison.html"
+  } | sendmail -t
+
+done
+
+
+⸻
+
+🧪 Maven Setup (comparator-jira-pom.xml)
+
+Create a POM to execute the JAR (if it’s not self-contained):
+
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>comparator-runner</artifactId>
+  <version>1.0</version>
+
+  <dependencies>
+    <!-- Dependency on comparator_jira -->
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>comparator_jira</artifactId>
+      <version>1.0.0</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.0</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+
+
+⸻
+
+🧵 Bamboo Plan
+
+✅ Job Steps
+	1.	Source Code Checkout
+	•	Checkout comparator and script files.
+	2.	Run Shell Script
+	•	Add script task:
+
+chmod +x release_report.sh
+./release_report.sh
+
+
+	3.	Artifacts (optional)
+	•	Define an artifact for release_htmls/ folder to be archived in Bamboo UI.
+
+⸻
+
+📧 Optional: Use mailx or sendemail if sendmail is unavailable
+
+Replace the mail sending part with:
+
+mailx -a "Content-Type: text/html" -s "${service} Release Notes" "$email" < "$OUTPUT_DIR/${service}_release_comparison.html"
+
+
+⸻
+
+✅ Summary
+
+Step	Description
+🧾 Input	services-config.csv with project keys and versions
+⚙️ Execution	Shell script runs Maven to generate HTML using comparator_jira.jar
+📤 Upload	HTML files pushed to Artifactory
+📧 Notify	Separate HTML email sent per service
+📦 Bamboo	Automates all steps in one plan
+
+Would you like me to generate the CSV sample, Maven POM, and script as downloadable files?
+
+=#=#=#
+You’re absolutely right — the HTML formatter for the returned JIRA details was implicitly handled by the comparator_jira.jar execution in the shell script, but was not shown explicitly.
+
+Let’s break it down properly and address the missing part:
+
+⸻
+
+✅ Recap: What’s Missing?
+
+You are using comparator_jira.jar, which:
+	•	Takes JIRA project, current version, target version
+	•	Returns a list of JIRA issues
+	•	But you also need it to generate a formatted HTML report
+
+⸻
+
+🔧 Option A: HTML generation is built into the JAR
+
+If comparator_jira.jar already:
+	•	Fetches JIRA issues
+	•	And generates the HTML report directly to a file
+
+Then this line is correct:
+
+-Dexec.args="$project $current $target $OUTPUT_DIR/${service}_release_comparison.html"
+
+✅ You don’t need to format HTML externally.
+
+⸻
+
+🔧 Option B: JAR returns raw data (JSON/CSV) and you must format HTML separately
+
+In this case, you need to:
+	1.	Capture the output from the JAR (e.g. JSON)
+	2.	Format it into HTML
+
+⸻
+
+🧩 Example: Capture JSON output from the JAR
+
+In release_report.sh:
+
+JIRA_JSON="$OUTPUT_DIR/${service}_jira.json"
+
+# Run the JAR and redirect JSON output
+mvn exec:java \
+  -Dexec.mainClass=com.example.ComparatorJiraMain \
+  -Dexec.args="$project $current $target $JIRA_JSON" \
+  -f comparator-jira-pom.xml
+
+
+⸻
+
+🧾 Sample JSON Output (Simulated)
+
+[
+  {
+    "key": "PROJ-123",
+    "summary": "Fix login issue",
+    "fixVersion": "1.3.0",
+    "assignee": "John Doe",
+    "url": "https://jira.example.com/browse/PROJ-123"
+  }
+]
+
+
+⸻
+
+🖼️ HTML Formatter in Bash using jq
+
+HTML_FILE="$OUTPUT_DIR/${service}_release_comparison.html"
+{
+  echo "<html><body>"
+  echo "<h2>Release Notes: $service ($current → $target)</h2>"
+  echo "<table border='1'><tr><th>JIRA</th><th>Summary</th><th>Fix Version</th><th>Assignee</th></tr>"
+
+  jq -r '.[] | "<tr><td><a href=\"" + .url + "\">" + .key + "</a></td><td>" + .summary + "</td><td>" + .fixVersion + "</td><td>" + .assignee + "</td></tr>"' "$JIRA_JSON"
+
+  echo "</table></body></html>"
+} > "$HTML_FILE"
+
+
+⸻
+
+✅ Final Shell Script Block (If HTML is not built-in)
+
+JIRA_JSON="$OUTPUT_DIR/${service}_jira.json"
+HTML_FILE="$OUTPUT_DIR/${service}_release_comparison.html"
+
+# Step 1: Run the comparator to fetch JSON
+mvn exec:java \
+  -Dexec.mainClass=com.example.ComparatorJiraMain \
+  -Dexec.args="$project $current $target $JIRA_JSON" \
+  -f comparator-jira-pom.xml
+
+# Step 2: Generate HTML from JSON
+{
+  echo "<html><body>"
+  echo "<h2>$service: $current → $target</h2>"
+  echo "<table border='1'><tr><th>Key</th><th>Summary</th><th>Version</th><th>Assignee</th></tr>"
+  jq -r '.[] | "<tr><td><a href=\"" + .url + "\">" + .key + "</a></td><td>" + .summary + "</td><td>" + .fixVersion + "</td><td>" + .assignee + "</td></tr>"' "$JIRA_JSON"
+  echo "</table></body></html>"
+} > "$HTML_FILE"
+
+
+⸻
+
+🎯 Summary
+
+Scenario	Solution
+comparator_jira.jar already outputs HTML	Pass output path as CLI argument and skip formatting
+It returns JSON or CSV only	Format using Bash + jq or use Python/Jinja2 for more control
+
+Would you like a portable HTML formatter in Python too, in case the shell version is too rigid?
