@@ -1,4 +1,153 @@
 
+Thanks — here’s the updated version of the HTML formatting section to clearly list:
+	•	The INTG, CTLQ, and PROD release versions at the top
+	•	Two separate Jira tables:
+	•	One for CTLQ release items (INTG → CTLQ)
+	•	One for PROD release items (CTLQ → PROD)
+
+⸻
+
+✅ HTML Generation Section (Updated Inside Script)
+
+Replace the previous HTML block in your release_email_pipeline.sh with this:
+
+  # --- Step 3: Format HTML with version summary
+  {
+    echo "<html><body style='font-family: Arial, sans-serif;'>"
+    echo "<h2>$service : Release Jira Items</h2>"
+
+    # Display release version info
+    echo "<h3>Release Versions</h3>"
+    echo "<ul>"
+    echo "<li><b>INTG Version:</b> $intg_ver</li>"
+    echo "<li><b>CTLQ Version:</b> $ctlq_ver</li>"
+    echo "<li><b>PROD Version:</b> $prod_ver</li>"
+    echo "</ul>"
+
+    # CTLQ section
+    echo "<h3>CTLQ Release Items ($intg_ver → $ctlq_ver)</h3>"
+    echo "<table border='1' cellpadding='5' cellspacing='0'>"
+    echo "<tr style='background-color:#f2f2f2;'><th>Key</th><th>Summary</th><th>Fix Version</th><th>Assignee</th></tr>"
+    jq -r '.[] | "<tr><td><a href=\"" + .url + "\">" + .key + "</a></td><td>" + .summary + "</td><td>" + .fixVersion + "</td><td>" + .assignee + "</td></tr>"' "$ctlq_json"
+    echo "</table>"
+
+    # PROD section
+    echo "<h3>PROD Release Items ($ctlq_ver → $prod_ver)</h3>"
+    echo "<table border='1' cellpadding='5' cellspacing='0'>"
+    echo "<tr style='background-color:#f2f2f2;'><th>Key</th><th>Summary</th><th>Fix Version</th><th>Assignee</th></tr>"
+    jq -r '.[] | "<tr><td><a href=\"" + .url + "\">" + .key + "</a></td><td>" + .summary + "</td><td>" + .fixVersion + "</td><td>" + .assignee + "</td></tr>"' "$prod_json"
+    echo "</table>"
+
+    echo "</body></html>"
+  } > "$html_file"
+
+
+⸻
+
+📧 Email Subject Format (already in script)
+
+Subject: $service : Release Jira items
+
+
+⸻
+
+Let me know if you want:
+	•	An empty state message (e.g., “No Jira items found”)
+	•	The HTML pushed to Artifactory
+	•	The email to include the HTML file as an attachment instead of in the body
+
+
+If jq is not available on your Bamboo agent and you can’t install it, here are three alternative strategies to format JSON from comparator_jira.jar into HTML using only standard shell tools:
+
+⸻
+
+✅ Option 1: Replace jq with python (universally available)
+
+Add this generate_table() shell function that uses Python:
+
+generate_table() {
+  json_file="$1"
+  echo "<table border='1' cellpadding='5' cellspacing='0'>"
+  echo "<tr style='background-color:#f2f2f2;'><th>Key</th><th>Summary</th><th>Fix Version</th><th>Assignee</th></tr>"
+  
+  python3 - <<EOF
+import json, html
+with open("$json_file") as f:
+    for item in json.load(f):
+        key = html.escape(item.get('key', ''))
+        summary = html.escape(item.get('summary', ''))
+        fix = html.escape(item.get('fixVersion', ''))
+        assignee = html.escape(item.get('assignee', ''))
+        url = html.escape(item.get('url', ''))
+        print(f'<tr><td><a href="{url}">{key}</a></td><td>{summary}</td><td>{fix}</td><td>{assignee}</td></tr>')
+EOF
+
+  echo "</table>"
+}
+
+Then call it like this in your HTML block:
+
+echo "<h3>CTLQ Release Items ($intg_ver → $ctlq_ver)</h3>"
+generate_table "$ctlq_json"
+
+echo "<h3>PROD Release Items ($ctlq_ver → $prod_ver)</h3>"
+generate_table "$prod_json"
+
+
+⸻
+
+✅ Option 2: Use a simple awk parser (if JSON format is flat and predictable)
+
+Only safe if comparator_jira.jar outputs very clean JSON like:
+
+[
+  {
+    "key": "JIRA-123",
+    "summary": "Fix login",
+    "fixVersion": "v1.2",
+    "assignee": "John",
+    "url": "http://jira/browse/JIRA-123"
+  }
+]
+
+Shell function:
+
+generate_table_with_awk() {
+  echo "<table border='1'><tr><th>Key</th><th>Summary</th><th>Fix Version</th><th>Assignee</th></tr>"
+  awk '
+    /"key":/      { key=$2; gsub(/"|,/, "", key) }
+    /"summary":/  { summary=substr($0, index($0,$2)); gsub(/"|,/, "", summary) }
+    /"fixVersion":/ { fix=$2; gsub(/"|,/, "", fix) }
+    /"assignee":/ { assignee=$2; gsub(/"|,/, "", assignee) }
+    /"url":/ {
+      url=$2; gsub(/"|,/, "", url);
+      print "<tr><td><a href=\"" url "\">" key "</a></td><td>" summary "</td><td>" fix "</td><td>" assignee "</td></tr>"
+    }
+  ' "$1"
+  echo "</table>"
+}
+
+Then call:
+
+generate_table_with_awk "$ctlq_json"
+generate_table_with_awk "$prod_json"
+
+
+⸻
+
+✅ Option 3: Modify comparator_jira.jar to emit HTML directly (if you control it)
+
+Update the JAR logic to emit a complete HTML block per comparison so you don’t need jq, python, or any post-processing.
+
+⸻
+
+🔍 Recommendation
+
+If possible, use python3 with the generate_table() function — it’s safe, portable, handles escaping, and doesn’t rely on brittle text matching like awk.
+
+Let me know if you want me to embed this into your complete Bamboo script end-to-end.
+
+
 Thanks for the clarification!
 
 You want a Bamboo-compatible shell script that:
