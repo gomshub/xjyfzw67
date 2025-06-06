@@ -1,4 +1,151 @@
 
+Perfect — here’s the updated Bamboo shell script that:
+
+⸻
+
+✅ Does all the following:
+	1.	Fetches versions from ArgoCD
+	2.	Uses comparator_jira.jar to get Jira items for:
+	•	INTG → CTLQ
+	•	CTLQ → PROD
+	3.	Generates individual HTML pages for each service
+	4.	Sends email per service
+	5.	Also builds one master HTML page (main_release_comparison.html) with:
+	•	Hyperlinks to each service section
+	•	Collapsible <details> sections
+
+⸻
+
+🟨 Assumptions:
+	•	Python is available (used instead of jq)
+	•	comparator_jira.jar outputs JSON
+	•	release_htmls/ is the output directory
+
+⸻
+
+✅ Full bamboo_release_comparison.sh
+
+#!/bin/bash
+
+set -e
+
+# --- INPUTS
+SERVICES="service-a,service-b,service-c"
+COMPARATOR_JAR="/path/to/comparator_jira.jar"
+RELEASE_HTML_DIR="release_htmls"
+ARTIFACTORY_URL="https://your-artifactory/path"
+EMAIL_FROM="release-bot@example.com"
+EMAIL_TO="devops@example.com"
+
+# --- PREP
+mkdir -p "$RELEASE_HTML_DIR"
+MASTER_HTML="$RELEASE_HTML_DIR/main_release_comparison.html"
+IFS=',' read -ra SERVICE_LIST <<< "$SERVICES"
+
+# --- START MASTER HTML FILE
+echo "<html><head><style>body{font-family:Arial;}table{border-collapse:collapse;}th,td{padding:8px;border:1px solid #ccc;}summary{font-size:1.2em;}</style></head><body>" > "$MASTER_HTML"
+echo "<h1>Service Release Jira Comparison</h1><ul>" >> "$MASTER_HTML"
+
+# --- FUNCTION: Generate HTML table from JSON
+generate_table() {
+  json_file="$1"
+  echo "<table border='1' cellpadding='5' cellspacing='0'>"
+  echo "<tr style='background-color:#f2f2f2;'><th>Key</th><th>Summary</th><th>Fix Version</th><th>Assignee</th></tr>"
+  python3 - <<EOF
+import json, html
+with open("$json_file") as f:
+    for item in json.load(f):
+        key = html.escape(item.get('key', ''))
+        summary = html.escape(item.get('summary', ''))
+        fix = html.escape(item.get('fixVersion', ''))
+        assignee = html.escape(item.get('assignee', ''))
+        url = html.escape(item.get('url', ''))
+        print(f'<tr><td><a href="{url}">{key}</a></td><td>{summary}</td><td>{fix}</td><td>{assignee}</td></tr>')
+EOF
+  echo "</table>"
+}
+
+# --- PROCESS EACH SERVICE
+for service in "${SERVICE_LIST[@]}"; do
+  echo "Processing $service..."
+
+  # Fetch versions from ArgoCD
+  intg_ver=$(curl -s "https://argocd-api/$service/intg/actuator/info" | grep version | cut -d':' -f2 | tr -d '", ')
+  ctlq_ver=$(curl -s "https://argocd-api/$service/ctlq/actuator/info" | grep version | cut -d':' -f2 | tr -d '", ')
+  prod_ver=$(curl -s "https://argocd-api/$service/prod/actuator/info" | grep version | cut -d':' -f2 | tr -d '", ')
+
+  # Run comparator JAR
+  ctlq_json="$RELEASE_HTML_DIR/${service}_ctlq.json"
+  prod_json="$RELEASE_HTML_DIR/${service}_prod.json"
+
+  java -jar "$COMPARATOR_JAR" --service "$service" --from "$intg_ver" --to "$ctlq_ver" > "$ctlq_json"
+  java -jar "$COMPARATOR_JAR" --service "$service" --from "$ctlq_ver" --to "$prod_ver" > "$prod_json"
+
+  # Create individual HTML page
+  html_file="$RELEASE_HTML_DIR/${service}_release_comparison.html"
+  {
+    echo "<html><body style='font-family: Arial;'>"
+    echo "<h2>$service : Release Jira Items</h2>"
+    echo "<p><b>INTG Version:</b> $intg_ver<br><b>CTLQ Version:</b> $ctlq_ver<br><b>PROD Version:</b> $prod_ver</p>"
+
+    echo "<h3>CTLQ Release Items ($intg_ver → $ctlq_ver)</h3>"
+    generate_table "$ctlq_json"
+    echo "<h3>PROD Release Items ($ctlq_ver → $prod_ver)</h3>"
+    generate_table "$prod_json"
+
+    echo "</body></html>"
+  } > "$html_file"
+
+  # Push to Artifactory
+  curl -T "$html_file" "$ARTIFACTORY_URL/${service}_release_comparison.html"
+
+  # Email individual page
+  {
+    echo "To: $EMAIL_TO"
+    echo "Subject: $service : Release Jira items"
+    echo "Content-Type: text/html"
+    echo "From: $EMAIL_FROM"
+    echo
+    cat "$html_file"
+  } | sendmail -t
+
+  # Add entry to master index
+  echo "<li><a href=\"#$service\">$service</a></li>" >> "$MASTER_HTML"
+
+  {
+    echo "<details id=\"$service\"><summary><b>$service</b></summary>"
+    echo "<p><b>INTG Version:</b> $intg_ver<br><b>CTLQ Version:</b> $ctlq_ver<br><b>PROD Version:</b> $prod_ver</p>"
+    echo "<h4>CTLQ Release Items ($intg_ver → $ctlq_ver)</h4>"
+    generate_table "$ctlq_json"
+    echo "<h4>PROD Release Items ($ctlq_ver → $prod_ver)</h4>"
+    generate_table "$prod_json"
+    echo "</details><br><hr>"
+  } >> "$MASTER_HTML"
+
+done
+
+# --- CLOSE MASTER HTML
+echo "</ul></body></html>" >> "$MASTER_HTML"
+
+# (Optional) Email or push master page
+# curl -T "$MASTER_HTML" "$ARTIFACTORY_URL/main_release_comparison.html"
+# cat "$MASTER_HTML" | mail -s "All Service Release Comparison" "$EMAIL_TO"
+
+
+⸻
+
+📌 Notes
+	•	You can remove or comment the last sendmail/curl line if not needed
+	•	The individual HTML pages and emails still run per service
+	•	The main_release_comparison.html gives a clean, collapsible summary for all in one page
+
+⸻
+
+Would you like me to turn this into a Bamboo-compatible task YAML or integrate it into your pom.xml using Maven exec?
+
+
+
+=#=#
 Thanks — here’s the updated version of the HTML formatting section to clearly list:
 	•	The INTG, CTLQ, and PROD release versions at the top
 	•	Two separate Jira tables:
