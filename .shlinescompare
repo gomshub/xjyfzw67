@@ -1,0 +1,55 @@
+Here’s the updated bash script that:
+	1.	Trims trailing whitespace from each line in file1 and file2.
+	2.	Compares each trimmed line from file1 against file2.
+	3.	Writes matched and unmatched lines to matched.txt and unmatched.txt.
+
+⸻
+
+✅ compare_files_trimmed.sh
+
+#!/bin/bash
+
+# Input files
+FILE1="file1.txt"
+FILE2="file2.txt"
+
+# Output files
+MATCHED="matched.txt"
+UNMATCHED="unmatched.txt"
+
+# Ensure output files are empty before writing
+> "$MATCHED"
+> "$UNMATCHED"
+
+# Preprocess: Remove trailing whitespace from both files
+sed 's/[[:space:]]\+$//' "$FILE1" > /tmp/file1_trimmed.txt
+sed 's/[[:space:]]\+$//' "$FILE2" > /tmp/file2_trimmed.txt
+
+# Compare each line from trimmed file1 with trimmed file2
+while IFS= read -r line
+do
+    if grep -Fxq "$line" /tmp/file2_trimmed.txt; then
+        echo "$line" >> "$MATCHED"
+    else
+        echo "$line" >> "$UNMATCHED"
+    fi
+done < /tmp/file1_trimmed.txt
+
+echo "Comparison complete. Results:"
+echo "Matched lines:   $MATCHED"
+echo "Unmatched lines: $UNMATCHED"
+
+
+⸻
+
+🧪 Optional Improvements
+	•	If you want to remove both leading and trailing whitespace, change:
+
+sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+
+	•	If files have Windows line endings, add:
+
+sed -i 's/\r$//' "$FILE1"
+sed -i 's/\r$//' "$FILE2"
+
+Let me know if you’d like to include case-insensitive comparison or comparison ignoring duplicate lines.
