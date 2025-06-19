@@ -1,0 +1,105 @@
+To check code changes between different Docker image versions (e.g., myapp:v1.0 vs myapp:v1.1) by pulling them from a Docker registry (like Docker Hub, ECR, or private registry) on a local Windows machine, follow these steps:
+
+⸻
+
+✅ Step-by-step Guide
+
+🔹 1. Pull both versions of the Docker image
+
+Open PowerShell or Command Prompt and pull the two image versions:
+
+docker pull myregistry/myapp:v1.0
+docker pull myregistry/myapp:v1.1
+
+If you’re using Docker Hub:
+
+docker pull myapp:v1.0
+docker pull myapp:v1.1
+
+
+⸻
+
+🔹 2. Create containers from both images
+
+Run both containers with a shell, without starting the application:
+
+docker create --name app_v1.0 myapp:v1.0
+docker create --name app_v1.1 myapp:v1.1
+
+
+⸻
+
+🔹 3. Copy code or files from the container to your local system
+
+Use docker cp to copy application code or relevant directories (like /app, /src, or /usr/src/app depending on your image structure):
+
+docker cp app_v1.0:/app ./app_v1.0_code
+docker cp app_v1.1:/app ./app_v1.1_code
+
+If unsure about the path, start an interactive shell inside one container to explore:
+
+docker start -ai app_v1.0
+# or
+docker run -it myapp:v1.0 cmd
+
+
+⸻
+
+🔹 4. Compare the folders using a diff tool
+
+Now you can use a Windows diff tool like:
+	•	WinMerge: https://winmerge.org/
+	•	Meld
+	•	Visual Studio Code:
+	•	Install the “Compare Folders” extension
+	•	Open both folders side-by-side
+
+Or, use PowerShell:
+
+Compare-Object -ReferenceObject (Get-Content .\app_v1.0_code\file.py) -DifferenceObject (Get-Content .\app_v1.1_code\file.py)
+
+
+⸻
+
+🔹 5. Clean up afterward
+
+docker rm app_v1.0 app_v1.1
+
+
+⸻
+
+📝 Optional Tips
+	•	If the image is based on source code (e.g., Python, Node.js), the /app, /src, or /usr/src/app folders often contain the code.
+	•	If the image uses compiled binaries only, code changes may not be visible unless the Dockerfile includes source files.
+	•	You can inspect Docker image metadata with:
+
+docker inspect myapp:v1.0
+
+
+
+⸻
+
+🛠 If You Want to Automate It
+
+You can script this in PowerShell:
+
+$image1 = "myapp:v1.0"
+$image2 = "myapp:v1.1"
+
+docker pull $image1
+docker pull $image2
+
+docker create --name tmp1 $image1
+docker create --name tmp2 $image2
+
+docker cp tmp1:/app ./app1
+docker cp tmp2:/app ./app2
+
+Start-Process "C:\Program Files\WinMerge\WinMergeU.exe" -ArgumentList '"app1" "app2"'
+
+docker rm tmp1 tmp2
+
+
+⸻
+
+Would you like a Bash version for Git Bash or a script that checks differences in Dockerfile layers too?
