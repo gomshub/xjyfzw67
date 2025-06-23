@@ -1,0 +1,132 @@
+To deploy Prometheus with SSL/TLS certificate support using Puppet, you typically need to handle:
+	1.	Installing Prometheus
+	2.	Managing Prometheus configuration (prometheus.yml)
+	3.	Generating or deploying SSL certificates
+	4.	Configuring reverse proxy (like Nginx or Apache) with the certificate
+	5.	Managing services using Puppet
+
+Prometheus itself doesn’t support SSL/TLS natively, so a reverse proxy (Nginx/Apache) is the recommended approach.
+
+⸻
+
+✅ Puppet Manifest Structure for Prometheus + SSL
+
+Option A: With Nginx as SSL Proxy
+
+⸻
+
+1. Install Prometheus
+
+You can either:
+	•	Use Puppet Forge module (e.g., puppet-prometheus), or
+	•	Use custom installation via Puppet resources.
+
+Example:
+
+class { 'prometheus':
+  version         => '2.50.0',
+  install_method  => 'url',
+  manage_user     => true,
+  manage_group    => true,
+  config_dir      => '/etc/prometheus',
+  storage_dir     => '/var/lib/prometheus',
+  web_listen_address => 'localhost:9090',
+}
+
+
+⸻
+
+2. Install and Configure Nginx with SSL
+
+Install Nginx and set up the reverse proxy:
+
+package { 'nginx':
+  ensure => installed,
+}
+
+file { '/etc/nginx/conf.d/prometheus.conf':
+  ensure  => file,
+  content => template('mymodule/prometheus_ssl_nginx.conf.erb'),
+  notify  => Service['nginx'],
+}
+
+service { 'nginx':
+  ensure => running,
+  enable => true,
+}
+
+
+⸻
+
+3. Deploy SSL Certificates
+
+Assume the cert and key are copied securely, or use Puppet to manage them:
+
+file { '/etc/ssl/certs/prometheus.crt':
+  ensure => file,
+  source => 'puppet:///modules/mymodule/prometheus.crt',
+  mode   => '0644',
+}
+
+file { '/etc/ssl/private/prometheus.key':
+  ensure => file,
+  source => 'puppet:///modules/mymodule/prometheus.key',
+  mode   => '0600',
+}
+
+
+⸻
+
+4. Nginx Reverse Proxy Template Example
+
+templates/prometheus_ssl_nginx.conf.erb:
+
+server {
+    listen 443 ssl;
+    server_name prometheus.example.com;
+
+    ssl_certificate     /etc/ssl/certs/prometheus.crt;
+    ssl_certificate_key /etc/ssl/private/prometheus.key;
+
+    location / {
+        proxy_pass http://localhost:9090/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+
+⸻
+
+5. Firewall (Optional)
+
+firewall { '100 allow https access':
+  proto  => 'tcp',
+  dport  => 443,
+  action => 'accept',
+}
+
+
+⸻
+
+🧪 Testing
+	•	Access Prometheus via https://prometheus.example.com
+	•	Validate certificate chain with curl -v https://prometheus.example.com
+	•	Reload Nginx on cert changes
+
+⸻
+
+🔐 Optional: Let’s Encrypt Integration (certbot)
+
+You can integrate Let’s Encrypt certbot with Puppet if needed via shell or module:
+
+exec { 'get_ssl_cert':
+  command => 'certbot certonly --nginx -d prometheus.example.com',
+  unless  => 'test -f /etc/letsencrypt/live/prometheus.example.com/fullchain.pem',
+  path    => ['/usr/bin', '/bin'],
+}
+
+
+⸻
+
+Would you like a full Puppet module structure, or a YAML-based Hiera version?
