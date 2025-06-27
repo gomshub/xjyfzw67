@@ -1,0 +1,142 @@
+Great question. Let’s clarify your situation:
+
+🎯 Problem Statement:
+You have a Git repo with only a pom.xml, no test code, no src/test/java, no .feature files — yet it is somehow being used in a Bamboo plan to run Karate tests.
+
+⸻
+
+🔍 Key Possibilities to Investigate
+
+✅ 1. Pom.xml Might Reference Another Git Repo as a Dependency
+
+Your pom.xml may be pulling Karate test artifacts (features or runners) from Artifactory or another internal Maven repository.
+
+Look inside the pom.xml for this:
+
+<dependency>
+  <groupId>com.yourcompany.qa</groupId>
+  <artifactId>karate-tests</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+</dependency>
+
+➡️ This means the actual .feature files and test runners are in that published artifact, not in your Git repo.
+
+⸻
+
+✅ 2. Karate Tests Packaged in a Snapshot Jar
+
+If a previous team uploaded a Karate test suite as a SNAPSHOT JAR to Artifactory, this pom.xml could be:
+	•	a test runner module, or
+	•	a thin wrapper to download that JAR and execute tests.
+
+⸻
+
+✅ 3. Surefire or Failsafe Plugin in pom.xml Triggers Tests Automatically
+
+Check for this:
+
+<plugin>
+  <groupId>org.apache.maven.plugins</groupId>
+  <artifactId>maven-surefire-plugin</artifactId>
+  <version>3.1.2</version>
+  <configuration>
+    <includes>
+      <include>**/*Test.java</include>
+    </includes>
+  </configuration>
+</plugin>
+
+If the tests are in a dependency, Surefire will discover and execute test runners from that JAR during mvn test.
+
+⸻
+
+✅ 4. Bamboo Plan Might Download Another Repo or Artifact
+
+Even if this repo is empty, the Bamboo plan might:
+	•	Clone another Git repo that contains the tests
+	•	Use curl/wget to download a test JAR from Artifactory
+	•	Call mvn verify or mvn test which runs the tests from the downloaded dependency
+
+⸻
+
+🛠️ What You Can Do Right Now
+
+👉 Step 1: Open pom.xml and check for dependencies
+
+Are there any -SNAPSHOT or internal artifact dependencies like:
+
+<groupId>com.company.qa</groupId>
+<artifactId>test-suite</artifactId>
+<version>1.2.3-SNAPSHOT</version>
+
+If yes, then tests live inside that JAR.
+
+⸻
+
+👉 Step 2: Look for Surefire or Failsafe plugins
+
+These plugins are what run JUnit / Karate tests. Check if any are configured.
+
+⸻
+
+👉 Step 3: Check Bamboo Build Logs
+
+Look at the Bamboo plan logs:
+	•	Is it cloning more than one repo?
+	•	Is it downloading any JARs?
+	•	What does the mvn command look like?
+	•	Are .feature files shown in the logs?
+
+⸻
+
+👉 Step 4: Ask: Is This a Wrapper Repo?
+
+This Git repo might just exist:
+	•	to define a test suite through dependencies
+	•	and run it in CI/CD without holding any real test code
+
+⸻
+
+📦 Example: Karate Tests Pulled From Artifactory
+
+Let’s say this pom.xml is the only file:
+
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.company.automation</groupId>
+  <artifactId>qa-karate-runner</artifactId>
+  <version>1.0.0</version>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.company.qa</groupId>
+      <artifactId>karate-test-suite</artifactId>
+      <version>2.3.1-SNAPSHOT</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.0.0</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+
+Then mvn test will:
+	•	Download the karate-test-suite from Artifactory
+	•	Run the test classes defined in that JAR
+
+⸻
+
+✅ Want Help Reverse-Engineering It?
+
+If you share your pom.xml content (even partially), I can:
+	•	Tell you if it’s pulling tests from somewhere
+	•	Show exactly how the tests are being executed
+	•	Recreate the logic locally or in another Bamboo plan
+
+Just paste your pom.xml, and I’ll explain how it’s being used.
