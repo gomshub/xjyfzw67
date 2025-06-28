@@ -1,3 +1,113 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  
+  <groupId>com.example.runner</groupId>
+  <artifactId>test-runner</artifactId> 
+  <packaging>jar</packaging> 
+  <version>1.0-SNAPSHOT</version> 
+  <name>test-runner</name> 
+  <url>http://maven.apache.org</url> 
+  <dependencies> 
+  <dependency> 
+  <groupId>example.karate</groupId> 
+  <artifactId>TestLightMaven</artifactId> 
+  <version>1.0.0-SNAPSHOT</version> 
+  </dependency> 
+  <dependency> 
+  <groupId>com.intuit.karate</groupId> 
+  <artifactId>karate-junit5</artifactId> 
+  <version>1.4.1</version> 
+  <scope>test</scope> 
+  </dependency> 
+  </dependencies>
+  <build>
+  <plugins>
+    <plugin>
+  <groupId>org.apache.maven.plugins</groupId>
+  <artifactId>maven-compiler-plugin</artifactId>
+  <version>3.10.1</version>
+  <configuration>
+    <source>11</source>
+    <target>11</target>
+  </configuration>
+  
+</plugin>
+<plugin>
+  <groupId>org.apache.maven.plugins</groupId>
+  <artifactId>maven-surefire-plugin</artifactId>
+  <version>3.0.0-M5</version>
+</plugin>
+  </plugins>
+  
+</build>
+  
+</project>
+000000000000000000000000000000
+
+
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>example.karate</groupId>
+  <artifactId>TestLightMaven</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+    <karate.version>1.4.1</karate.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.intuit.karate</groupId>
+      <artifactId>karate-junit5</artifactId>
+      <version>${karate.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Compiler Plugin -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.10.1</version>
+      </plugin>
+
+      <!-- Surefire Plugin for JUnit 5 and Karate -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+        <configuration>
+          <includes>
+            <include>**/*Test.java</include>
+          </includes>
+        </configuration>
+      </plugin>
+    </plugins>
+
+    <!-- Include feature files from test resources into final JAR -->
+    <resources>
+      <resource>
+        <directory>src/test/resources</directory>
+        <includes>
+          <include>**/*.feature</include>
+        </includes>
+      </resource>
+    </resources>
+  </build>
+</project>
+
+000000000000000000
 Great question. Let’s clarify your situation:
 
 🎯 Problem Statement:
