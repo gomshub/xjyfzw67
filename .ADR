@@ -1,0 +1,154 @@
+Perfect — here’s a complete HTML version of your Architecture Design Report with:
+
+✅ Hyperlinked Index (Table of Contents)
+✅ “Back to Index” links at the end of each section
+✅ Fully self-contained and styled for clarity
+
+⸻
+
+✅ architecture.html with TOC and Anchors
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Architecture Design Report - Storage Lifecycle</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2em; line-height: 1.6; background-color: #fdfdfd; color: #333; }
+    h1, h2 { color: #2c3e50; }
+    img { max-width: 100%; border: 1px solid #ccc; margin-top: 1em; }
+    pre, code { background-color: #f4f4f4; padding: 4px 8px; border-radius: 4px; display: inline-block; }
+    ul { margin-top: 0.5em; }
+    .section { margin-bottom: 2em; }
+    .note { background-color: #e8f4fd; padding: 10px; border-left: 5px solid #3498db; }
+    a { color: #0077cc; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .back { font-size: 0.9em; margin-top: 1em; display: block; }
+  </style>
+</head>
+<body>
+
+  <h1>Architecture Design Report: S3 Storage Lifecycle</h1>
+
+  <div class="section" id="index">
+    <h2>📘 Index</h2>
+    <ul>
+      <li><a href="#overview">1. Overview</a></li>
+      <li><a href="#usecase">2. Use Case</a></li>
+      <li><a href="#diagram">3. Architecture Diagram</a></li>
+      <li><a href="#components">4. AWS Components</a></li>
+      <li><a href="#lifecycle">5. Storage Lifecycle Policy</a></li>
+      <li><a href="#security">6. Security Considerations</a></li>
+      <li><a href="#cost">7. Cost Optimization</a></li>
+      <li><a href="#future">8. Future Enhancements</a></li>
+    </ul>
+  </div>
+
+  <div class="section" id="overview">
+    <h2>1. Overview</h2>
+    <p>This architecture describes a cost-optimized AWS S3 storage solution for data that needs fast retrieval for the first 3 months and then transitions to a low-cost archival tier.</p>
+    <a href="#index" class="back">↑ Back to Index</a>
+  </div>
+
+  <div class="section" id="usecase">
+    <h2>2. Use Case: Cost-Optimized Archival Storage</h2>
+    <div class="note">
+      <p><strong>Objective:</strong> Store infrequently accessed data that must be retrievable immediately for the first 90 days, and allow slow retrieval afterward to reduce long-term storage cost.</p>
+    </div>
+    <ul>
+      <li>Data is <strong>rarely accessed</strong> during the first 3 months but requires <strong>immediate retrieval</strong> when needed.</li>
+      <li>After 90 days, data can be retrieved within <strong>hours or days</strong>.</li>
+      <li>Use cases: audit logs, compliance files, reports, investigation data.</li>
+    </ul>
+    <a href="#index" class="back">↑ Back to Index</a>
+  </div>
+
+  <div class="section" id="diagram">
+    <h2>3. Architecture Diagram</h2>
+    <img src="architecture-diagram.png" alt="Architecture Diagram Placeholder">
+    <p><em>Flow: Store → 90 days in GLACIER_IR → Transition to DEEP_ARCHIVE</em></p>
+    <a href="#index" class="back">↑ Back to Index</a>
+  </div>
+
+  <div class="section" id="components">
+    <h2>4. AWS Components Used</h2>
+    <ul>
+      <li>Amazon S3 with Lifecycle Configuration</li>
+      <li>Storage Classes: <code>GLACIER_IR</code>, <code>GLACIER</code>, <code>DEEP_ARCHIVE</code></li>
+      <li>Optional: AWS Lambda (automated processes)</li>
+      <li>Optional: SNS or CloudWatch for notifications</li>
+    </ul>
+    <a href="#index" class="back">↑ Back to Index</a>
+  </div>
+
+  <div class="section" id="lifecycle">
+    <h2>5. Storage Lifecycle Policy</h2>
+    <pre>
+S3 Lifecycle:
+- Day 0: Store in GLACIER_IR
+- Day 90: Transition to DEEP_ARCHIVE
+    </pre>
+    <p><strong>Lifecycle Policy JSON Example:</strong></p>
+    <pre>
+{
+  "Rules": [
+    {
+      "ID": "StorageLifecycleRule",
+      "Filter": { "Prefix": "" },
+      "Status": "Enabled",
+      "Transitions": [
+        { "Days": 0, "StorageClass": "GLACIER_IR" },
+        { "Days": 90, "StorageClass": "DEEP_ARCHIVE" }
+      ]
+    }
+  ]
+}
+    </pre>
+    <a href="#index" class="back">↑ Back to Index</a>
+  </div>
+
+  <div class="section" id="security">
+    <h2>6. Security Considerations</h2>
+    <ul>
+      <li>Restrict access using bucket policies and IAM roles.</li>
+      <li>Enable encryption with <code>SSE-S3</code> or <code>SSE-KMS</code>.</li>
+      <li>Audit access using <code>AWS CloudTrail</code>.</li>
+    </ul>
+    <a href="#index" class="back">↑ Back to Index</a>
+  </div>
+
+  <div class="section" id="cost">
+    <h2>7. Cost Optimization</h2>
+    <ul>
+      <li>Use <code>GLACIER_IR</code> for 90-day low-cost fast access.</li>
+      <li>Use <code>DEEP_ARCHIVE</code> for lowest cost after 90 days (12-hour+ retrieval).</li>
+      <li>Avoid STANDARD for cold or infrequent data.</li>
+    </ul>
+    <a href="#index" class="back">↑ Back to Index</a>
+  </div>
+
+  <div class="section" id="future">
+    <h2>8. Future Enhancements</h2>
+    <ul>
+      <li>Use S3 object tags for dynamic lifecycle policies.</li>
+      <li>Send retrieval alerts via SNS or Lambda triggers.</li>
+      <li>Enable Athena queries for archived Parquet data.</li>
+    </ul>
+    <a href="#index" class="back">↑ Back to Index</a>
+  </div>
+
+</body>
+</html>
+
+
+⸻
+
+✅ Features Included
+	•	Clean index navigation
+	•	Anchor links for all sections
+	•	“Back to Index” links
+	•	Can be extended with JavaScript, collapsible menus, or hosted on internal S3 static site
+
+⸻
+
+Would you like this in Markdown or Confluence format too?
