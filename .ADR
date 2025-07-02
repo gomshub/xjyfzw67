@@ -1,4 +1,132 @@
+Here is a complete, simple, and short HTML Architecture Design Report (ADR) that includes:
+	•	✅ Goal: Migration from Cloudian S3 to AWS S3
+	•	✅ Current data flow
+	•	✅ PUT/GET operations, size & frequency
+	•	✅ Cost estimation of storage classes
+	•	✅ Internal vs. external account
+	•	✅ Approval request section
 
+⸻
+
+✅ adr-s3-migration.html
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Architecture Design Report: Cloudian to AWS S3</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; line-height: 1.6; }
+    h1, h2 { color: #003366; }
+    .section { margin-bottom: 40px; }
+    a.back { display: block; margin-top: 10px; font-size: 0.9em; }
+    ul { padding-left: 20px; }
+  </style>
+</head>
+<body>
+
+<h1>Architecture Design Report: S3 Migration</h1>
+
+<div class="section" id="index">
+  <h2>📘 Index</h2>
+  <ul>
+    <li><a href="#goal">1. Goal</a></li>
+    <li><a href="#current-architecture">2. Current Data Flow Architecture</a></li>
+    <li><a href="#data-details">3. Data Details</a></li>
+    <li><a href="#storage-cost">4. Cost Estimation</a></li>
+    <li><a href="#account-type">5. AWS Account Type</a></li>
+    <li><a href="#approval">6. Storage Class Approval</a></li>
+  </ul>
+</div>
+
+<div class="section" id="goal">
+  <h2>1. Goal</h2>
+  <p>Migrate object storage from on-prem Cloudian S3 to AWS S3 to leverage AWS-native lifecycle policies, scalability, security, and cost-optimized storage tiers.</p>
+  <a href="#index" class="back">↑ Back to Index</a>
+</div>
+
+<div class="section" id="current-architecture">
+  <h2>2. Current Data Flow Architecture</h2>
+  <ul>
+    <li>Data ingested daily from application servers and logs</li>
+    <li>Stored in Cloudian S3-compatible object storage</li>
+    <li>Rare queries run via in-house analytics (on ~10–20% of data)</li>
+    <li>No automated lifecycle or archival process in place</li>
+  </ul>
+  <img src="https://via.placeholder.com/700x250?text=Current+Cloudian+Data+Flow" alt="Data Flow Diagram" style="margin-top:10px; max-width:100%;">
+  <a href="#index" class="back">↑ Back to Index</a>
+</div>
+
+<div class="section" id="data-details">
+  <h2>3. Data Details</h2>
+  <ul>
+    <li><strong>Total data size:</strong> ~15 TB</li>
+    <li><strong>Daily PUT volume:</strong> 200–500 MB</li>
+    <li><strong>GET operations:</strong> ~5% of files accessed per week (mostly recent)</li>
+    <li><strong>Rare queries:</strong> Target older than 3 months (~12 TB)</li>
+    <li><strong>Access pattern:</strong> Immediate for first 90 days, delayed OK beyond</li>
+  </ul>
+  <a href="#index" class="back">↑ Back to Index</a>
+</div>
+
+<div class="section" id="storage-cost">
+  <h2>4. Cost Estimation (US-East)</h2>
+  <table border="1" cellpadding="6" cellspacing="0">
+    <tr><th>Storage Class</th><th>Cost/GB/Month</th><th>Use Case</th></tr>
+    <tr><td>S3 Intelligent-Tiering</td><td>$0.023 (frequent)<br>$0.0125 (infrequent)<br>+$0.0025 monitor</td><td>First 90 days</td></tr>
+    <tr><td>S3 Glacier Deep Archive</td><td>$0.00099</td><td>After 90 days</td></tr>
+  </table>
+  <p><strong>Estimated monthly cost for 15 TB:</strong></p>
+  <ul>
+    <li>3 months Intelligent-Tiering (~$1,050)</li>
+    <li>Afterward Deep Archive (~$15/month)</li>
+  </ul>
+  <a href="#index" class="back">↑ Back to Index</a>
+</div>
+
+<div class="section" id="account-type">
+  <h2>5. AWS Account Type</h2>
+  <ul>
+    <li><strong>Account Name:</strong> `team-data-analytics`</li>
+    <li><strong>Environment:</strong> Internal AWS Organization Account</li>
+    <li><strong>Access:</strong> Scoped via IAM role and SSO group mapping</li>
+  </ul>
+  <a href="#index" class="back">↑ Back to Index</a>
+</div>
+
+<div class="section" id="approval">
+  <h2>6. Storage Class Approval</h2>
+  <p>Requesting approval for the following configuration:</p>
+  <ul>
+    <li><strong>Initial storage:</strong> S3 Intelligent-Tiering (auto cost control)</li>
+    <li><strong>Lifecycle rule:</strong> Transition to Glacier Deep Archive after 90 days</li>
+    <li><strong>Justification:</strong> Low access frequency, long retention, minimal retrieval SLA after 90 days</li>
+  </ul>
+  <p><strong>Approval Status:</strong> ☐ Approved &nbsp;&nbsp; ☐ Rejected</p>
+  <p><em>Approver Signature:</em> ______________________</p>
+  <a href="#index" class="back">↑ Back to Index</a>
+</div>
+
+</body>
+</html>
+
+
+⸻
+
+📎 You Can Add This To:
+	•	A Confluence page (paste raw HTML)
+	•	GitHub Pages or S3-hosted internal docs
+	•	Download locally as adr-s3-migration.html and open in a browser
+
+⸻
+
+Would you like:
+	•	A downloadable .zip with this and a sample diagram?
+	•	Terraform lifecycle rule code to attach?
+	•	Versioned ADR with timestamp and change log?
+
+
+=#=#
 Here’s how to enhance your Architecture Design Report HTML with a section covering data migration from Cloudian S3 to AWS S3, including:
 	•	Total data size
 	•	Daily import size
