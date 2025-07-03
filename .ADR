@@ -1,3 +1,134 @@
+
+Yes, you’re spot on! ✅
+
+To get accurate cost estimates using the AWS Pricing Calculator, you need:
+
+⸻
+
+📌 Two Key Inputs:
+	1.	Total size of data that will be stored for the first 90 days (before lifecycle transition)
+	2.	Total size after that (if data persists, e.g., moved to Glacier Deep Archive)
+
+⸻
+
+✅ Step 1: Python Code to Get Data Stored in Last 90 Days
+
+You can scan objects based on LastModified (put/uploaded time), and calculate the total size for those added in the last 90 days:
+
+🐍 Python Script
+
+import boto3
+from datetime import datetime, timezone, timedelta
+
+s3 = boto3.client('s3')
+
+def get_last_90_days_size(bucket_name, prefix=""):
+    paginator = s3.get_paginator('list_objects_v2')
+    pages = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
+
+    total_size_90_days = 0
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=90)
+
+    for page in pages:
+        for obj in page.get('Contents', []):
+            if obj['LastModified'] >= cutoff_date:
+                total_size_90_days += obj['Size']
+
+    print(f"Total size of objects PUT in last 90 days: {total_size_90_days / (1024**3):.2f} GB")
+    return total_size_90_days / (1024**3)  # return in GB
+
+# Replace with your bucket name
+size_90_days_gb = get_last_90_days_size('your-bucket-name')
+
+
+⸻
+
+🧮 Step 2: Use This Value in AWS Pricing Calculator
+	1.	Go to: https://calculator.aws.amazon.com
+	2.	Add Service → Amazon S3
+	3.	In the calculator:
+	•	Storage Class: Choose one for the first 90 days:
+	•	e.g., S3 Glacier Instant Retrieval or S3 Intelligent-Tiering
+	•	Storage amount: Use the GB from the script
+	•	Duration: Enter 3 months
+	•	Add PUT/GET request estimates if needed
+	4.	Add another storage class:
+	•	S3 Glacier Deep Archive
+	•	Use same GB value, with 9-month duration
+
+This models:
+“Store for 90 days in IA/Instant → then transition to Deep Archive”
+
+⸻
+
+🧠 Optional Additions to Script
+	•	Add prefix filtering (e.g., /archive/, /daily-ingest/)
+	•	Group by storage class
+	•	Export to CSV for dashboarding
+
+Would you like the enhanced version of the script or a complete HTML report with this breakdown for documentation or approval?
+
+Let me know!
+
+=#=#=#
+Yes — in the AWS Pricing Calculator, when modeling a lifecycle transition (e.g., from Intelligent-Tiering or Glacier Instant to Deep Archive after 90 days), you need to:
+
+⸻
+
+✅ Enter Total Storage That Will Transition After 90 Days
+
+Key Points:
+	•	You only enter storage once per storage class, with the size that will live in that tier.
+	•	You do not have to enter duration manually for lifecycle transitions — instead, you split the estimate into two parts:
+
+⸻
+
+📊 Example Workflow in Pricing Calculator
+
+🎯 Scenario:
+	•	You ingest 500 GB/month
+	•	Each file stays in S3 for 1 year
+	•	Lifecycle rule moves files from IA (or Glacier Instant) → Deep Archive after 90 days
+
+🔁 Then you enter:
+	1.	For first 90 days (3 months):
+	•	Storage Class: e.g. Glacier Instant or Intelligent-Tiering
+	•	Storage amount: 1500 GB (500 × 3)
+	•	Duration: 3 months
+	2.	For Deep Archive (after 90 days):
+	•	Storage Class: Glacier Deep Archive
+	•	Storage amount: 1500 GB
+	•	Duration: 9 months
+
+✅ This reflects the real transition:
+Data lives in tier 1 for 90 days, then moves to cheaper Deep Archive.
+
+⸻
+
+🧮 Using Your Python Code Output
+
+Use this flow:
+
+What	How
+Run Python script	get_last_90_days_size() will return GB
+Enter that in Pricing Calculator	Use that GB for both parts (IA + Deep Archive)
+PUT/GET estimate	Add estimates only to the first class (usually little/no access in archive)
+
+
+⸻
+
+🔁 TL;DR
+
+Yes — you enter the full 90-day data size for both the first class and for Deep Archive, just split by duration and storage class in the calculator.
+
+Would you like a filled-in sample of the AWS Calculator JSON estimate export for this model?
+
+Or a short HTML ADR showing this lifecycle and pricing structure?
+
+Let me know.
+
+
+==
 Here is a complete, simple, and short HTML Architecture Design Report (ADR) that includes:
 	•	✅ Goal: Migration from Cloudian S3 to AWS S3
 	•	✅ Current data flow
