@@ -1,4 +1,187 @@
-Great! Let’s enhance the script to:
+
+Thanks for the detailed clarification. Let’s design this in two Bamboo plans:
+
+⸻
+
+🎯 Goal
+	•	Build Plan:
+	•	Accepts releaseVersion, helmChartVersion, and optional forceDeploy (default: false).
+	•	Detects if any JIRA has breaking_change label.
+	•	Sets a hasBreakingChange variable to true or false.
+	•	Triggers the Deploy Plan, passing:
+	•	releaseVersion
+	•	helmChartVersion
+	•	forceDeploy
+	•	hasBreakingChange
+	•	Deploy Plan:
+	•	Deploys only if:
+	•	hasBreakingChange=false
+	•	OR forceDeploy=true
+
+⸻
+
+🧩 1. Build Plan Setup
+
+🔧 Bamboo Variables
+
+Variable Name	Type	Default	Description
+releaseVersion	Text	(no default)	Runtime input (e.g., 2025.07.04.Release)
+helmChartVersion	Text	(no default)	Runtime input (e.g., 1.2.3)
+forceDeploy	Boolean	false	Runtime optional input. Default false.
+
+✅ Mark forceDeploy as a plan variable, and allow override at runtime.
+
+⸻
+
+🔧 Script Task: check_jira_breaking.sh
+
+#!/bin/bash
+
+# Input Variables (injected by Bamboo)
+FIX_VERSION="${bamboo.releaseVersion}"
+FORCE_DEPLOY="${bamboo.forceDeploy:-false}"
+
+# JIRA Config
+JIRA_BASE_URL="https://your-jira.atlassian.net"
+JIRA_USERNAME="${bamboo.jiraUsername}"
+JIRA_TOKEN="${bamboo.jiraToken}"
+PROJECT_KEY="MYPROJ"
+
+# Init
+HAS_BREAKING_CHANGE=false
+REPORT_FILE="target/jira_breaking_check.html"
+mkdir -p target
+
+log() {
+  echo "[INFO] $1"
+}
+
+fail() {
+  echo "[ERROR] $1"
+  exit 1
+}
+
+get_jira_issues() {
+  local jql="project=${PROJECT_KEY} AND fixVersion=\"${FIX_VERSION}\""
+  local url="${JIRA_BASE_URL}/rest/api/2/search?jql=$(echo "$jql" | jq -sRr @uri)&fields=key,summary,labels"
+  curl -s -u "${JIRA_USERNAME}:${JIRA_TOKEN}" -H "Accept: application/json" "$url"
+}
+
+generate_report() {
+  echo "<html><body><h3>JIRA Breaking Change Check</h3><table border='1'><tr><th>Key</th><th>Summary</th><th>Labels</th></tr>" > "$REPORT_FILE"
+  while read -r issue; do
+    key=$(echo "$issue" | jq -r '.key')
+    summary=$(echo "$issue" | jq -r '.fields.summary')
+    labels=$(echo "$issue" | jq -r '.fields.labels | join(", ")')
+
+    if echo "$labels" | grep -q "breaking_change"; then
+      HAS_BREAKING_CHANGE=true
+      echo "<tr style='background-color:#fdd'><td>$key</td><td>$summary</td><td>$labels</td></tr>" >> "$REPORT_FILE"
+    else
+      echo "<tr><td>$key</td><td>$summary</td><td>$labels</td></tr>" >> "$REPORT_FILE"
+    fi
+  done <<< "$(echo "$jira_response" | jq -c '.issues[]')"
+  echo "</table></body></html>" >> "$REPORT_FILE"
+}
+
+# Run
+log "Checking JIRA issues for fixVersion: $FIX_VERSION"
+jira_response=$(get_jira_issues)
+
+generate_report
+
+# Export HAS_BREAKING_CHANGE variable for downstream
+echo "HAS_BREAKING_CHANGE=${HAS_BREAKING_CHANGE}" > breaking.env
+echo "FORCE_DEPLOY=${FORCE_DEPLOY}" >> breaking.env
+
+
+⸻
+
+✅ Build Plan Artifact
+	•	Copy pattern: target/jira_breaking_check.html
+	•	Optional shared artifact for review.
+
+⸻
+
+✅ Inject Environment Variables
+
+In the final task of Build Plan (after JIRA check):
+
+# Inject environment vars for deployment trigger
+source breaking.env
+
+Then pass HAS_BREAKING_CHANGE and FORCE_DEPLOY into the triggered deploy plan as variables.
+
+⸻
+
+🚀 2. Trigger Deploy Plan
+
+✅ Final Task in Build Plan:
+
+Use a Bamboo Trigger Plan Task or a custom curl to trigger deployment with variables:
+
+curl -X POST -u "${bamboo.deployUsername}:${bamboo.deployToken}" \
+  -H "Content-Type: application/json" \
+  "https://bamboo.example.com/rest/api/latest/queue/DEPLOY-PLAN-KEY?stage&executeAllStages=true" \
+  --data '{
+    "variables": {
+      "releaseVersion": "'"${FIX_VERSION}"'",
+      "helmChartVersion": "'"${bamboo.helmChartVersion}"'",
+      "forceDeploy": "'"${FORCE_DEPLOY}"'",
+      "hasBreakingChange": "'"${HAS_BREAKING_CHANGE}"'"
+    }
+  }'
+
+
+⸻
+
+🧩 3. Deploy Plan Logic
+
+🔧 Script Task in Deploy Plan (deploy.sh)
+
+#!/bin/bash
+
+RELEASE_VERSION="${bamboo.releaseVersion}"
+CHART_VERSION="${bamboo.helmChartVersion}"
+FORCE_DEPLOY="${bamboo.forceDeploy:-false}"
+HAS_BREAKING_CHANGE="${bamboo.hasBreakingChange:-false}"
+
+echo "[INFO] Starting deployment for $RELEASE_VERSION, Chart $CHART_VERSION"
+echo "[INFO] forceDeploy = $FORCE_DEPLOY"
+echo "[INFO] hasBreakingChange = $HAS_BREAKING_CHANGE"
+
+if [[ "$HAS_BREAKING_CHANGE" == "true" && "$FORCE_DEPLOY" != "true" ]]; then
+  echo "[ERROR] Breaking changes detected and forceDeploy not enabled. Skipping deployment."
+  exit 1
+fi
+
+# Proceed with deployment
+echo "[INFO] Deploying to CTLQ..."
+# ./deploy-ctlq.sh "$RELEASE_VERSION" "$CHART_VERSION"
+
+
+⸻
+
+🔁 Summary of Flow
+
+➤ Build Plan
+	•	Inputs: releaseVersion, helmChartVersion, forceDeploy (default false)
+	•	Runs JIRA check script
+	•	Generates hasBreakingChange output
+	•	Triggers Deploy Plan with both values
+
+➤ Deploy Plan
+	•	Reads forceDeploy and hasBreakingChange
+	•	Deploys only if:
+	•	No breaking changes
+	•	OR forceDeploy is true
+
+⸻
+
+Would you like a sample Bamboo YAML spec or need this wrapped as reusable Bamboo shared tasks?
+
+
+==###Great! Let’s enhance the script to:
 
 ⸻
 
