@@ -1,0 +1,162 @@
+Great! Let’s enhance the script to:
+
+⸻
+
+✅ Updated Requirements Recap
+	1.	Fetch JIRA issues by fixVersion.
+	2.	Identify breaking_change labeled issues.
+	3.	Log list of JIRA keys + summary + label flag to console.
+	4.	Generate an HTML report showing:
+	•	JIRA Key (with link),
+	•	Summary,
+	•	Labels (highlight if breaking_change),
+	•	Decision (Deploy / Skip).
+	5.	Fail deployment unless FORCE_DEPLOY=true.
+	6.	Save HTML in a folder (target/) so Bamboo can pick it up as an artifact.
+
+⸻
+
+📝 deploy_to_ctlq.sh (Enhanced)
+
+#!/bin/bash
+
+# ---- Inputs ----
+JIRA_BASE_URL="${JIRA_BASE_URL:-https://your-jira-instance.atlassian.net}"
+JIRA_PROJECT_KEY="${JIRA_PROJECT_KEY:-MYPROJ}"
+JIRA_USERNAME="${JIRA_USERNAME:-jira_user@example.com}"
+JIRA_TOKEN="${JIRA_TOKEN:-your_jira_token}"  # Use Bamboo secret variable
+FIX_VERSION="${FIX_VERSION:-2025.07.04.Release}"
+FORCE_DEPLOY="${FORCE_DEPLOY:-false}"
+
+# ---- Paths ----
+REPORT_DIR="target"
+REPORT_HTML="${REPORT_DIR}/jira_deploy_report.html"
+mkdir -p "$REPORT_DIR"
+
+# ---- Functions ----
+function log() {
+    echo "[INFO] $1"
+}
+
+function fail() {
+    echo "[ERROR] $1"
+    exit 1
+}
+
+function get_jiras_for_fix_version() {
+    local jql="project=${JIRA_PROJECT_KEY} AND fixVersion=\"${FIX_VERSION}\" ORDER BY key"
+    local url="${JIRA_BASE_URL}/rest/api/2/search?jql=$(echo "$jql" | jq -sRr @uri)&fields=key,summary,labels"
+
+    curl -s -u "${JIRA_USERNAME}:${JIRA_TOKEN}" -H "Accept: application/json" "$url"
+}
+
+function generate_html_header() {
+    cat <<EOF > "$REPORT_HTML"
+<html><head><style>
+body { font-family: Arial; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+th { background-color: #eee; }
+.breaking { background-color: #fdd; font-weight: bold; }
+.ok { background-color: #dfd; }
+</style></head><body>
+<h2>JIRA Deployment Report for Version: $FIX_VERSION</h2>
+<table>
+<tr><th>JIRA</th><th>Summary</th><th>Labels</th><th>Status</th></tr>
+EOF
+}
+
+function generate_html_footer() {
+    echo "</table></body></html>" >> "$REPORT_HTML"
+}
+
+# ---- Execution ----
+log "Checking JIRA issues for fixVersion: $FIX_VERSION"
+response=$(get_jiras_for_fix_version)
+
+if [ -z "$response" ]; then
+    fail "No response from JIRA API."
+fi
+
+issues=$(echo "$response" | jq -c '.issues[]')
+has_breaking_change=false
+
+generate_html_header
+
+log "---- JIRA Issues for Version $FIX_VERSION ----"
+while read -r issue; do
+    key=$(echo "$issue" | jq -r '.key')
+    summary=$(echo "$issue" | jq -r '.fields.summary')
+    labels=$(echo "$issue" | jq -r '.fields.labels | join(", ")')
+    url="$JIRA_BASE_URL/browse/$key"
+
+    if echo "$issue" | jq -e '.fields.labels[]? | select(. == "breaking_change")' > /dev/null; then
+        has_breaking_change=true
+        status="SKIP DEPLOY"
+        echo "[BREAKING] $key: $summary (labels: $labels)"
+        echo "<tr class='breaking'><td><a href='$url'>$key</a></td><td>$summary</td><td>$labels</td><td><b>$status</b></td></tr>" >> "$REPORT_HTML"
+    else
+        status="SAFE TO DEPLOY"
+        echo "[SAFE]     $key: $summary (labels: $labels)"
+        echo "<tr class='ok'><td><a href='$url'>$key</a></td><td>$summary</td><td>$labels</td><td>$status</td></tr>" >> "$REPORT_HTML"
+    fi
+done <<< "$issues"
+
+generate_html_footer
+
+if [[ "$has_breaking_change" == "true" && "$FORCE_DEPLOY" != "true" ]]; then
+    log "Detected JIRA(s) with 'breaking_change' label. Skipping deployment to CTLQ."
+    log "To override, set FORCE_DEPLOY=true."
+    fail "Deployment halted due to breaking changes."
+else
+    log "No blocking issues found, or FORCE_DEPLOY enabled. Proceeding with deployment to CTLQ."
+    # ---- Your deployment command here ----
+    log "Deploying version $FIX_VERSION to CTLQ..."
+    # ./run-ctlq-deployment.sh "$FIX_VERSION"
+fi
+
+
+⸻
+
+📦 Bamboo Setup
+
+1. Inject variables into Bamboo Plan:
+	•	JIRA_USERNAME, JIRA_TOKEN (as Secure Variables)
+	•	FIX_VERSION (release version)
+	•	Optional: FORCE_DEPLOY = true
+
+2. Script Task
+
+chmod +x deploy_to_ctlq.sh
+./deploy_to_ctlq.sh
+
+3. Artifact Definition
+
+Go to Job → Artifacts → Define Artifact:
+	•	Name: JIRA_Report
+	•	Copy pattern: target/jira_deploy_report.html
+	•	Shared: Yes (if needed)
+
+⸻
+
+✅ Sample Output (Console)
+
+[INFO] Checking JIRA issues for fixVersion: 2025.07.04.Release
+---- JIRA Issues for Version 2025.07.04.Release ----
+[SAFE]     MYPROJ-101: Fix styling (labels: ui,low)
+[BREAKING] MYPROJ-102: Schema change (labels: breaking_change,backend)
+[ERROR] Deployment halted due to breaking changes.
+
+
+⸻
+
+✅ Sample Output (HTML)
+
+A well-formatted table with breaking_change rows highlighted in red and clickable JIRA links.
+
+⸻
+
+Let me know if you want to:
+	•	Email the HTML report via SMTP.
+	•	Automatically attach the HTML report to a Confluence page.
+	•	Or include a Markdown export too.
