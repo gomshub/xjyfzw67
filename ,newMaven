@@ -1,3 +1,117 @@
+
+Great — here’s a secure and clean guide to using Maven encrypted credentials with Windows Credential Manager for deploying to Artifactory.
+
+⸻
+
+🔐 GOAL
+
+Securely store Artifactory credentials on Windows, and use them in Maven deploy without exposing them in:
+	•	settings.xml
+	•	Environment variables
+	•	Eclipse or logs
+
+⸻
+
+✅ Step-by-Step: Encrypt and Store Artifactory Credentials
+
+⸻
+
+1. Encrypt Your Artifactory Password or API Token
+
+In your terminal (Git Bash / PowerShell / CMD):
+
+mvn --encrypt-password
+
+You’ll be prompted to enter your real password or token.
+Maven returns something like:
+
+{jSM1dfU2A3kfdLkjsdf==}
+
+✅ Copy this encrypted password. Do not store the plain text anywhere now.
+
+⸻
+
+2. Update ~/.m2/settings-security.xml (optional)
+
+This file contains the master key used for decryption.
+
+Usually at:
+
+C:\Users\<your-user>\.m2\settings-security.xml
+
+If it doesn’t exist, Maven creates one automatically with:
+
+mvn --encrypt-password
+
+You don’t need to modify this file unless you want to re-use a specific master key (in teams, for example).
+
+⸻
+
+3. Update settings.xml Securely
+
+Edit your Maven settings file:
+C:\Users\<your-user>\.m2\settings.xml
+
+Add the Artifactory server section with the encrypted password:
+
+<servers>
+  <server>
+    <id>artifactory-snapshot</id>
+    <username>your-artifactory-username</username>
+    <password>{jSM1dfU2A3kfdLkjsdf==}</password> <!-- ENCRYPTED -->
+  </server>
+</servers>
+
+🔒 This is now safe to use, as the password is not in plaintext.
+
+⸻
+
+✅ Optional: Add Distribution Management in pom.xml
+
+<distributionManagement>
+  <snapshotRepository>
+    <id>artifactory-snapshot</id>
+    <url>https://artifactory.company.com/artifactory/libs-snapshot-local</url>
+  </snapshotRepository>
+</distributionManagement>
+
+
+⸻
+
+4. Use mvn deploy as Usual
+
+Now Maven will:
+	•	Use the encrypted password
+	•	Automatically decrypt it using your master key
+	•	Upload to Artifactory securely
+
+⸻
+
+🧠 Summary
+
+Step	File	Secure?
+Encrypt password	mvn --encrypt-password	✅
+Store encrypted token	settings.xml	✅
+Keep master key safe	settings-security.xml	✅
+Avoid plain env vars or plaintext secrets	✅	✅
+
+
+⸻
+
+🛡️ Extra Tip: Windows Credential Manager (Optional)
+
+If you want to store the real token there and pull it dynamically into your Maven settings.xml, you’ll need a custom Maven extension (not standard Maven behavior).
+
+So the recommended approach remains:
+	•	Encrypt it using mvn --encrypt-password
+	•	Keep it in your settings.xml
+
+⸻
+
+Would you like me to generate a ready-to-paste settings.xml and pom.xml sample based on your snapshot module and Artifactory structure?
+
+===
+
 Sure! Here’s a complete README that gives you everything to create a minimal runnable Maven test-runner project named indicator-daily-sync-test which:
 	•	References your Karate snapshot JAR from Artifactory
 	•	Includes a minimal JUnit 5 test runner class to trigger tests
