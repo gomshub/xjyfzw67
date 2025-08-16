@@ -1,0 +1,72 @@
+Perfect 👍 Let’s build both for you:
+
+⸻
+
+🟢 Option 1: Method 2 (Rolling To-Do) with JIRA + Status in OneNote
+
+Here’s a template table you can copy into OneNote to track tasks in a Kanban-style format:
+
+✅	Task	JIRA ID	Status	Notes
+[ ]	Fix ECS deployment error	JIRA-1234	⏳ In Progress	Debugging Terraform ALB module
+[ ]	Add RabbitMQ queue arguments	JIRA-5678	⛔ On Hold	Waiting for product team input
+[ ]	Automate S3-to-Lambda pipeline	JIRA-7890	🔜 Not Started	Terraform IAM roles needed
+
+
+⸻
+
+🔹 How to use this table:
+	•	✅ Column = OneNote checkbox (Ctrl+1) → tick when done.
+	•	Task = Short description.
+	•	JIRA ID = Hyperlink to ticket.
+	•	Status = Use emojis or plain text (⏳ In Progress / ⛔ On Hold / ✅ Completed / 🔜 Not Started).
+	•	Notes = Extra context.
+
+👉 You can have three tables (Today / This Week / Later) on the same page for rolling tracking.
+
+⸻
+
+🟢 Option 2: Method 2 + Method 3 (OneNote + Outlook Integration)
+
+This combo lets you:
+	•	Organize tasks in OneNote (Method 2).
+	•	Send selected tasks into Outlook for reminders & mobile sync (Method 3).
+
+⸻
+
+🔹 Step 1: Rolling To-Do in OneNote
+
+Keep the same table as above, OR just a bulleted list:
+
+🔴 Today
+[ ] [JIRA-1234] Fix ECS deployment error – ⏳ In Progress
+[ ] [JIRA-5678] Add RabbitMQ queue arguments – ⛔ On Hold
+
+🟡 This Week
+[ ] [JIRA-7890] Automate S3-to-Lambda pipeline – 🔜 Not Started
+
+
+⸻
+
+🔹 Step 2: Send Important Tasks to Outlook
+	1.	Right-click a task in OneNote → Outlook Tasks.
+	2.	Pick due date (Today, Tomorrow, Next Week, Custom Date).
+	3.	The task gets a red flag + syncs into Outlook Tasks / Microsoft To Do.
+	•	You get reminders.
+	•	If you check it off in Outlook/To Do → it updates in OneNote automatically.
+
+⸻
+
+🔹 Step 3: Daily Flow
+	•	Morning → Move 2–3 items from This Week → Today. Flag urgent ones to Outlook for reminders.
+	•	During the day → Update status in OneNote (⏳/⛔/✅).
+	•	End of day → Check off completed tasks in Outlook & OneNote, move pending tasks forward.
+
+⸻
+
+✅ Benefit:
+	•	OneNote = your planning hub (organized by JIRA + status + notes).
+	•	Outlook = your execution tool (reminders, mobile sync, calendar view).
+
+⸻
+
+👉 Do you want me to prepare a ready-to-paste OneNote daily template (with the three sections + JIRA/status table + Outlook task flags) so you can literally drop it into your office OneNote and start tomorrow?
