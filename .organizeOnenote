@@ -1,4 +1,65 @@
 
+
+Ahh got it 👍
+You don’t just want a generic In Progress / On Hold / Completed — you want statuses that match the SDLC workflow like:
+	•	🛠 In Dev
+	•	🧪 In FAT (Functional Acceptance Testing)
+	•	🔬 In UAT (User Acceptance Testing)
+	•	🚀 Ready for Prod / Released
+	•	⛔ On Hold
+
+That makes your OneNote task tracker much closer to how JIRA workflows actually run.
+
+⸻
+
+Here’s how your Rolling To-Do with Notes would look with these statuses:
+
+⸻
+
+🔴 Today
+
+[ ] [JIRA-1234] Fix ECS deployment error – 🛠 In Dev
+  Notes: Debugging Terraform ALB module, pending security group change
+
+[ ] [JIRA-5678] Add RabbitMQ queue arguments – 🧪 In FAT
+  Notes: Test queue bindings with staging setup
+
+⸻
+
+🟡 This Week
+
+[ ] [JIRA-7890] Automate S3-to-Lambda pipeline – 🔬 In UAT
+  Notes: UAT team validating IAM roles + S3 triggers
+
+[ ] [JIRA-2468] Review RabbitMQ config – ⛔ On Hold
+  Notes: Waiting for product approval
+
+⸻
+
+🟢 Later
+
+[ ] [JIRA-3456] Improve monitoring with CloudWatch alarms – 🔜 Planned
+  Notes: Add ECS + ALB health check alarms
+
+[ ] [JIRA-6789] Explore EKS scaling options – 🚀 Ready for Prod
+  Notes: Karpenter vs Cluster Autoscaler to be finalized
+
+⸻
+
+🔗 Outlook Sync Still Works
+	•	You can still flag tasks to Outlook (due dates + reminders).
+	•	Status is just part of your text → won’t break the sync.
+	•	Outlook will show:
+
+[JIRA-1234] Fix ECS deployment error – In Dev
+
+(so you know the lifecycle stage).
+
+⸻
+
+👉 Do you want me to expand this into a Weekly Template (Mon–Fri) using your Dev → FAT → UAT → Prod flow so you can plan where each JIRA ticket stands during the week?
+
+
 Perfect 👌 let’s build a Weekly Rolling To-Do Template for OneNote that already has Mon–Fri pages with JIRA + Status + Outlook sync built in.
 
 ⸻
