@@ -1,3 +1,102 @@
+
+Perfect 👌 let’s build a Weekly Rolling To-Do Template for OneNote that already has Mon–Fri pages with JIRA + Status + Outlook sync built in.
+
+⸻
+
+📒 Weekly Rolling To-Do (OneNote + Outlook)
+
+📅 Week of: ____ (DD–DD MMM YYYY)
+
+⸻
+
+🔴 Monday
+
+✅	Task	JIRA ID	Status	Notes
+[ ]			🔜 Not Started	
+[ ]			🔜 Not Started	
+
+
+⸻
+
+🔴 Tuesday
+
+✅	Task	JIRA ID	Status	Notes
+[ ]			🔜 Not Started	
+[ ]			🔜 Not Started	
+
+
+⸻
+
+🔴 Wednesday
+
+✅	Task	JIRA ID	Status	Notes
+[ ]			🔜 Not Started	
+[ ]			🔜 Not Started	
+
+
+⸻
+
+🔴 Thursday
+
+✅	Task	JIRA ID	Status	Notes
+[ ]			🔜 Not Started	
+[ ]			🔜 Not Started	
+
+
+⸻
+
+🔴 Friday
+
+✅	Task	JIRA ID	Status	Notes
+[ ]			🔜 Not Started	
+[ ]			🔜 Not Started	
+
+
+⸻
+
+🟡 This Week (Backlog)
+
+✅	Task	JIRA ID	Status	Notes
+[ ]			🔜 Not Started	
+[ ]			🔜 Not Started	
+
+
+⸻
+
+🟢 Later
+
+✅	Task	JIRA ID	Status	Notes
+[ ]			🔜 Not Started	
+[ ]			🔜 Not Started	
+
+
+⸻
+
+🔗 Outlook Sync
+	•	Right-click any row → Outlook Tasks → pick Today/Tomorrow/Next Week.
+	•	Task syncs into Outlook and Microsoft To Do with reminders.
+	•	Completion syncs both ways (check in Outlook → auto-check in OneNote).
+
+⸻
+
+🔄 Weekly Workflow
+	•	Monday morning → Pull 2–3 items from This Week → Monday table, flag urgent ones to Outlook.
+	•	Daily → Update Status (⏳ / ⛔ / ✅ / 🔜) + add notes.
+	•	Friday afternoon → Move unfinished items to Next Week page.
+	•	Review “Later” list once a week → promote if needed.
+
+⸻
+
+✨ With this setup:
+	•	Each day has its own sectioned table (great for JIRA + notes).
+	•	You keep rolling tasks forward (Method 2).
+	•	Important tasks get synced into Outlook for reminders (Method 3).
+
+⸻
+
+👉 Do you want me to also prepare this as a OneNote template file (.onepkg) that you can import directly instead of copy-pasting tables every time?
+
+
 Perfect 👍 Let’s build both for you:
 
 ⸻
