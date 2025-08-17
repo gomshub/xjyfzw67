@@ -1,3 +1,39 @@
+Got it 👍 you want a clear icon for SFTP-related tasks / follow-ups (like when coordinating with the SFTP/transfer/file-movement team).
+
+Here are a few good symbolic options you can use in OneNote:
+	•	📂 Folder/File → represents file transfers
+	•	🔑 Key → secure key-based SFTP access
+	•	📡 Antenna → data transmission
+	•	🔐 Lock with keyhole → secure transfer
+	•	📨 Envelope with arrow → file delivery
+
+👉 My recommendation for SFTP team follow-ups is:
+
+📂 SFTP Team → File movement / transfer requests
+or
+🔐 SFTP Team → Secure file transfer issues
+
+⸻
+
+Example with your workflow:
+
+[ ] 🧩 [JIRA-1234] Fix ECS deployment error – 🛠 In Dev  
+     Notes: Debugging ALB module  
+
+[ ] 📂 Follow up with SFTP team on user onboarding – ⏳ Pending  
+     Notes: Requested SSH key setup  
+
+[ ] 🔒 Request firewall rule update (Security) – ⛔ On Hold  
+     Notes: Ticket SEC-4567 raised  
+
+[ ] 📧 Follow up with AWS provider – ⏳ In Progress  
+     Notes: Waiting for ACM cert confirmation  
+
+
+⸻
+
+👉 Do you want me to add 📂 SFTP Team into the symbol legend template so you have one standard legend for all teams (Security, Cloud, Batch, SFTP, Provider)?
+
 Perfect 👍 now we’re getting into real-life task management in OneNote where you want:
 	1.	Tasks with JIRA tickets (your dev/test work).
 	2.	Follow-ups with internal teams (security, cloud, batch automation, etc.).
