@@ -1,4 +1,72 @@
+Perfect 👍 now we’re getting into real-life task management in OneNote where you want:
+	1.	Tasks with JIRA tickets (your dev/test work).
+	2.	Follow-ups with internal teams (security, cloud, batch automation, etc.).
+	3.	Follow-ups with external providers via email.
+	4.	Each type should have a symbol / icon so you can identify at a glance what kind of follow-up it is.
 
+⸻
+
+🏷 Symbol Legend for Quick Identification
+
+Here are some clean, memorable symbols you can use in front of tasks:
+	•	🧩 JIRA Task → Standard dev/test issue
+	•	🔒 Security Team follow-up
+	•	☁️ Cloud/Infra Team follow-up
+	•	🔄 Batch Process Automation follow-up
+	•	📧 Email Provider / Vendor follow-up
+	•	📌 General Reminder / Admin task
+
+⸻
+
+Example in OneNote (Method 2 + Notes + Status)
+
+🔴 Today
+
+[ ] 🧩 [JIRA-1234] Fix ECS deployment error – 🛠 In Dev
+  Notes: Debugging Terraform ALB module, pending SG update
+
+[ ] 🔒 Request firewall rule update (Security) – ⏳ Pending
+  Notes: Ticket SEC-4567 raised, waiting for approval
+
+[ ] ☁️ Cloud team review for subnet change – ⛔ On Hold
+  Notes: CloudOps to validate subnet sizing by EOD
+
+[ ] 🔄 Follow-up with Batch team on job retry logic – 🧪 In FAT
+  Notes: BatchOps to test retry strategy
+
+[ ] 📧 Follow up with AWS provider – ⏳ In Progress
+  Notes: Sent mail to provider on ACM cert issue, awaiting reply
+
+⸻
+
+🟡 This Week
+
+[ ] 🧩 [JIRA-7890] Automate S3-to-Lambda pipeline – 🔬 In UAT
+  Notes: UAT testing IAM roles
+
+[ ] 🔒 Request IAM policy review from Security – Planned
+  Notes: Need approval before production
+
+⸻
+
+🔗 Outlook Sync Still Works
+	•	Right-click any of these lines → Outlook Tasks → add due date.
+	•	Symbols + JIRA IDs stay in Outlook / To Do, so you’ll see:
+
+🔒 Request firewall rule update (Security) – Pending
+
+
+
+⸻
+
+⚡ This way, you can scan your OneNote page visually:
+	•	🧩 = Dev work
+	•	🔒 / ☁️ / 🔄 = internal follow-ups
+	•	📧 = external follow-up
+
+⸻
+
+👉 Do you want me to create a Weekly OneNote template (Mon–Fri) using this symbol + status + notes format, so you can just duplicate each week and fill in tasks/follow-ups?
 
 Ahh got it 👍
 You don’t just want a generic In Progress / On Hold / Completed — you want statuses that match the SDLC workflow like:
