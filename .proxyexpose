@@ -1,0 +1,150 @@
+Perfect, now it’s very clear 👍
+	•	Cluster A Swagger services are already exposed via Ingress (https://service1.clusterA.com/...).
+	•	Some users cannot access them directly (due to zone / firewall restrictions).
+	•	But those same users can access Cluster B.
+	•	✅ So we just need to give them a proxy endpoint inside Cluster B, which forwards their requests to Cluster A.
+
+⸻
+
+🔹 Solution: Proxy in Cluster B for Cluster A’s Ingress
+
+Step 1. Nginx Config
+
+We’ll create an Nginx reverse proxy in Cluster B.
+Example for 2 services (service1 and service2):
+
+events {}
+http {
+  server {
+    listen 8080;
+
+    location /service1/ {
+      proxy_pass https://service1.clusterA.com/;
+    }
+
+    location /service2/ {
+      proxy_pass https://service2.clusterA.com/;
+    }
+  }
+}
+
+
+⸻
+
+Step 2. Kubernetes YAML (in Cluster B)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-config
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 8080;
+
+        location /service1/ {
+          proxy_pass https://service1.clusterA.com/;
+          proxy_set_header Host service1.clusterA.com;
+        }
+
+        location /service2/ {
+          proxy_pass https://service2.clusterA.com/;
+          proxy_set_header Host service2.clusterA.com;
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swagger-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: swagger-proxy
+  template:
+    metadata:
+      labels:
+        app: swagger-proxy
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+      volumes:
+      - name: config
+        configMap:
+          name: swagger-proxy-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swagger-proxy
+spec:
+  selector:
+    app: swagger-proxy
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+
+⸻
+
+Step 3. Optional: Expose in Cluster B
+
+If users need to access it from outside Cluster B, expose it with an Ingress or a LoadBalancer Service:
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swagger-proxy-ingress
+spec:
+  rules:
+  - host: swagger-proxy.clusterB.com
+    http:
+      paths:
+      - path: /service1/
+        pathType: Prefix
+        backend:
+          service:
+            name: swagger-proxy
+            port:
+              number: 8080
+      - path: /service2/
+        pathType: Prefix
+        backend:
+          service:
+            name: swagger-proxy
+            port:
+              number: 8080
+
+
+⸻
+
+🔹 Final Access Flow
+	•	User cannot access https://service1.clusterA.com directly.
+	•	User goes to:
+
+https://swagger-proxy.clusterB.com/service1/
+
+
+	•	Request goes → Cluster B Nginx → forwards to https://service1.clusterA.com/ in Cluster A.
+	•	Response comes back via the proxy.
+
+⸻
+
+✅ No changes needed in Cluster A (since it’s already exposed by Ingress).
+✅ Only deploy a proxy Deployment + Service + Ingress in Cluster B.
+
+⸻
+
+Do you want me to extend this YAML so you can proxy an arbitrary list of services (like 10+ Swagger endpoints) with just one config?
