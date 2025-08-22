@@ -1,3 +1,207 @@
+
+Perfect 👍 you want a Helmized proxy deployment in Cluster B that can forward to a list of Swagger services in Cluster A.
+
+Here’s a clean Helm chart structure + YAML configs that you can adapt.
+
+⸻
+
+🔹 Directory Structure
+
+swagger-proxy/
+├── Chart.yaml
+├── values.yaml
+├── templates/
+│   ├── configmap.yaml
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── ingress.yaml
+
+
+⸻
+
+🔹 Chart.yaml
+
+apiVersion: v2
+name: swagger-proxy
+description: Reverse proxy for Swagger services in Cluster A
+version: 0.1.0
+appVersion: "1.0"
+
+
+⸻
+
+🔹 values.yaml
+
+Here you define the list of services in Cluster A you want to proxy.
+
+replicaCount: 1
+
+image:
+  repository: nginx
+  tag: alpine
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: ""
+  hosts:
+    - host: swagger-proxy.clusterB.com
+      paths:
+        - path: /
+          pathType: Prefix
+          backendPort: 8080
+  tls: []   # e.g., configure if you have certs
+
+# List of Swagger services in Cluster A
+services:
+  - name: service1
+    url: https://service1.clusterA.com/swagger/
+  - name: service2
+    url: https://service2.clusterA.com/swagger/
+  - name: service3
+    url: https://service3.clusterA.com/swagger/
+
+
+⸻
+
+🔹 templates/configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "swagger-proxy.fullname" . }}-config
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen {{ .Values.service.port }};
+        {{- range .Values.services }}
+        location /{{ .name }}/ {
+          proxy_pass {{ .url }};
+          proxy_set_header Host {{ regexReplaceAll "https?://" .url "" }};
+        }
+        {{- end }}
+      }
+    }
+
+
+⸻
+
+🔹 templates/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swagger-proxy.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "swagger-proxy.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "swagger-proxy.name" . }}
+    spec:
+      containers:
+      - name: nginx
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.service.port }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "swagger-proxy.fullname" . }}-config
+
+
+⸻
+
+🔹 templates/service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "swagger-proxy.fullname" . }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: {{ include "swagger-proxy.name" . }}
+  ports:
+  - port: {{ .Values.service.port }}
+    targetPort: {{ .Values.service.port }}
+
+
+⸻
+
+🔹 templates/ingress.yaml
+
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "swagger-proxy.fullname" . }}
+spec:
+  rules:
+  {{- range .Values.ingress.hosts }}
+  - host: {{ .host }}
+    http:
+      paths:
+      {{- range .paths }}
+      - path: {{ .path }}
+        pathType: {{ .pathType }}
+        backend:
+          service:
+            name: {{ include "swagger-proxy.fullname" $ }}
+            port:
+              number: {{ .backendPort }}
+      {{- end }}
+  {{- end }}
+{{- end }}
+
+
+⸻
+
+🔹 How It Works
+	1.	Add your Cluster A Swagger services in values.yaml under .services.
+
+services:
+  - name: service1
+    url: https://service1.clusterA.com/swagger/
+  - name: service2
+    url: https://service2.clusterA.com/swagger/
+
+
+	2.	Deploy Helm chart in Cluster B:
+
+helm install swagger-proxy ./swagger-proxy
+
+
+	3.	Access endpoints from Cluster B users:
+
+https://swagger-proxy.clusterB.com/service1/
+https://swagger-proxy.clusterB.com/service2/
+
+
+
+⸻
+
+✅ This setup needs no changes in Cluster A (since it’s already exposed via Ingress).
+✅ Users who only have access to Cluster B can now consume Cluster A Swagger via the proxy.
+
+⸻
+
+Do you want me to also include basic auth / IP restriction in this proxy Helm chart so only selected users can use it?
+
 Perfect, now it’s very clear 👍
 	•	Cluster A Swagger services are already exposed via Ingress (https://service1.clusterA.com/...).
 	•	Some users cannot access them directly (due to zone / firewall restrictions).
