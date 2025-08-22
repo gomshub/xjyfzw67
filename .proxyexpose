@@ -1,4 +1,188 @@
 
+Perfect 👍 let’s make this generic with Helm so you don’t have to hardcode every service proxy.
+
+We’ll build a small Helm chart called swagger-proxy.
+
+⸻
+
+📂 Directory Structure
+
+swagger-proxy/
+  Chart.yaml
+  values.yaml
+  templates/
+    configmap.yaml
+    deployment.yaml
+    service.yaml
+    ingress.yaml
+
+
+⸻
+
+📝 Chart.yaml
+
+apiVersion: v2
+name: swagger-proxy
+description: Proxy Swagger UI + API services from Cluster A into Cluster B
+version: 0.1.0
+appVersion: "1.0"
+
+
+⸻
+
+📝 values.yaml
+
+Here you configure all the endpoints to proxy:
+
+replicaCount: 1
+
+image:
+  repository: nginx
+  tag: alpine
+
+ingress:
+  enabled: true
+  host: swagger-clusterB.com
+
+# Proxy rules
+# Each entry maps a path on Cluster B → a target in Cluster A
+proxies:
+  - path: /
+    target: https://swagger-clusterA.com/
+    hostHeader: swagger-clusterA.com
+
+  - path: /service1/
+    target: https://api-service1.clusterA.com/
+    hostHeader: api-service1.clusterA.com
+
+  - path: /service2/
+    target: https://api-service2.clusterA.com/
+    hostHeader: api-service2.clusterA.com
+
+
+⸻
+
+📝 templates/configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-config
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 8080;
+
+        {{- range .Values.proxies }}
+        location {{ .path }} {
+          proxy_pass {{ .target }};
+          proxy_set_header Host {{ .hostHeader }};
+        }
+        {{- end }}
+      }
+    }
+
+
+⸻
+
+📝 templates/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swagger-proxy
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: swagger-proxy
+  template:
+    metadata:
+      labels:
+        app: swagger-proxy
+    spec:
+      containers:
+      - name: nginx
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+      volumes:
+      - name: config
+        configMap:
+          name: swagger-proxy-config
+
+
+⸻
+
+📝 templates/service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: swagger-proxy
+spec:
+  selector:
+    app: swagger-proxy
+  ports:
+    - port: 8080
+      targetPort: 8080
+  type: ClusterIP
+
+
+⸻
+
+📝 templates/ingress.yaml
+
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swagger-proxy-ingress
+spec:
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+        {{- range .Values.proxies }}
+          - path: {{ .path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: swagger-proxy
+                port:
+                  number: 8080
+        {{- end }}
+{{- end }}
+
+
+⸻
+
+🚀 Deploy
+
+helm install swagger-proxy ./swagger-proxy
+
+
+⸻
+
+🔹 How it Works
+	•	Users go to https://swagger-clusterB.com
+	•	Requests to / → proxied to https://swagger-clusterA.com
+	•	Requests to /service1/ → proxied to https://api-service1.clusterA.com
+	•	Requests to /service2/ → proxied to https://api-service2.clusterA.com
+	•	You can add/remove services just by editing values.yaml.
+
+⸻
+
+Do you also want me to show how to make the proxy auto-rewrite the Swagger UI URLs (so that instead of api-service1.clusterA.com showing up in the docs, it automatically rewrites to swagger-clusterB.com/service1/)? That way users never even see the Cluster A domains.
+
+
+======
 Perfect 👍 you want a Helmized proxy deployment in Cluster B that can forward to a list of Swagger services in Cluster A.
 
 Here’s a clean Helm chart structure + YAML configs that you can adapt.
