@@ -1,4 +1,228 @@
 
+Nice 🚀 you want the end-to-end flow:
+	1.	Helm chart for Nginx proxy (with multiple Swagger service mappings).
+	2.	Bamboo build script to:
+	•	Package the Helm chart.
+	•	Push Docker image + Helm chart to Artifactory.
+	•	Trigger ArgoCD to sync.
+	3.	Use paramArgoCDUpdater (parametrized deployment).
+
+Let’s break it step by step 👇
+
+⸻
+
+1️⃣ Helm Chart Structure
+
+swagger-proxy/
+├── Chart.yaml
+├── values.yaml
+├── templates/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── ingress.yaml
+│   └── configmap.yaml
+
+
+⸻
+
+Chart.yaml
+
+apiVersion: v2
+name: swagger-proxy
+description: Reverse proxy for Swagger APIs across clusters
+type: application
+version: 0.1.0
+appVersion: "1.25.3"
+
+
+⸻
+
+values.yaml
+
+image:
+  repository: artifactory.company.com/docker/nginx
+  tag: 1.25.3
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  host: swagger-clusterB.com
+
+proxies:
+  - path: /service1/
+    target: https://api-service1.clusterA.com/
+    hostHeader: api-service1.clusterA.com
+
+  - path: /service2/
+    target: https://api-service2.clusterA.com/
+    hostHeader: api-service2.clusterA.com
+
+
+⸻
+
+templates/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swagger-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: swagger-proxy
+  template:
+    metadata:
+      labels:
+        app: swagger-proxy
+    spec:
+      containers:
+        - name: nginx
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+      volumes:
+        - name: config
+          configMap:
+            name: swagger-proxy-config
+
+
+⸻
+
+templates/service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: swagger-proxy
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+  selector:
+    app: swagger-proxy
+
+
+⸻
+
+templates/ingress.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swagger-proxy-ingress
+spec:
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: swagger-proxy
+                port:
+                  number: 8080
+
+
+⸻
+
+templates/configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-config
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 8080;
+        {{- range .Values.proxies }}
+        location {{ .path }} {
+          proxy_pass {{ .target }};
+          proxy_set_header Host {{ .hostHeader }};
+        }
+        {{- end }}
+      }
+    }
+
+
+⸻
+
+2️⃣ Bamboo Build Script (bamboo-specs.yaml or inline script)
+
+Example task script in your Bamboo plan:
+
+#!/bin/bash
+set -e
+
+CHART_NAME=swagger-proxy
+CHART_VERSION=0.1.$(date +%Y%m%d%H%M)
+HELM_REPO_URL=https://artifactory.company.com/helm
+DOCKER_IMAGE=artifactory.company.com/docker/nginx:1.25.3
+
+echo ">>> Packaging Helm Chart"
+helm package ./swagger-proxy --version $CHART_VERSION
+
+echo ">>> Pushing Helm Chart to Artifactory"
+curl -u $ARTIFACTORY_USER:$ARTIFACTORY_PASSWORD \
+     -T ${CHART_NAME}-${CHART_VERSION}.tgz \
+     "$HELM_REPO_URL/${CHART_NAME}-${CHART_VERSION}.tgz"
+
+echo ">>> Updating ArgoCD Deployment"
+argocd app set swagger-proxy \
+  --values values.yaml \
+  --parameter image.tag=$CHART_VERSION \
+  --grpc-web
+
+
+⸻
+
+3️⃣ ArgoCD Deployment with paramArgoCDUpdater
+
+In ArgoCD, you’ll have an app like:
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: swagger-proxy
+  namespace: argocd
+spec:
+  source:
+    repoURL: https://artifactory.company.com/helm
+    chart: swagger-proxy
+    targetRevision: 0.1.*
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: swagger
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+
+
+⸻
+
+✅ Flow:
+	1.	Bamboo builds chart + uploads to Artifactory.
+	2.	Bamboo triggers ArgoCD CLI (argocd app set) or paramArgoCDUpdater plugin to update the chart version / values.
+	3.	ArgoCD pulls Helm chart from Artifactory → deploys to Cluster B.
+
+⸻
+
+Would you like me to give you a ready-to-use Bamboo bamboo-specs.yaml (YAML DSL) so you don’t need to inline scripts, or do you prefer the bash script task approach?
+
+
+=#=#=#
 Perfect 👍 let’s make this generic with Helm so you don’t have to hardcode every service proxy.
 
 We’ll build a small Helm chart called swagger-proxy.
