@@ -1,4 +1,75 @@
 
+Yes 👍 you can always see the final YAMLs that Helm generates before/after packaging and deploying.
+
+Here’s how:
+
+⸻
+
+🔹 1. Check templates without packaging
+
+If you have a Helm chart folder (say swagger-proxy/), run:
+
+helm template swagger-proxy ./swagger-proxy -f values.yaml
+
+👉 This renders all templates into plain Kubernetes YAMLs, substituting values from values.yaml.
+It does not install, just prints to stdout.
+
+If you want to save them:
+
+helm template swagger-proxy ./swagger-proxy -f values.yaml > rendered.yaml
+
+
+⸻
+
+🔹 2. Check packaged chart
+
+If you already ran:
+
+helm package ./swagger-proxy
+
+You’ll get something like:
+
+swagger-proxy-0.1.0.tgz
+
+You can still inspect it without deploying:
+
+helm template swagger-proxy swagger-proxy-0.1.0.tgz -f values.yaml
+
+
+⸻
+
+🔹 3. After deployment — inspect applied YAMLs
+
+If it’s already installed in Kubernetes:
+
+helm get manifest swagger-proxy
+
+👉 This shows the exact YAMLs Helm applied to the cluster.
+Useful for debugging when what you expected ≠ what’s running.
+
+⸻
+
+🔹 4. Alternative: unpack .tgz chart
+
+Since a Helm chart is just a tarball:
+
+tar -xvzf swagger-proxy-0.1.0.tgz
+
+This gives you back the /templates, values.yaml, and Chart.yaml.
+
+⸻
+
+✅ So yes — you can fully unpack and inspect all YAMLs either:
+	•	before deploying (helm template)
+	•	after packaging (helm template .tgz)
+	•	after deployment (helm get manifest)
+
+⸻
+
+Do you want me to show you a Bamboo build step that does helm template into an artifact (rendered.yaml) so you can always see exactly what will be applied, before ArgoCD picks it up?
+
+
+===
 Nice 🚀 you want the end-to-end flow:
 	1.	Helm chart for Nginx proxy (with multiple Swagger service mappings).
 	2.	Bamboo build script to:
