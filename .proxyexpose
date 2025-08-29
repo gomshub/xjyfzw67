@@ -1,3 +1,227 @@
+
+Got it ✅ thanks for clarifying your exact need.
+Let me restate in plain words so we don’t miss the logic:
+	•	Cluster A has:
+	•	https://swagger.clusterA.com (Swagger UI)
+	•	https://api-actor.clusterA.com (backend APIs)
+	•	… other backend APIs.
+	•	Some users cannot reach Cluster A, but they can reach Cluster B.
+	•	You want to deploy a proxy in Cluster B so that users can use:
+	•	https://swagger.clusterB.com → proxy → https://swagger.clusterA.com
+	•	https://api-actor.clusterB.com → proxy → https://api-actor.clusterA.com
+
+⚡ So Cluster B acts as a mirror/proxy for Cluster A.
+
+⸻
+
+📂 Helm Chart Structure (swagger-proxy/)
+
+swagger-proxy/
+├── Chart.yaml
+├── values.yaml
+└── templates/
+    ├── configmap.yaml
+    ├── deployment.yaml
+    ├── service.yaml
+    └── ingress.yaml
+
+
+⸻
+
+Chart.yaml
+
+apiVersion: v2
+name: swagger-proxy
+description: Proxy from Cluster B → Cluster A (swagger + APIs)
+version: 0.1.0
+appVersion: "1.0"
+
+
+⸻
+
+values.yaml
+
+replicaCount: 1
+
+image:
+  repository: bitnami/nginx
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Map of proxy hosts (ClusterB → ClusterA)
+proxy:
+  mappings:
+    - sourceHost: swagger.clusterB.com
+      targetHost: swagger.clusterA.com
+    - sourceHost: api-actor.clusterB.com
+      targetHost: api-actor.clusterA.com
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    - swagger.clusterB.com
+    - api-actor.clusterB.com
+  tls: []   # add tls secrets here if you terminate SSL in clusterB ingress
+
+
+⸻
+
+templates/configmap.yaml
+
+This generates nginx.conf dynamically with multiple server {} blocks — one per mapping.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "swagger-proxy.fullname" . }}-nginx
+data:
+  nginx.conf: |
+    worker_processes 1;
+
+    events { worker_connections 1024; }
+
+    http {
+      include       mime.types;
+      default_type  application/octet-stream;
+
+      sendfile        on;
+      keepalive_timeout  65;
+
+      {{- range .Values.proxy.mappings }}
+      server {
+        listen 8080;
+        server_name {{ .sourceHost }};
+
+        location / {
+          proxy_pass https://{{ .targetHost }};
+          proxy_ssl_server_name on;
+
+          proxy_set_header Host {{ .targetHost }};
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          # Optional if target cluster has self-signed certs
+          # proxy_ssl_verify off;
+        }
+      }
+      {{- end }}
+    }
+
+
+⸻
+
+templates/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swagger-proxy.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "swagger-proxy.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "swagger-proxy.name" . }}
+    spec:
+      containers:
+        - name: nginx
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /opt/bitnami/nginx/conf/nginx.conf
+              subPath: nginx.conf
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: {{ include "swagger-proxy.fullname" . }}-nginx
+
+
+⸻
+
+templates/service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "swagger-proxy.fullname" . }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: 8080
+  selector:
+    app: {{ include "swagger-proxy.name" . }}
+
+
+⸻
+
+templates/ingress.yaml
+
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "swagger-proxy.fullname" . }}
+  annotations:
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "swagger-proxy.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port }}
+    {{- end }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- toYaml .Values.ingress.tls | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+
+⸻
+
+🔗 How it works
+	•	You list ClusterB → ClusterA host mappings in values.yaml.
+	•	Chart generates nginx.conf with one proxy server block per mapping.
+	•	Users hit swagger.clusterB.com → Ingress in ClusterB → Nginx proxy → swagger.clusterA.com.
+	•	Same for api-actor.clusterB.com → proxy → api-actor.clusterA.com.
+
+⸻
+
+⚡ This chart is generic — you can add any number of services into values.yaml.mappings and redeploy.
+
+👉 Do you also want me to include a Bamboo build script that:
+	1.	packages this chart,
+	2.	pushes to Artifactory (e.g., swagger-ui-charts/0.1.0/),
+	3.	and triggers ArgoCD sync automatically?
+
+
+=====
+
+
 Yes 👍 that’s exactly the reason it didn’t work.
 Your config snippet is incomplete compared to what Nginx needs to actually boot with your proxy.
 
