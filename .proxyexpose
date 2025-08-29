@@ -1,4 +1,102 @@
+Yes 👍 that’s exactly the reason it didn’t work.
+Your config snippet is incomplete compared to what Nginx needs to actually boot with your proxy.
 
+Here’s why:
+
+⸻
+
+🔹 Problems in your nginx.conf
+	1.	You overwrote the default Nginx config with only:
+
+events {}
+http {
+  server {
+    listen 80;
+    location / { proxy_pass ... }
+  }
+}
+
+	•	Missing mime.types, default_type, worker_processes.
+	•	Bitnami’s base image expects a full config.
+
+	2.	You didn’t enable SSL options (proxy_ssl_server_name on;) → needed when proxying to https://swagger-clusterA.com.
+	3.	On Windows Docker, you exposed port 8080 but your config was listening on 80. That mismatch means:
+	•	You hit localhost:8080
+	•	But Nginx inside was only listening on 80 → request never reached your proxy block.
+
+⸻
+
+🔹 Fixed minimal working nginx.conf
+
+Try this instead:
+
+worker_processes 1;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+
+    sendfile        on;
+    keepalive_timeout  65;
+
+    server {
+        listen 8080;   # match docker -p 8080:8080
+
+        location / {
+            proxy_pass https://swagger-clusterA.com;
+            proxy_ssl_server_name on;
+
+            proxy_set_header Host swagger-clusterA.com;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            # Optional if swagger-clusterA has self-signed cert
+            # proxy_ssl_verify off;
+        }
+    }
+}
+
+
+⸻
+
+🔹 Run on Windows Docker
+
+docker run --rm -d -p 8080:8080 `
+  -v ${PWD}\nginx.conf:/opt/bitnami/nginx/conf/nginx.conf:ro `
+  --name swagger-proxy bitnami/nginx:latest
+
+Then open:
+
+http://localhost:8080/
+
+It should forward to:
+
+https://swagger-clusterA.com/
+
+Check logs if unsure:
+
+docker logs swagger-proxy
+
+
+⸻
+
+✅ This is now a fully working testable proxy.
+Once confirmed locally, you can directly reuse this config in Kubernetes via a ConfigMap.
+
+⸻
+
+Do you want me to show you how to reuse the exact same nginx.conf for both:
+	1.	Local Docker testing
+	2.	Kubernetes Helm deployment (ConfigMap mount)
+so you don’t maintain 2 different versions?
+
+
+=====
 Yes ✅ you can absolutely test this swagger-proxy locally on Windows Docker before deploying to Kubernetes.
 
 Let me walk you through step by step:
