@@ -1,4 +1,82 @@
 
+Yes ✅ you can absolutely test this swagger-proxy locally on Windows Docker before deploying to Kubernetes.
+
+Let me walk you through step by step:
+
+⸻
+
+🔹 1. Write your nginx.conf
+
+Create a file nginx.conf on your Windows machine:
+
+events {}
+http {
+  server {
+    listen 80;
+
+    location / {
+      proxy_pass https://swagger-clusterA.com;
+      proxy_set_header Host swagger-clusterA.com;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+  }
+}
+
+👉 Replace swagger-clusterA.com with the real domain you want to forward to.
+
+⸻
+
+🔹 2. Run Nginx Docker container on Windows
+
+If you’re using official nginx image:
+
+docker run --rm -d -p 8080:80 `
+  -v ${PWD}\nginx.conf:/etc/nginx/nginx.conf:ro `
+  --name swagger-proxy nginx:1.25
+
+	•	-p 8080:80 → exposes Nginx on localhost:8080
+	•	-v ${PWD}\nginx.conf:/etc/nginx/nginx.conf:ro → mounts your config file into the container
+	•	nginx:1.25 → official nginx image
+
+If you want to use bitnami/nginx:
+
+docker run --rm -d -p 8080:8080 `
+  -v ${PWD}\nginx.conf:/opt/bitnami/nginx/conf/nginx.conf:ro `
+  --name swagger-proxy bitnami/nginx:latest
+
+
+⸻
+
+🔹 3. Test it
+
+Open browser or use curl:
+
+curl http://localhost:8080/swagger-ui/
+
+👉 This should forward to https://swagger-clusterA.com/swagger-ui/ transparently.
+
+⸻
+
+🔹 4. Debugging
+	•	If you see errors → check logs with:
+
+docker logs swagger-proxy
+
+
+	•	If config reload fails → Nginx will show error on container startup.
+
+⸻
+
+✅ This way, you can fully test the proxy logic on your local Windows Docker environment before deploying the same config to Kubernetes.
+
+⸻
+
+Would you like me to also write a Dockerfile so you can package this proxy (with nginx.conf baked in) and push it to your internal Artifactory, instead of mounting the config each time? That way your K8s deployment just pulls a ready-made image.
+
+
+====
 Yes 👍 you can always see the final YAMLs that Helm generates before/after packaging and deploying.
 
 Here’s how:
