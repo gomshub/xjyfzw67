@@ -1,3 +1,159 @@
+
+Perfect 👍 let’s make it ready-to-deploy on Cluster B with Helm (you can later templatize values).
+
+⸻
+
+🔹 1. ConfigMap with Nginx Proxy Rules
+
+This contains the nginx.conf we discussed:
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-nginx-conf
+  namespace: default
+data:
+  nginx.conf: |
+    events {}
+
+    http {
+      server {
+        listen 80;
+
+        # Any subdomain of clusterB.com
+        server_name ~^(?<subdomain>.+)\.clusterB\.com$;
+
+        location / {
+          proxy_pass https://$subdomain.clusterA.com;
+
+          proxy_set_header Host $subdomain.clusterA.com;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          proxy_connect_timeout 60s;
+          proxy_read_timeout 300s;
+        }
+      }
+    }
+
+
+⸻
+
+🔹 2. Deployment (Bitnami Nginx with custom config)
+
+This mounts the above ConfigMap into the container so Nginx uses it.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swagger-proxy
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: swagger-proxy
+  template:
+    metadata:
+      labels:
+        app: swagger-proxy
+    spec:
+      containers:
+        - name: nginx
+          image: bitnami/nginx:1.25.3   # replace with your Artifactory image if needed
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /opt/bitnami/nginx/conf/nginx.conf
+              subPath: nginx.conf
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: swagger-proxy-nginx-conf
+
+
+⸻
+
+🔹 3. Service (ClusterIP / LoadBalancer)
+
+Expose Nginx inside Cluster B. If you use Ingress, just make it ClusterIP.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: swagger-proxy-svc
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: swagger-proxy
+  ports:
+    - port: 80
+      targetPort: 80
+
+
+⸻
+
+🔹 4. Ingress (Expose externally as *.clusterB.com)
+
+Assuming you have an Ingress Controller in Cluster B:
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swagger-proxy-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  rules:
+    - host: swagger.clusterB.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: swagger-proxy-svc
+                port:
+                  number: 80
+    - host: api-actor.clusterB.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: swagger-proxy-svc
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - swagger.clusterB.com
+        - api-actor.clusterB.com
+      secretName: clusterb-tls
+
+
+⸻
+
+🔹 Flow
+	•	User → https://swagger.clusterB.com
+	•	Ingress → Service → Nginx Pod
+	•	Nginx proxies → https://swagger.clusterA.com
+	•	User → https://api-actor.clusterB.com
+	•	Ingress → Service → Nginx Pod
+	•	Nginx proxies → https://api-actor.clusterA.com
+
+Browser always stays on *.clusterB.com.
+
+⸻
+
+👉 Do you want me to also show you the Helm chart folder structure (values.yaml, templates/ etc.) so you can package and push this proxy setup to Artifactory and later deploy via ArgoCD?
+####
+
+
 Great 🚀 — let’s build a Helm chart for your generic Swagger proxy that runs on Cluster B.
 
 This chart will:
