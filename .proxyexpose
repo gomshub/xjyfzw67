@@ -1,3 +1,55 @@
+Good catch 👍 — let me explain why I showed 8.8.8.8 there and when you should not use it.
+
+⸻
+
+Why I showed 8.8.8.8
+	•	8.8.8.8 is Google’s public DNS.
+	•	I used it in the example because it works anywhere, including your local Windows Docker test.
+	•	That way, if you run the Nginx container on your laptop, it can resolve swagger.clusterA.com without needing Kubernetes’ internal DNS.
+
+⸻
+
+Why you should not use it in Kubernetes
+
+Inside a Kubernetes cluster:
+	•	Services & hostnames are resolved by CoreDNS (kube-dns), not by Google.
+	•	So if you use 8.8.8.8, it might fail for internal names (*.svc.cluster.local) or be slower.
+	•	The right resolver is the Cluster DNS service IP, typically 10.96.0.10 (but check with:
+
+kubectl get svc -n kube-system kube-dns
+
+or
+
+kubectl get svc -n kube-system coredns
+
+
+
+⸻
+
+✅ Correct approach
+	•	Local Docker test (Windows/Mac/Linux) → use resolver 8.8.8.8; (or your system DNS).
+	•	Cluster B Helm deployment → use resolver <kube-dns-service-ip>;
+
+So your Helm values.yaml should allow overriding, for example:
+
+resolver: "10.96.0.10"   # default for in-cluster
+
+and in nginx.conf template:
+
+resolver {{ .Values.resolver }};
+
+
+⸻
+
+👉 This way, the same Helm chart works for both:
+	•	Local laptop test (set resolver=8.8.8.8)
+	•	Kubernetes deployment (set resolver=10.96.0.10)
+
+⸻
+
+Do you want me to extend the Helm chart configmap.yaml with a resolver parameter so you can swap it between local and kube easily?
+
+
 
 Perfect 👍 let’s make it ready-to-deploy on Cluster B with Helm (you can later templatize values).
 
