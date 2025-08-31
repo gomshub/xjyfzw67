@@ -1,4 +1,79 @@
 
+Good catch 👍 — let me clarify why my answer looked like “two responses” and which one is the cleanest.
+
+⸻
+
+The “two” responses in my answer
+	•	Part 1 (local Windows Docker test config):
+That was for you to quickly spin up an Nginx container on your laptop and check the proxy behavior without Kubernetes/Helm.
+	•	Part 2 (Helm chart templates + values):
+That was for deploying the same logic cleanly in Kubernetes with Ingress and TLS.
+
+Both implement Approach #2 (explicit host → host mapping).
+So it’s not two different strategies, just two environments (local test vs. K8s).
+
+⸻
+
+Which is the best, simplest, cleanest, and most performant?
+
+👉 Approach #2 (explicit allow-list of backend APIs)
+	•	Security: No wildcard exposure like Approach #3 (which risks exposing everything on cluster A).
+	•	Correctness: Unlike Approach #1, this works for both Swagger UI and direct backend curls.
+	•	Performance: 15–20 server_name entries in Nginx is nothing — Nginx matches hosts in O(1) hash table lookup, so there’s no noticeable cost.
+	•	Clarity: Each exposed API is explicit in values.yaml → zero ambiguity about what’s reachable.
+
+⸻
+
+The cleanest way to write it
+
+You don’t actually need complicated regex rewrites.
+The simplest effective config is:
+
+# Swagger UI
+server {
+  listen 80;
+  server_name swagger.clusterB.com;
+
+  location / {
+    proxy_pass https://swagger.clusterA.com;
+    proxy_ssl_server_name on;
+    proxy_set_header Host swagger.clusterA.com;
+  }
+}
+
+# Backend APIs (all explicit)
+server {
+  listen 80;
+  server_name
+    api-actor.clusterB.com
+    api-agent.clusterB.com
+    api-movie.clusterB.com;
+
+  location / {
+    # Map B → A directly by replacing suffix
+    if ($host ~* "^([^.]+)\.clusterB\.com$") {
+      set $upstream $1.clusterA.com;
+    }
+    proxy_pass https://$upstream$request_uri;
+    proxy_ssl_server_name on;
+    proxy_set_header Host $upstream;
+  }
+}
+
+And in Helm, you’d just loop over the allowed apiHosts list in the Ingress rule and leave the mapping logic in Nginx.
+
+⸻
+
+✅ So the final recommendation:
+	•	Use Approach #2 with an allow-list.
+	•	Keep config simple (one server_name block for Swagger, one for APIs).
+	•	Manage the hostnames via Helm values.yaml.
+
+⸻
+
+Do you want me to refactor the Helm template I gave into this “simple two-block version” (Swagger block + API block) so you get a clean minimal chart without regex spaghetti?
+
+...====
 events {}
 
 http {
