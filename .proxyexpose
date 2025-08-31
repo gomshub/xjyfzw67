@@ -1,3 +1,116 @@
+
+Perfect 👍 let’s make your Helm dynamic ConfigMap production-ready by adding:
+	•	✅ Dynamic upstream hosts from values.yaml (swagger + APIs)
+	•	✅ Keepalive timeout (client reuse)
+	•	✅ Proxy timeouts (connect, send, read)
+	•	✅ MIME types for static content fallback
+
+⸻
+
+1. values.yaml
+
+swaggerProxy:
+  swaggerHost: swagger.clusterA.com
+  apiHosts:
+    - api-actor.clusterA.com
+    - api-movie.clusterA.com
+    - api-user.clusterA.com
+  timeouts:
+    keepalive: 65s
+    connect: 10s
+    send: 60s
+    read: 60s
+
+
+⸻
+
+2. ConfigMap template (configmap.yaml)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-nginx-conf
+data:
+  nginx.conf: |
+    worker_processes  1;
+
+    events { worker_connections 1024; }
+
+    http {
+      include       mime.types;
+      default_type  application/octet-stream;
+
+      # Client keepalive timeout
+      keepalive_timeout {{ .Values.swaggerProxy.timeouts.keepalive }};
+
+      server {
+        listen 80;
+
+        # Swagger UI proxy
+        location / {
+          proxy_pass https://{{ .Values.swaggerProxy.swaggerHost }};
+          proxy_ssl_server_name on;
+
+          proxy_set_header Host {{ .Values.swaggerProxy.swaggerHost }};
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          proxy_connect_timeout {{ .Values.swaggerProxy.timeouts.connect }};
+          proxy_send_timeout {{ .Values.swaggerProxy.timeouts.send }};
+          proxy_read_timeout {{ .Values.swaggerProxy.timeouts.read }};
+        }
+
+        # Dynamic API proxy (wildcard *.clusterA.com)
+        location /api/ {
+          resolver 8.8.8.8;   # Or kube-dns in-cluster
+          set $api_host "";
+          if ($uri ~ ^/api/([^/]+)(/.*)$) {
+            set $api_host $1.clusterA.com;
+            set $api_path $2;
+          }
+
+          proxy_pass https://$api_host$api_path;
+          proxy_ssl_server_name on;
+
+          proxy_set_header Host $api_host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          proxy_connect_timeout {{ .Values.swaggerProxy.timeouts.connect }};
+          proxy_send_timeout {{ .Values.swaggerProxy.timeouts.send }};
+          proxy_read_timeout {{ .Values.swaggerProxy.timeouts.read }};
+        }
+      }
+    }
+
+
+⸻
+
+3. How this works
+
+Component	Purpose
+swagger.clusterB.com	UI entrypoint. Requests → proxied to swagger.clusterA.com.
+/api/<service>/...	Dynamic rule: extracts <service> from path → rewrites to <service>.clusterA.com/....
+resolver 8.8.8.8	Lets Nginx resolve *.clusterA.com. In cluster, replace with kube-dns.kube-system.svc.cluster.local.
+Timeouts (connect, send, read)	Protects against hanging requests.
+keepalive_timeout	Keeps client connection open for reuse (65s).
+MIME types	Ensures static content fallback (Swagger UI assets, yaml/json).
+
+
+⸻
+
+✅ With this one ConfigMap, you cover:
+	•	Swagger UI proxy
+	•	Multiple API backends (dynamic)
+	•	Production-safe timeouts
+	•	Browser always sees swagger.clusterB.com, never clusterA.com.
+
+⸻
+
+Do you want me to also provide the Ingress.yaml Helm template that pairs with this ConfigMap (supporting TLS + multiple hosts with wildcard)?
+
 Perfect ✅ let’s wrap it all into one Helm chart skeleton that does what you need:
 	•	Dynamic Nginx ConfigMap → proxies both Swagger UI & multiple backend APIs (*.clusterA.com)
 	•	Single Ingress → exposes swagger.clusterB.com + *.clusterB.com to Cluster B
