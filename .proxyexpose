@@ -1,4 +1,45 @@
 
+events {}
+
+http {
+  # Swagger UI proxy
+  server {
+    listen 80;
+    server_name localhost;  # for testing, point Swagger to localhost
+
+    location /swagger {
+      proxy_pass http://localhost:8081;  # dummy Swagger server
+      proxy_set_header Host localhost;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+  }
+
+  # Dynamic backend API proxy
+  server {
+    listen 80;
+    server_name localhost;  # all other localhost requests
+
+    resolver 8.8.8.8;
+
+    location /api/ {
+      set $upstream "";
+
+      # Example: route /api/actor -> http://localhost:8082
+      if ($request_uri ~ "^/api/actor") {
+        set $upstream http://localhost:8082;
+      }
+
+      proxy_pass $upstream;
+      proxy_set_header Host $upstream;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+  }
+}
+
 Good question 👍
 
 The ingressClassName in Kubernetes tells the Ingress object which Ingress Controller should process it.
