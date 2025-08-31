@@ -1,4 +1,46 @@
 
+Good question 👍
+
+The ingressClassName in Kubernetes tells the Ingress object which Ingress Controller should process it.
+
+⸻
+
+Why it exists
+	•	Kubernetes supports multiple ingress controllers (Nginx, AWS ALB, Traefik, Istio, HAProxy, etc.) running in the same cluster.
+	•	By default, an Ingress controller only looks at Ingress objects that match its class.
+	•	If you don’t set it, the controller with --watch-ingress-without-class=true may pick it up (depends on your setup).
+
+⸻
+
+Example:
+
+ingressClassName: nginx
+
+	•	This means: “Only the Nginx Ingress Controller should handle this ingress.”
+	•	If you had AWS ALB ingress installed, you’d instead use:
+
+ingressClassName: alb
+
+
+⸻
+
+TL;DR
+	•	If your cluster has only one ingress controller (say Nginx) → setting ingressClassName: nginx is best practice (explicit, avoids ambiguity).
+	•	If you omit it, it might still work, but then you’re relying on defaults, which can break later if someone installs another ingress controller.
+
+⸻
+
+👉 In your case (Helm chart for swagger-proxy), keeping
+
+ingressClassName: nginx
+
+is the safest, because you’re targeting the Nginx ingress controller for swagger.clusterB.com and api-*.clusterB.com.
+
+⸻
+
+Do you want me to show you how this looks in wildcard ingress (*.clusterB.com) so you don’t need to list every API host individually?
+
+
 Perfect 👍 let’s make your Helm dynamic ConfigMap production-ready by adding:
 	•	✅ Dynamic upstream hosts from values.yaml (swagger + APIs)
 	•	✅ Keepalive timeout (client reuse)
