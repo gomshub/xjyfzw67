@@ -1,3 +1,223 @@
+Perfect ✅ let’s wrap it all into one Helm chart skeleton that does what you need:
+	•	Dynamic Nginx ConfigMap → proxies both Swagger UI & multiple backend APIs (*.clusterA.com)
+	•	Single Ingress → exposes swagger.clusterB.com + *.clusterB.com to Cluster B
+	•	Deployment + Service → runs the proxy pod
+
+⸻
+
+📂 Chart structure
+
+swagger-proxy/
+  Chart.yaml
+  values.yaml
+  templates/
+    configmap.yaml
+    deployment.yaml
+    service.yaml
+    ingress.yaml
+
+
+⸻
+
+📄 Chart.yaml
+
+apiVersion: v2
+name: swagger-proxy
+description: Nginx reverse proxy for Swagger + APIs (ClusterB → ClusterA)
+version: 0.1.0
+appVersion: "1.0"
+
+
+⸻
+
+📄 values.yaml
+
+image:
+  repository: bitnami/nginx
+  tag: 1.27
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Proxy target cluster A
+clusterA:
+  swaggerHost: swagger.clusterA.com
+  apiDomain: clusterA.com
+
+# Ingress settings
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - swagger.clusterB.com
+    - "*.clusterB.com"
+  tls:
+    enabled: true
+    secretName: clusterb-tls
+
+
+⸻
+
+📄 templates/configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-nginx-conf
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 80;
+
+        # Swagger UI proxy
+        location / {
+          proxy_pass https://{{ .Values.clusterA.swaggerHost }};
+          proxy_ssl_server_name on;
+
+          proxy_set_header Host {{ .Values.clusterA.swaggerHost }};
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Dynamic backend API proxy
+        # Example: https://api-actor.clusterB.com -> https://api-actor.clusterA.com
+        location / {
+          resolver 8.8.8.8;   # (or kube-dns inside cluster)
+          set $upstream "";
+
+          if ($host ~* "^([^.]+)\.clusterB\.com$") {
+            set $upstream $1.{{ .Values.clusterA.apiDomain }};
+          }
+
+          proxy_pass https://$upstream$request_uri;
+          proxy_ssl_server_name on;
+
+          proxy_set_header Host $upstream;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+      }
+    }
+
+
+⸻
+
+📄 templates/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swagger-proxy
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: swagger-proxy
+  template:
+    metadata:
+      labels:
+        app: swagger-proxy
+    spec:
+      containers:
+        - name: nginx
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /opt/bitnami/nginx/conf/nginx.conf
+              subPath: nginx.conf
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: swagger-proxy-nginx-conf
+
+
+⸻
+
+📄 templates/service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: swagger-proxy-svc
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: swagger-proxy
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: 8080
+      protocol: TCP
+
+
+⸻
+
+📄 templates/ingress.yaml
+
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swagger-proxy-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+  {{- range .Values.ingress.hosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: swagger-proxy-svc
+                port:
+                  number: {{ $.Values.service.port }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+      {{- range .Values.ingress.hosts }}
+        - {{ . | quote }}
+      {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+{{- end }}
+
+
+⸻
+
+📊 How it works (flow)
+
+Browser request	Goes to Ingress	Proxy Pod forwards to
+https://swagger.clusterB.com	swagger-proxy	https://swagger.clusterA.com
+https://actor.clusterB.com	swagger-proxy	https://actor.clusterA.com
+curl https://xyz.clusterB.com	swagger-proxy	https://xyz.clusterA.com
+
+
+⸻
+
+⚡ So:
+	•	One Ingress (*.clusterB.com)
+	•	One Proxy Service
+	•	Dynamic ConfigMap → resolves any <api>.clusterB.com to <api>.clusterA.com
+
+⸻
+
+Do you want me to also include a Bamboo build + Helm package + push to Artifactory + ArgoCD sync script that works with this chart so you can fully automate?
+
+===
+
 Yes — this approach scales fine for 10+ backend APIs, but there are a few important points and best practices to keep in mind:
 
 ⸻
