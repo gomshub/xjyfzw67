@@ -1,3 +1,159 @@
+Yes — this approach scales fine for 10+ backend APIs, but there are a few important points and best practices to keep in mind:
+
+⸻
+
+🔹 How it works for multiple APIs
+	1.	Generic API server block in Nginx:
+
+server {
+  listen 80;
+  server_name api-actor.clusterB.com api-payment.clusterB.com ...; # all APIs
+
+  resolver 10.96.0.10;
+
+  location / {
+    if ($host ~ ^(.+)\.clusterB\.com$) {
+      set $api_host $1.clusterA.com;
+    }
+
+    proxy_pass https://$api_host$request_uri;
+    proxy_ssl_server_name on;
+    proxy_set_header Host $api_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+
+✅ This one server block can handle any number of API hosts because the $host variable dynamically maps *.clusterB.com → *.clusterA.com.
+
+⸻
+
+🔹 Things to consider
+
+Aspect	Notes / Recommendation
+Nginx server_name limits	Nginx doesn’t really limit server_name, but 100+ names may slightly increase parsing time. Use wildcard *.clusterB.com if you have many APIs.
+Resolver	Must point to in-cluster DNS (like 10.96.0.10) so dynamic $api_host works.
+sub_filter	If you rewrite Swagger JSON for multiple APIs, ensure all backend URLs are replaced. Can use sub_filter multiple times or a regex-based solution.
+Ingress	If you use wildcard ingress (*.clusterB.com) you don’t need 1 rule per API, just one wildcard rule pointing to the same service.
+TLS	Requires wildcard certificate (*.clusterB.com) to cover all API subdomains.
+Performance	Nginx handles many proxy_pass rules well, but monitor memory & connection limits if you have hundreds of APIs or high traffic.
+
+
+⸻
+
+🔹 Recommendation for >10 APIs
+	•	Use wildcard hostnames in Nginx: server_name *.clusterB.com;
+	•	Use wildcard TLS cert: *.clusterB.com
+	•	List APIs in values.yaml.hosts.apis if you want explicit mapping, or leave dynamic for all subdomains.
+
+This way you don’t need to manually update the config for every new backend API.
+
+⸻
+
+If you want, I can provide a ready-to-use Helm template for swagger-proxy with wildcard Nginx + wildcard ingress that automatically supports any number of APIs dynamically.
+
+Do you want me to do that?
+
+
+=====
+Sure! Let’s make a simple local Docker test on Windows for one backend API with Swagger UI and Nginx proxy. This will mimic your Cluster B → Cluster A proxy scenario.
+
+⸻
+
+1️⃣ Folder Structure
+
+C:\swagger-proxy-test\
+├─ nginx.conf
+
+
+⸻
+
+2️⃣ nginx.conf (Local Test)
+
+events {}
+
+http {
+    # Swagger UI proxy
+    server {
+        listen 8080;
+        server_name localhost;
+
+        location / {
+            proxy_pass https://swagger.clusterA.com;   # Replace with real clusterA swagger URL
+            proxy_ssl_server_name on;
+
+            proxy_set_header Host swagger.clusterA.com;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Rewrite backend URL in Swagger JSON (optional)
+        sub_filter 'https://api-actor.clusterA.com' 'http://localhost:8080/actor';
+        sub_filter_once off;
+    }
+
+    # Backend API proxy
+    server {
+        listen 8081;
+        server_name localhost;
+
+        location /actor/ {
+            proxy_pass https://api-actor.clusterA.com/;   # Replace with real backend
+            proxy_ssl_server_name on;
+
+            proxy_set_header Host api-actor.clusterA.com;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+}
+
+
+⸻
+
+3️⃣ Run Nginx Container on Windows
+
+Open PowerShell in C:\swagger-proxy-test and run:
+
+docker run --rm -d --name swagger-proxy -p 8080:8080 -p 8081:8081 `
+  -v ${PWD}/nginx.conf:/opt/bitnami/nginx/conf/nginx.conf `
+  bitnami/nginx:1.25.3
+
+	•	8080 → Swagger UI
+	•	8081 → Backend API proxy /actor/...
+
+⸻
+
+4️⃣ Test the Proxy
+	•	Open Swagger UI in browser:
+
+http://localhost:8080
+
+	•	API requests go through Nginx proxy:
+
+http://localhost:8081/actor/getAllActors
+
+	•	Browser still sees localhost:8080 for Swagger, localhost:8081 for backend API, while Nginx forwards requests to Cluster A.
+
+⸻
+
+✅ This is a minimal working local test for 1 backend API.
+
+You can later expand /actor/ to /api/actor/ or add more backend services.
+
+⸻
+
+If you want, I can provide a single-port version so both Swagger UI and backend API calls go through just localhost:8080 like it would on Cluster B, making it even closer to your final Kubernetes deployment.
+
+Do you want me to do that?
+
+
+
+====
+
 Good catch 👍 — let me explain why I showed 8.8.8.8 there and when you should not use it.
 
 ⸻
