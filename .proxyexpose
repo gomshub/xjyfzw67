@@ -1,3 +1,89 @@
+
+Got it ✅
+If you are not using variables like $api_host in proxy_pass (i.e., you write the actual hostname directly from your Helm values.yaml), then Nginx resolves it at startup and uses normal DNS.
+👉 In that case, no resolver is needed because Kubernetes pods already use CoreDNS.
+
+⸻
+
+🔹 Example Helm values.yaml
+
+swaggerProxy:
+  swaggerHost: swagger.clusterA.com
+  apiHosts:
+    - name: actor
+      host: api-actor.clusterA.com
+    - name: agent
+      host: api-agent.clusterA.com
+    - name: order
+      host: api-order.clusterA.com
+
+
+⸻
+
+🔹 ConfigMap Template (templates/configmap.yaml)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-config
+data:
+  nginx.conf: |
+    events {}
+
+    http {
+      server {
+        listen 80;
+
+        # Swagger UI proxy
+        location / {
+          proxy_pass https://{{ .Values.swaggerProxy.swaggerHost }};
+          proxy_ssl_server_name on;
+
+          proxy_set_header Host {{ .Values.swaggerProxy.swaggerHost }};
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        {{- range .Values.swaggerProxy.apiHosts }}
+        # Backend API proxy for {{ .name }}
+        server_name {{ .name }}.clusterB.com;
+
+        location / {
+          proxy_pass https://{{ .host }};
+          proxy_ssl_server_name on;
+
+          proxy_set_header Host {{ .host }};
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+        {{- end }}
+      }
+    }
+
+
+⸻
+
+🔹 How it Works
+	•	Swagger UI
+	•	Request: https://swagger.clusterB.com/
+	•	Proxied to: https://swagger.clusterA.com/
+	•	UI still shows browser URL as swagger.clusterB.com.
+	•	API backends (from Swagger or direct curl)
+	•	Request: https://actor.clusterB.com/v1/...
+	•	Proxied to: https://api-actor.clusterA.com/v1/....
+	•	Request: https://agent.clusterB.com/v1/...
+	•	Proxied to: https://api-agent.clusterA.com/v1/....
+
+No resolver is needed because proxy_pass uses static hostnames from values.yaml.
+
+⸻
+
+⚡ Question for you:
+Do you want me to also provide the Ingress template (single file) for this Helm chart so that both swagger.clusterB.com and actor.clusterB.com etc. are exposed automatically?
+
+==###
 Ahh I see 👍 — you don’t want to bother with swagger.clusterB.com or api-actor.clusterB.com in local Docker Windows, only localhost should work.
 
 That means in local testing you’ll hit http://localhost/swagger and http://localhost/api-actor/... etc.
