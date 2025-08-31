@@ -1,4 +1,74 @@
+Ahh I see 👍 — you don’t want to bother with swagger.clusterB.com or api-actor.clusterB.com in local Docker Windows, only localhost should work.
 
+That means in local testing you’ll hit http://localhost/swagger and http://localhost/api-actor/... etc.
+
+Here’s a clean localhost Nginx conf 👇
+
+⸻
+
+🔹 nginx.conf (Localhost only)
+
+events {}
+
+http {
+    resolver 8.8.8.8 ipv6=off;
+
+    server {
+        listen 80;
+        server_name localhost;
+
+        # Swagger UI proxy
+        location /swagger/ {
+            proxy_pass https://swagger.clusterA.com/;
+            proxy_ssl_server_name on;
+
+            proxy_set_header Host swagger.clusterA.com;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # API Actor proxy
+        location /api-actor/ {
+            proxy_pass https://api-actor.clusterA.com/;
+            proxy_ssl_server_name on;
+
+            proxy_set_header Host api-actor.clusterA.com;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Add more APIs like /api-agent/ → https://api-agent.clusterA.com/
+    }
+}
+
+
+⸻
+
+🔹 Run it locally
+
+docker run --rm -d -p 80:80 -v %cd%/nginx.conf:/etc/nginx/nginx.conf:ro --name nginx-proxy nginx
+
+
+⸻
+
+🔹 Test calls
+	•	Browser → http://localhost/swagger/ → Proxies to swagger.clusterA.com
+	•	Curl →
+
+curl http://localhost/api-actor/v1/getActors
+
+Will internally call https://api-actor.clusterA.com/v1/getActors ✅
+
+⸻
+
+⚡ This way, you don’t need to touch hosts file or fake DNS, everything works on localhost only.
+
+Do you want me to also make this dynamic (so you don’t hardcode /api-actor/, /api-agent/, etc.) for your local Docker test?
+
+
+====
 Good catch 👍 — let me clarify why my answer looked like “two responses” and which one is the cleanest.
 
 ⸻
