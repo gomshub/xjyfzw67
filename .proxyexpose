@@ -1,3 +1,197 @@
+Ahh 👍 got it now — thanks for clarifying again.
+You want both behaviors in the same Nginx:
+	1.	Swagger UI → swagger.clusterB.com → proxies to swagger.clusterA.com.
+	•	When user browses Swagger, requests like /actor inside that UI must go to actor.clusterA.com.
+	•	So /actor path under swagger.clusterB.com should proxy → actor.clusterA.com.
+	2.	Direct backend API curl → actor.clusterB.com → proxies to actor.clusterA.com.
+	•	Similarly for agent.clusterB.com, etc.
+
+So basically:
+	•	One Swagger server block with multiple location rules.
+	•	Plus multiple backend server blocks (one per API).
+
+⸻
+
+🔹 Local Docker (Windows, localhost test)
+
+nginx.conf
+
+events {}
+
+http {
+  # Swagger UI
+  server {
+    listen 80;
+    server_name swagger.localhost;
+
+    # Swagger main UI
+    location / {
+      proxy_pass https://swagger.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host swagger.clusterA.com;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Swagger calling backend APIs
+    location /actor {
+      proxy_pass https://actor.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host actor.clusterA.com;
+    }
+
+    location /agent {
+      proxy_pass https://agent.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host agent.clusterA.com;
+    }
+  }
+
+  # Direct backend APIs (curl)
+  server {
+    listen 80;
+    server_name actor.localhost;
+
+    location / {
+      proxy_pass https://actor.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host actor.clusterA.com;
+    }
+  }
+
+  server {
+    listen 80;
+    server_name agent.localhost;
+
+    location / {
+      proxy_pass https://agent.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host agent.clusterA.com;
+    }
+  }
+}
+
+👉 Add to hosts file on Windows:
+
+127.0.0.1 swagger.localhost actor.localhost agent.localhost
+
+Then:
+	•	Open http://swagger.localhost/ → loads Swagger from swagger.clusterA.com.
+	•	Inside Swagger, calling /actor → proxies actor.clusterA.com.
+	•	Curl direct: curl http://actor.localhost/ → proxies to actor.clusterA.com.
+
+⸻
+
+🔹 Helm ConfigMap Template
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-nginx
+data:
+  nginx.conf: |
+    events {}
+
+    http {
+      server {
+        listen 80;
+        server_name {{ .Values.clusterB.swaggerHost }};
+
+        location / {
+          proxy_pass https://{{ .Values.clusterA.swaggerHost }};
+          proxy_ssl_server_name on;
+          proxy_set_header Host {{ .Values.clusterA.swaggerHost }};
+        }
+
+        {{- range $path, $apiHost := .Values.clusterB.swaggerPaths }}
+        location {{ $path }} {
+          proxy_pass https://{{ $apiHost | replace "clusterB.com" "clusterA.com" }};
+          proxy_ssl_server_name on;
+          proxy_set_header Host {{ $apiHost | replace "clusterB.com" "clusterA.com" }};
+        }
+        {{- end }}
+      }
+
+      {{- range .Values.clusterB.apiHosts }}
+      server {
+        listen 80;
+        server_name {{ . }};
+
+        location / {
+          proxy_pass https://{{ regexReplaceAll "clusterB.com" . "clusterA.com" }};
+          proxy_ssl_server_name on;
+          proxy_set_header Host {{ regexReplaceAll "clusterB.com" . "clusterA.com" }};
+        }
+      }
+      {{- end }}
+    }
+
+
+⸻
+
+🔹 Helm values.yaml
+
+clusterB:
+  swaggerHost: swagger.clusterB.com
+  swaggerPaths:
+    /actor: actor.clusterB.com
+    /agent: agent.clusterB.com
+  apiHosts:
+    - actor.clusterB.com
+    - agent.clusterB.com
+
+clusterA:
+  swaggerHost: swagger.clusterA.com
+
+
+⸻
+
+🔹 Ingress Helm Template
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swagger-proxy-ingress
+spec:
+  rules:
+    - host: {{ .Values.clusterB.swaggerHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: swagger-proxy-svc
+                port:
+                  number: 80
+    {{- range .Values.clusterB.apiHosts }}
+    - host: {{ . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: swagger-proxy-svc
+                port:
+                  number: 80
+    {{- end }}
+
+
+⸻
+
+✅ This setup:
+	•	Swagger UI proxied at swagger.clusterB.com → swagger.clusterA.com.
+	•	Swagger API calls (/actor, /agent) also proxied correctly.
+	•	Direct curl to backend (actor.clusterB.com, agent.clusterB.com) also works.
+
+⸻
+
+Do you want me to also show you a single combined Helm values structure (swagger paths + backend hosts in one mapping), so you don’t repeat hostnames twice? That would simplify maintenance if you have ~15 backend services.
+					........=
+
+
 
 Got it ✅
 If you are not using variables like $api_host in proxy_pass (i.e., you write the actual hostname directly from your Helm values.yaml), then Nginx resolves it at startup and uses normal DNS.
