@@ -1,3 +1,164 @@
+
+Perfect 👍 Let’s lock this down with a minimal, clean Nginx config that:
+	•	Proxies swagger.clusterB.com → swagger.clusterA.com
+	•	Proxies backend APIs (actor.clusterB.com → actor.clusterA.com, etc.)
+	•	Adds CORS headers for Swagger UI
+	•	Keeps the standard proxy headers (Host, X-Real-IP, etc.)
+
+⸻
+
+🔹 ConfigMap (nginx.conf) for Helm
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-nginx
+data:
+  nginx.conf: |
+    worker_processes 1;
+
+    events { worker_connections 1024; }
+
+    http {
+      server {
+        listen 8080;
+
+        # Swagger UI proxy
+        server_name swagger.clusterB.com;
+
+        location / {
+          proxy_pass https://swagger.clusterA.com;
+
+          # CORS for Swagger UI
+          add_header Access-Control-Allow-Origin *;
+          add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS";
+          add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With";
+
+          if ($request_method = OPTIONS) {
+            return 204;
+          }
+
+          # Standard proxy headers
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+      }
+
+      # Backend API proxies
+      server {
+        listen 8080;
+        server_name actor.clusterB.com;
+
+        location / {
+          proxy_pass https://actor.clusterA.com;
+
+          # Standard proxy headers
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          # CORS (for browser requests hitting backend APIs directly)
+          add_header Access-Control-Allow-Origin *;
+          add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS";
+          add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With";
+
+          if ($request_method = OPTIONS) {
+            return 204;
+          }
+        }
+      }
+
+      # 👆 Repeat more `server {}` blocks for agent.clusterB.com, etc.
+    }
+
+
+⸻
+
+🔹 Ingress (Helm template)
+
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swagger-proxy-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  rules:
+    - host: {{ .Values.clusterB.swaggerHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: swagger-proxy-svc
+                port:
+                  number: {{ .Values.service.port }}
+    {{- range .Values.clusterB.apiHosts }}
+    - host: {{ . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: swagger-proxy-svc
+                port:
+                  number: {{ $.Values.service.port }}
+    {{- end }}
+  tls:
+    - hosts:
+        - {{ .Values.clusterB.swaggerHost }}
+        {{- range .Values.clusterB.apiHosts }}
+        - {{ . }}
+        {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+{{- end }}
+
+
+⸻
+
+🔹 Example values.yaml
+
+clusterB:
+  swaggerHost: swagger.clusterB.com
+  apiHosts:
+    - actor.clusterB.com
+    - agent.clusterB.com
+    - user.clusterB.com
+
+service:
+  port: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    enabled: true
+    secretName: clusterb-tls
+
+
+⸻
+
+✅ How this works
+	•	Swagger UI: Browser → swagger.clusterB.com → Nginx → swagger.clusterA.com
+	•	Backend APIs:
+	•	From Swagger UI calls (/actor) → actor.clusterA.com (proxied)
+	•	From direct curl (curl https://actor.clusterB.com/...) → Nginx → actor.clusterA.com
+
+Both flows respect CORS and proxy headers.
+
+⸻
+
+👉 Do you want me to extend this to generate the API server blocks dynamically from values.yaml (so you don’t duplicate for 15 services), or is static repetition fine for you?
+
+
+
+
 Ah, that makes total sense 👍
 
 What’s happening:
