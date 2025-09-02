@@ -1,3 +1,83 @@
+Ah, that makes total sense 👍
+
+What’s happening:
+	•	Your browser loads Swagger UI from swagger.clusterB.com.
+	•	Swagger UI then makes XHR/fetch calls to swagger.clusterB.com/actor/....
+	•	Nginx proxies those to actor.clusterA.com.
+	•	The response from backend does not have CORS headers, so browser blocks it.
+
+⸻
+
+✅ Fix: Add CORS headers at the Nginx proxy layer
+
+Here’s how you extend your Nginx config:
+
+http {
+  server {
+    listen 8080;
+    server_name localhost;
+
+    # Common CORS headers (applies to all proxied locations)
+    location / {
+      proxy_pass https://swagger.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host swagger.clusterA.com;
+
+      # Add CORS headers
+      add_header 'Access-Control-Allow-Origin' '*' always;
+      add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+      add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, X-Requested-With' always;
+
+      # Handle preflight requests
+      if ($request_method = OPTIONS) {
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, X-Requested-With' always;
+        add_header 'Access-Control-Max-Age' 1728000;
+        add_header 'Content-Length' 0;
+        add_header 'Content-Type' 'text/plain charset=UTF-8';
+        return 204;
+      }
+    }
+
+    location /actor {
+      proxy_pass https://actor.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host actor.clusterA.com;
+
+      # Same CORS headers
+      add_header 'Access-Control-Allow-Origin' '*' always;
+      add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+      add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, X-Requested-With' always;
+
+      if ($request_method = OPTIONS) {
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, X-Requested-With' always;
+        add_header 'Access-Control-Max-Age' 1728000;
+        add_header 'Content-Length' 0;
+        add_header 'Content-Type' 'text/plain charset=UTF-8';
+        return 204;
+      }
+    }
+  }
+}
+
+
+⸻
+
+🛠 How it works
+	•	add_header ... always; → ensures headers are returned on both normal responses and errors.
+	•	Preflight (OPTIONS) requests are intercepted and return 204 No Content with the correct headers.
+	•	Now the browser accepts responses from /actor via swagger.clusterB.com.
+
+⸻
+
+👉 Question: Do you want me to make this CORS block reusable (so you don’t have to repeat it for all 15 API locations), or keep it inline per location for clarity?
+
+====
+
+
 Ahh 👍 got it now — thanks for clarifying again.
 You want both behaviors in the same Nginx:
 	1.	Swagger UI → swagger.clusterB.com → proxies to swagger.clusterA.com.
