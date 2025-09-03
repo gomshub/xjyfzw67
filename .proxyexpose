@@ -1,5 +1,175 @@
 
 
+Perfect ✅ let’s consolidate everything cleanly so you can copy-paste and run both on Kubernetes (Helm) and locally on Windows Docker.
+
+⸻
+
+🚀 Final Nginx Config (Kubernetes via ConfigMap)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-conf
+data:
+  nginx.conf: |
+    events {}
+
+    http {
+      gzip off;   # disable gzip so sub_filter can work
+
+      server {
+        listen 8080;
+        server_name swagger.clusterB.com;
+
+        # === Swagger UI proxy ===
+        location / {
+          proxy_pass https://swagger.clusterA.com;
+          proxy_ssl_server_name on;
+
+          proxy_set_header Host swagger.clusterA.com;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          proxy_set_header Accept-Encoding "";
+
+          # Fix Swagger spec URLs by rewriting clusterA → clusterB
+          sub_filter 'https://swagger.clusterA.com' 'https://swagger.clusterB.com';
+          sub_filter 'https://actor.clusterA.com'   'https://actor.clusterB.com';
+          sub_filter 'https://agent.clusterA.com'   'https://agent.clusterB.com';
+          sub_filter_once off;
+
+          # CORS for UI
+          add_header 'Access-Control-Allow-Origin' '*' always;
+          add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+          add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, X-Requested-With' always;
+          if ($request_method = OPTIONS) {
+            return 204;
+          }
+        }
+
+        # === Backend APIs via swagger.clusterB.com paths ===
+        location /actor {
+          proxy_pass https://actor.clusterA.com;
+          proxy_ssl_server_name on;
+          proxy_set_header Host actor.clusterA.com;
+
+          add_header 'Access-Control-Allow-Origin' '*' always;
+        }
+
+        location /agent {
+          proxy_pass https://agent.clusterA.com;
+          proxy_ssl_server_name on;
+          proxy_set_header Host agent.clusterA.com;
+
+          add_header 'Access-Control-Allow-Origin' '*' always;
+        }
+      }
+
+      # === Direct backend API proxies (curl) ===
+      server {
+        listen 8080;
+        server_name actor.clusterB.com;
+
+        location / {
+          proxy_pass https://actor.clusterA.com;
+          proxy_ssl_server_name on;
+          proxy_set_header Host actor.clusterA.com;
+
+          add_header 'Access-Control-Allow-Origin' '*' always;
+        }
+      }
+
+      server {
+        listen 8080;
+        server_name agent.clusterB.com;
+
+        location / {
+          proxy_pass https://agent.clusterA.com;
+          proxy_ssl_server_name on;
+          proxy_set_header Host agent.clusterA.com;
+
+          add_header 'Access-Control-Allow-Origin' '*' always;
+        }
+      }
+    }
+
+👉 Notes for Kube:
+	•	Container should expose port 8080.
+	•	Service maps 80 → 8080.
+	•	Ingress points external hostnames (swagger.clusterB.com, actor.clusterB.com, etc.) to the service.
+	•	sub_filter rewrites Swagger’s OpenAPI spec so browser never sees ClusterA URLs.
+
+⸻
+
+🖥 Final Nginx Config (Local Windows Docker)
+
+Save as nginx.conf in your project folder and mount into container:
+
+events {}
+
+http {
+  gzip off;
+
+  server {
+    listen 80;
+    server_name localhost;
+
+    # Swagger UI proxy on localhost
+    location / {
+      proxy_pass https://swagger.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host swagger.clusterA.com;
+
+      proxy_set_header Accept-Encoding "";
+
+      sub_filter 'https://swagger.clusterA.com' 'http://localhost';
+      sub_filter 'https://actor.clusterA.com'   'http://localhost/actor';
+      sub_filter 'https://agent.clusterA.com'   'http://localhost/agent';
+      sub_filter_once off;
+
+      add_header 'Access-Control-Allow-Origin' '*' always;
+      add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+      add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, X-Requested-With' always;
+      if ($request_method = OPTIONS) {
+        return 204;
+      }
+    }
+
+    # Localhost direct paths
+    location /actor {
+      proxy_pass https://actor.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host actor.clusterA.com;
+      add_header 'Access-Control-Allow-Origin' '*' always;
+    }
+
+    location /agent {
+      proxy_pass https://agent.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host agent.clusterA.com;
+      add_header 'Access-Control-Allow-Origin' '*' always;
+    }
+  }
+}
+
+👉 Run it locally:
+
+docker run --rm -p 80:80 -v ${PWD}/nginx.conf:/opt/bitnami/nginx/conf/nginx.conf:ro bitnami/nginx
+
+Then open http://localhost → it proxies to Swagger UI from ClusterA, but Swagger spec + backend API calls go through your proxy.
+
+⸻
+
+📌 Summary
+	•	Swagger UI (swagger.clusterB.com or localhost) shows UI and API docs.
+	•	Backend APIs (actor, agent, etc.) proxied correctly both from Swagger UI and via curl.
+	•	CORS enabled, gzip disabled, sub_filter rewrites clusterA → clusterB.
+
+⸻
+
+Do you also want me to provide the Helm values.yaml snippet (so you can just drop in your list of backend APIs instead of hardcoding /actor, /agent)?
+
 
 
 
