@@ -1,4 +1,107 @@
 
+
+
+
+
+Got it ✅
+Here’s a unified curl-based health audit script you can run in Kubernetes (ClusterB) or on your local Windows Docker test.
+
+The difference is just the hostnames:
+	•	In Kubernetes, you hit real hosts like swagger.clusterB.com, actor.clusterB.com.
+	•	In local Docker, you use localhost (since you mapped Nginx port to 8080/80) and test with paths.
+
+⸻
+
+1. Kubernetes Health Audit Script (health-kube.sh)
+
+#!/bin/bash
+# Health audit for Swagger proxy (ClusterB Kubernetes)
+
+# Hosts exposed via Ingress in ClusterB
+SWAGGER_HOST="https://swagger.clusterB.com"
+API_HOSTS=(
+  "https://actor.clusterB.com/public/v1/api-spec"
+  "https://agent.clusterB.com/public/v1/api-spec"
+  "https://payment.clusterB.com/public/v1/api-spec"
+)
+
+echo "=== Swagger Proxy Health Audit (Kubernetes) ==="
+echo "Checking Swagger UI: $SWAGGER_HOST"
+
+swagger_status=$(curl -sk -o /dev/null -w "%{http_code}" "$SWAGGER_HOST")
+if [[ "$swagger_status" =~ ^(200|401|403)$ ]]; then
+  echo "✅ Swagger UI reachable ($swagger_status)"
+else
+  echo "❌ Swagger UI failed ($swagger_status)"
+fi
+echo
+
+for api in "${API_HOSTS[@]}"; do
+  echo "Checking API: $api"
+  status=$(curl -sk -o /dev/null -w "%{http_code}" "$api")
+  if [[ "$status" =~ ^(200|401|403)$ ]]; then
+    echo "  ✅ OK ($status)"
+  else
+    echo "  ❌ FAIL ($status)"
+  fi
+done
+
+echo "=== Audit complete ==="
+
+
+⸻
+
+2. Local Docker Health Audit Script (health-local.sh)
+
+When you run Nginx locally (on Windows Docker), you usually expose port 8080:80.
+So, instead of swagger.clusterB.com, you test against http://localhost:8080.
+
+#!/bin/bash
+# Health audit for Swagger proxy (Local Docker test)
+
+# Swagger UI via localhost
+SWAGGER_HOST="http://localhost:8080"
+# API endpoints mapped as /actor, /agent etc. in nginx.conf
+API_PATHS=(
+  "http://localhost:8080/actor/public/v1/api-spec"
+  "http://localhost:8080/agent/public/v1/api-spec"
+)
+
+echo "=== Swagger Proxy Health Audit (Local Docker) ==="
+echo "Checking Swagger UI: $SWAGGER_HOST"
+
+swagger_status=$(curl -s -o /dev/null -w "%{http_code}" "$SWAGGER_HOST")
+if [[ "$swagger_status" =~ ^(200|401|403)$ ]]; then
+  echo "✅ Swagger UI reachable ($swagger_status)"
+else
+  echo "❌ Swagger UI failed ($swagger_status)"
+fi
+echo
+
+for api in "${API_PATHS[@]}"; do
+  echo "Checking API: $api"
+  status=$(curl -s -o /dev/null -w "%{http_code}" "$api")
+  if [[ "$status" =~ ^(200|401|403)$ ]]; then
+    echo "  ✅ OK ($status)"
+  else
+    echo "  ❌ FAIL ($status)"
+  fi
+done
+
+echo "=== Audit complete ==="
+
+
+⸻
+
+🔑 Key difference:
+	•	ClusterB/Kube: uses real DNS hosts (swagger.clusterB.com).
+	•	Local Docker: uses localhost:8080 and paths (/actor, /agent).
+
+⸻
+
+👉 Do you want me to also add this as a Kubernetes Job (post-sync hook in ArgoCD) so the audit runs automatically after every deploy?
+
+
 Perfect 👍 Let’s lock this down with a minimal, clean Nginx config that:
 	•	Proxies swagger.clusterB.com → swagger.clusterA.com
 	•	Proxies backend APIs (actor.clusterB.com → actor.clusterA.com, etc.)
