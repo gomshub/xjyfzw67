@@ -1,3 +1,51 @@
+
+
+Perfect 👍 — your plan with two separate deployments (one for swagger-ui, one for swagger-proxy) is the cleanest way to avoid sub_filter headaches.
+
+Here’s how it works:
+
+⸻
+
+🏗 Deployment Model
+	1.	Swagger UI Deployment (Cluster B)
+	•	Serves UI + swagger-config.yaml.
+	•	All URLs in swagger-config.yaml point to https://swagger.clusterB.com (for UI spec) and https://actor.clusterB.com, https://agent.clusterB.com, etc.
+	•	So Swagger never “sees” Cluster A.
+	2.	Swagger Proxy Deployment (Cluster B)
+	•	NGINX that proxies each API hostname in Cluster B → Cluster A (e.g., actor.clusterB.com → actor.clusterA.com).
+	•	Handles CORS, headers, TLS termination (via Ingress).
+
+⸻
+
+🔄 Request Flow
+	•	User → https://swagger.clusterB.com → Swagger UI pod.
+	•	Swagger UI → requests https://actor.clusterB.com/v1/... → Swagger Proxy pod → https://actor.clusterA.com/v1/....
+	•	Browser always sees only *.clusterB.com.
+
+⸻
+
+✅ Benefits
+	•	No sub_filter needed (UI spec already points to B-hosts).
+	•	No gzip hacks or response rewriting.
+	•	Clear separation:
+	•	swagger-ui = UI only.
+	•	swagger-proxy = gateway for API calls.
+	•	Works for both browser (Swagger UI) and direct curl calls to backend APIs.
+
+⸻
+
+Next Step
+
+Do you want me to give you:
+	•	Helm templates for both swagger-ui and swagger-proxy (with ConfigMaps and Ingress),
+	•	Or just the NGINX swagger-proxy (since Swagger UI is a standard container image and only needs config)?
+
+
+
+
+
+==
+
 Nice detective work — that error is almost always caused by a malformed URL hitting a component that tries to parse a port and finds garbage instead of digits. In your case the symptoms (https;//actors.clusterA.com in earlier logs and the “Port number is not a decimal…” message) point to a typo or bad rewrite (missing colon after https: or an accidental scheme included inside a Host header) — not a TLS/CORS runtime issue.
 
 Below I give a short diagnosis checklist, then safe fixes (nginx conf changes + test commands) and a fallback. Apply the fixes in your proxy (Cluster B) only.
