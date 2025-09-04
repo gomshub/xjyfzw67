@@ -1,4 +1,229 @@
 
+Perfect, let’s lock this down step by step.
+Your two real problems are:
+	1.	Swagger UI “Fetch error” (CORS + spec rewrite)
+	2.	Curl via proxy → “Port number is not a decimal number” error
+
+Both are NGINX proxy config issues.
+
+⸻
+
+✅ Root causes & fixes
+
+1. “Port number is not a decimal number”
+
+This usually happens when:
+	•	$scheme is concatenated incorrectly → like https:https://...
+	•	Misuse of $host instead of $proxy_host
+	•	Passing headers with an invalid proto/port
+
+👉 Fixes to apply:
+	•	Always use proxy_pass https://backend.com; (no $scheme concatenation).
+	•	Keep:
+
+proxy_set_header Host $proxy_host;
+proxy_set_header X-Forwarded-Proto $scheme;
+
+
+	•	Ensure no trailing / mismatches in proxy_pass.
+
+⸻
+
+2. Swagger UI CORS + OpenAPI spec rewrite
+
+Swagger UI loads https://actor.clusterA.com/v1/publicspec.
+But from swagger.clusterB.com that looks cross-origin → CORS block.
+
+👉 Fixes to apply:
+	•	Add CORS headers in proxied API locations.
+	•	Disable gzip for Swagger / (so sub_filter can rewrite clusterA → clusterB).
+
+⸻
+
+3. gzip handling
+	•	Keep gzip ON globally for performance.
+	•	Disable gzip only on Swagger spec responses (because of sub_filter).
+
+⸻
+
+4. sendfile / tcp_nopush / keepalive
+	•	Keep defaults (Bitnami image already optimizes this).
+	•	Explicitly set:
+
+sendfile on;
+tcp_nopush on;
+keepalive_timeout 65;
+
+
+
+⸻
+
+5. CORS Preflight (OPTIONS)
+
+Handle OPTIONS correctly → return 204.
+
+⸻
+
+🟢 Final NGINX ConfigMap (Kubernetes Helm)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swagger-proxy-nginx
+data:
+  nginx.conf: |
+    events {}
+
+    http {
+      sendfile on;
+      tcp_nopush on;
+      keepalive_timeout 65;
+
+      # Swagger UI proxy
+      server {
+        listen 8080;
+        server_name swagger.clusterB.com;
+
+        location / {
+          proxy_pass https://swagger.clusterA.com;
+          proxy_ssl_server_name on;
+          proxy_set_header Host swagger.clusterA.com;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          # Disable gzip so sub_filter works
+          proxy_set_header Accept-Encoding "";
+
+          sub_filter_once off;
+          sub_filter "https://actor.clusterA.com" "https://actor.clusterB.com";
+          sub_filter "https://agent.clusterA.com" "https://agent.clusterB.com";
+
+          # CORS
+          add_header 'Access-Control-Allow-Origin' '*' always;
+          add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+          add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, X-Requested-With' always;
+
+          if ($request_method = OPTIONS) {
+            return 204;
+          }
+        }
+
+        # Backend API (actor)
+        location /actor/ {
+          proxy_pass https://actor.clusterA.com/;
+          proxy_ssl_server_name on;
+          proxy_set_header Host actor.clusterA.com;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          # CORS
+          add_header 'Access-Control-Allow-Origin' '*' always;
+          add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+          add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, X-Requested-With' always;
+
+          if ($request_method = OPTIONS) {
+            return 204;
+          }
+        }
+
+        # Backend API (agent)
+        location /agent/ {
+          proxy_pass https://agent.clusterA.com/;
+          proxy_ssl_server_name on;
+          proxy_set_header Host agent.clusterA.com;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          # CORS
+          add_header 'Access-Control-Allow-Origin' '*' always;
+          add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+          add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, X-Requested-With' always;
+
+          if ($request_method = OPTIONS) {
+            return 204;
+          }
+        }
+      }
+
+      # Direct backend curl (actor)
+      server {
+        listen 8080;
+        server_name actor.clusterB.com;
+
+        location / {
+          proxy_pass https://actor.clusterA.com;
+          proxy_ssl_server_name on;
+          proxy_set_header Host actor.clusterA.com;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+      }
+
+      # Direct backend curl (agent)
+      server {
+        listen 8080;
+        server_name agent.clusterB.com;
+
+        location / {
+          proxy_pass https://agent.clusterA.com;
+          proxy_ssl_server_name on;
+          proxy_set_header Host agent.clusterA.com;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+      }
+    }
+
+
+⸻
+
+🟢 For Local Docker (Windows localhost test)
+
+Change server_name → localhost, map ports 8080:8080:
+
+events {}
+http {
+  server {
+    listen 8080;
+    server_name localhost;
+
+    location / {
+      proxy_pass https://swagger.clusterA.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host swagger.clusterA.com;
+      proxy_set_header Accept-Encoding "";
+
+      sub_filter_once off;
+      sub_filter "https://actor.clusterA.com" "http://localhost:8080/actor";
+    }
+
+    location /actor/ {
+      proxy_pass https://actor.clusterA.com/;
+      proxy_ssl_server_name on;
+      proxy_set_header Host actor.clusterA.com;
+    }
+  }
+}
+
+Run:
+
+docker run --rm -p 8080:8080 -v C:\path\nginx.conf:/opt/bitnami/nginx/conf/nginx.conf bitnami/nginx:latest
+
+
+⸻
+
+✅ With this config:
+	•	Swagger UI works (swagger.clusterB.com).
+	•	Backend calls (actor.clusterB.com) work via curl and Swagger.
+	•	No more “invalid port number” errors.
+	•	CORS headers present.
+
+⸻
+
+Do you want me to also add a ready-made Helm values.yaml with swaggerHost and apiHosts list so you can dynamically scale this to 15+ APIs without editing nginx.conf every time?
+
+====
 
 Perfect 👍 — your plan with two separate deployments (one for swagger-ui, one for swagger-proxy) is the cleanest way to avoid sub_filter headaches.
 
