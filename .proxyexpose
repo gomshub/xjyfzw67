@@ -1,3 +1,27 @@
+3️⃣ Swagger UI / block
+
+No CORS headers are required here, because all API calls are proxied through the same origin. So this block only handles sub_filter, gzip, and proxying:
+
+location / {
+    proxy_pass https://{{ SWAGGER_CLUSTER_A_HOST }}/;
+    proxy_set_header Host {{ SWAGGER_CLUSTER_A_HOST }};
+    proxy_set_header Accept-Encoding "";
+    proxy_ssl_verify off;
+
+    sub_filter 'https://actor.{{ CLUSTER_A_DOMAIN }}' 'https://{{ SWAGGER_CLUSTER_B_HOST }}/actor';
+    sub_filter 'https://agent.{{ CLUSTER_A_DOMAIN }}' 'https://{{ SWAGGER_CLUSTER_B_HOST }}/agent';
+    sub_filter 'https://{{ SWAGGER_CLUSTER_A_HOST }}' 'https://{{ SWAGGER_CLUSTER_B_HOST }}';
+    sub_filter_once off;
+    sub_filter_types text/html application/javascript;
+
+    gzip on;
+    gzip_types text/html application/javascript application/json;
+    gzip_min_length 256;
+}
+
+
+////////////////
+
 Absolutely — you **can disable gzip globally** with `gzip off;` in the `http {}` block. That will override any local gzip settings, and it ensures that upstream compression won’t interfere with `sub_filter`. You can then selectively enable gzip for clients if needed, but for Swagger UI with `sub_filter`, disabling upstream gzip is the safest approach.
 
 Here’s a **fully updated, fixed, dynamic Nginx template** for your scenario (HTTPS upstream and proxy, dynamic host replacement, sub\_filter working, gzip safe, optional CORS kept minimal):
