@@ -1,3 +1,30 @@
+server {
+    listen 80;
+    server_name swagger.clusterB.com;
+
+   location / {
+    proxy_pass https://{{ SWAGGER_CLUSTER_A_HOST }}/;
+    proxy_set_header Host {{ SWAGGER_CLUSTER_A_HOST }};
+    proxy_set_header Accept-Encoding "";  # important for sub_filter
+    proxy_ssl_verify off;
+
+    # Rewrite backend API URLs dynamically
+    sub_filter 'https://actor.{{ CLUSTER_A_DOMAIN }}' 'https://{{ SWAGGER_CLUSTER_B_HOST }}/actor';
+    sub_filter 'https://agent.{{ CLUSTER_A_DOMAIN }}' 'https://{{ SWAGGER_CLUSTER_B_HOST }}/agent';
+    sub_filter 'https://{{ SWAGGER_CLUSTER_A_HOST }}' 'https://{{ SWAGGER_CLUSTER_B_HOST }}';
+    sub_filter_once off;
+    sub_filter_types text/html application/javascript;
+
+    # Optional gzip for clients
+    gzip on;
+    gzip_types text/html application/javascript application/json;
+    gzip_min_length 256;
+   }
+
+} 
+
+
+=============
 Absolutely — let's summarize the situation and provide a **fixed Nginx configuration** for your Cluster B deployment.
 
 ---
