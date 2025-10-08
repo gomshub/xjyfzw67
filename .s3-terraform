@@ -1,3 +1,38 @@
+PowerShell sees the *```hcl ... ```* part and gets confused because the string block ends early, causing the *“At line 96: unexpected token”* type of error.
+
+---
+
+## ✅ FIXED VERSION
+
+Below is the corrected version of that section (replace in your script from line ~96 onward):
+
+```powershell
+# --- modules/s3-backend/README.md ---
+$readmeContent = @"
+# S3 Backend Module
+
+Creates:
+- S3 bucket for Terraform state
+- DynamoDB for state locking
+
+## Usage Example
+
+\`\`\`hcl
+module "s3_backend" {
+  source         = "../../modules/s3-backend"
+  aws_region     = "us-east-1"
+  s3_bucket_name = "mycompany-tfstate-dev"
+  tags = {
+    Environment = "dev"
+  }
+}
+\`\`\`
+"@
+
+Set-Content "$modulePath/README.md" $readmeContent
+
+
+
 Perfect 👍 — you want:
 	•	A single common Terraform configuration (main files shared across environments).
 	•	Environment-specific variables (*.tfvars) that drive each deployment (e.g., dev, qa, prod).
