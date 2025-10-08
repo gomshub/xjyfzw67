@@ -1,369 +1,325 @@
-# ======================================================
-# setup-terraform-s3-remotebackend.ps1
-# Creates a Terraform project that deploys a new S3 bucket
-# and uses an existing team S3 backend (env-specific backend conf)
-# ======================================================
+Perfect 👍 — here’s the complete all-in-one PowerShell script that builds a secure, reusable Terraform module repo with:
+✅ secure S3 bucket (ACL, encryption, versioning, public-block, logging)
+✅ reusable environment tfvars & backend configs
+✅ GitHub Actions workflow with fmt, tflint, tfsec, plan/apply logic
+✅ everything neatly scaffolded for your team
 
-$root = "terraform-infra"
-$modulePath = Join-Path $root "modules\s3-bucket"
-$envPath = Join-Path $root "environments"
-$workflowPath = Join-Path $root ".github\workflows"
+⸻
 
-# Create directories
-New-Item -Path $modulePath -ItemType Directory -Force | Out-Null
-New-Item -Path $envPath -ItemType Directory -Force | Out-Null
-New-Item -Path $workflowPath -ItemType Directory -Force | Out-Null
+🧩 setup-terraform-secure.ps1
 
-# -----------------------------
-# modules/s3-bucket/main.tf
-# -----------------------------
-@'
-resource "aws_s3_bucket" "this" {
-  bucket        = var.bucket_name
-  acl           = var.acl
-  force_destroy = var.force_destroy
+# ==========================================
+# Script: setup-terraform-secure.ps1
+# Purpose: Create secure Terraform S3 module structure + GitHub Actions workflow
+# ==========================================
 
-  versioning {
-    enabled = var.versioning_enabled
-  }
+$basePath = "terraform-infra"
+$modulePath = "$basePath/modules/s3-backend"
+$envPath = "$basePath/environments"
+$workflowPath = "$basePath/.github/workflows"
 
-  server_side_encryption_configuration {
-    rule {
-      apply_server_side_encryption_by_default {
-        sse_algorithm = var.sse_algorithm
-      }
+# --- Create directories ---
+New-Item -ItemType Directory -Force -Path $modulePath, $envPath, $workflowPath | Out-Null
+
+# --- Root main.tf ---
+@"
+terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
     }
   }
-
-  tags = var.tags
-}
-'@ | Set-Content -Path (Join-Path $modulePath "main.tf")
-
-# -----------------------------
-# modules/s3-bucket/variables.tf
-# -----------------------------
-@'
-variable "bucket_name" {
-  description = "Name of the bucket to create"
-  type        = string
 }
 
-variable "acl" {
-  description = "ACL for the bucket"
-  type        = string
-  default     = "private"
-}
-
-variable "force_destroy" {
-  description = "Allow destroy even if bucket non-empty"
-  type        = bool
-  default     = false
-}
-
-variable "versioning_enabled" {
-  description = "Enable versioning on the bucket"
-  type        = bool
-  default     = true
-}
-
-variable "sse_algorithm" {
-  description = "Server-side encryption algorithm"
-  type        = string
-  default     = "AES256"
-}
-
-variable "tags" {
-  description = "Tags for the bucket"
-  type        = map(string)
-  default     = {}
-}
-'@ | Set-Content -Path (Join-Path $modulePath "variables.tf")
-
-# -----------------------------
-# modules/s3-bucket/outputs.tf
-# -----------------------------
-@'
-output "bucket_id" {
-  value = aws_s3_bucket.this.id
-}
-
-output "bucket_arn" {
-  value = aws_s3_bucket.this.arn
-}
-'@ | Set-Content -Path (Join-Path $modulePath "outputs.tf")
-
-# -----------------------------
-# modules/s3-bucket/README.md
-# Use double-quote here-string and escape backticks to avoid PS issues
-# -----------------------------
-$moduleReadme = @"
-# S3 Bucket Module
-
-Creates a single S3 bucket with sensible defaults (versioning, SSE, tags).
-
-## Example usage
-
-\`\`\`hcl
-module "new_bucket" {
-  source       = "../../modules/s3-bucket"
-  bucket_name  = "mycompany-new-bucket-dev"
-  acl          = "private"
-  force_destroy = false
-  tags = {
-    Project = "infra"
-    Owner   = "team@example.com"
-  }
-}
-\`\`\`
-"@
-
-Set-Content -Path (Join-Path $modulePath "README.md") -Value $moduleReadme
-
-# -----------------------------
-# Root (common) Terraform files
-# -----------------------------
-
-# main.tf (common)
-@'
 provider "aws" {
   region = var.aws_region
 }
 
-module "new_s3_bucket" {
-  source = "./modules/s3-bucket"
-
-  bucket_name        = var.new_bucket_name
-  acl                = var.bucket_acl
-  force_destroy      = var.bucket_force_destroy
-  versioning_enabled = var.bucket_versioning
-  sse_algorithm      = var.bucket_sse_algorithm
-  tags               = merge(var.common_tags, { Environment = var.environment })
+module "s3_backend" {
+  source             = "./modules/s3-backend"
+  s3_bucket_name     = var.s3_bucket_name
+  logging_bucket_name = var.logging_bucket_name
+  tags               = var.tags
 }
-'@ | Set-Content -Path (Join-Path $root "main.tf")
+"@ | Set-Content "$basePath/main.tf"
 
-# variables.tf (common)
-@'
+# --- Root variables.tf ---
+@"
 variable "aws_region" {
-  description = "AWS region to deploy into"
-  type        = string
-  default     = "eu-central-1"
+  description = "AWS region"
 }
 
-variable "environment" {
-  description = "Environment name (dev/qa/prod)"
-  type        = string
+variable "s3_bucket_name" {
+  description = "Name of the S3 bucket to create"
 }
 
-variable "new_bucket_name" {
-  description = "Name of the new S3 bucket to create"
-  type        = string
+variable "logging_bucket_name" {
+  description = "Optional logging bucket name"
+  default     = null
 }
 
-variable "bucket_acl" {
-  description = "ACL for the new bucket"
-  type        = string
-  default     = "private"
-}
-
-variable "bucket_force_destroy" {
-  description = "Allow destroy even if bucket non-empty"
-  type        = bool
-  default     = false
-}
-
-variable "bucket_versioning" {
-  description = "Enable versioning on the bucket"
-  type        = bool
-  default     = true
-}
-
-variable "bucket_sse_algorithm" {
-  description = "SSE algorithm for the bucket"
-  type        = string
-  default     = "AES256"
-}
-
-variable "common_tags" {
-  description = "Common tags applied to resources"
+variable "tags" {
+  description = "Common tags for all resources"
   type        = map(string)
-  default     = {}
 }
-'@ | Set-Content -Path (Join-Path $root "variables.tf")
+"@ | Set-Content "$basePath/variables.tf"
 
-# outputs.tf (common)
-@'
-output "deployed_bucket_id" {
-  value = module.new_s3_bucket.bucket_id
-}
-
-output "deployed_bucket_arn" {
-  value = module.new_s3_bucket.bucket_arn
-}
-'@ | Set-Content -Path (Join-Path $root "outputs.tf")
-
-# backend.tf (placeholder - will be configured at init by backend conf per env)
-@'
+# --- Root backend.tf ---
+@"
 terraform {
   backend "s3" {}
 }
-'@ | Set-Content -Path (Join-Path $root "backend.tf")
+"@ | Set-Content "$basePath/backend.tf"
 
-# -----------------------------
-# Environments (tfvars + backend conf placeholders)
-# -----------------------------
-# Dev
-@'
-aws_region = "eu-central-1"
-environment = "dev"
-new_bucket_name = "mycompany-new-bucket-dev"
-bucket_acl = "private"
-bucket_force_destroy = false
-bucket_versioning = true
-bucket_sse_algorithm = "AES256"
-common_tags = {
-  Project = "myproject"
-  Owner   = "team@example.com"
-}
-'@ | Set-Content -Path (Join-Path $envPath "dev.tfvars")
+# --- Secure S3 Module (main.tf) ---
+@"
+resource "aws_s3_bucket" "tf_state" {
+  bucket = var.s3_bucket_name
 
-@'
-# Backend config for dev environment.
-# EDIT these values to match your team's common S3 backend.
-# Example:
-# bucket=team-terraform-state-bucket
-# key=shared/infra/dev/terraform.tfstate
-# region=eu-central-1
-# dynamodb_table=team-terraform-locks
-# encrypt=true
-
-bucket=team-terraform-state-bucket
-key=shared/infra/dev/terraform.tfstate
-region=eu-central-1
-dynamodb_table=team-terraform-locks
-encrypt=true
-'@ | Set-Content -Path (Join-Path $envPath "dev.backend.conf")
-
-# QA
-@'
-aws_region = "eu-central-1"
-environment = "qa"
-new_bucket_name = "mycompany-new-bucket-qa"
-bucket_acl = "private"
-bucket_force_destroy = false
-bucket_versioning = true
-bucket_sse_algorithm = "AES256"
-common_tags = {
-  Project = "myproject"
-  Owner   = "team@example.com"
-}
-'@ | Set-Content -Path (Join-Path $envPath "qa.tfvars")
-
-@'
-# Backend config for qa environment - edit to match team settings
-bucket=team-terraform-state-bucket
-key=shared/infra/qa/terraform.tfstate
-region=eu-central-1
-dynamodb_table=team-terraform-locks
-encrypt=true
-'@ | Set-Content -Path (Join-Path $envPath "qa.backend.conf")
-
-# Prod
-@'
-aws_region = "eu-central-1"
-environment = "prod"
-new_bucket_name = "mycompany-new-bucket-prod"
-bucket_acl = "private"
-bucket_force_destroy = false
-bucket_versioning = true
-bucket_sse_algorithm = "AES256"
-common_tags = {
-  Project = "myproject"
-  Owner   = "team@example.com"
-}
-'@ | Set-Content -Path (Join-Path $envPath "prod.tfvars")
-
-@'
-# Backend config for prod environment - edit to match team settings
-bucket=team-terraform-state-bucket
-key=shared/infra/prod/terraform.tfstate
-region=eu-central-1
-dynamodb_table=team-terraform-locks
-encrypt=true
-'@ | Set-Content -Path (Join-Path $envPath "prod.backend.conf")
-
-# -----------------------------
-# Helper script: run-terraform.ps1
-# Usage:
-#   .\run-terraform.ps1 -Env dev [-AutoApply]
-# -----------------------------
-$runner = @'
-param(
-  [Parameter(Mandatory=$true)]
-  [ValidateSet("dev","qa","prod")]
-  [string]$Env,
-
-  [switch]$AutoApply
-)
-
-$root = "terraform-infra"
-$envPath = Join-Path $root "environments"
-$backendFile = Join-Path $envPath ("$Env.backend.conf")
-$tfvars = Join-Path $envPath ("$Env.tfvars")
-
-if (-not (Test-Path $backendFile)) {
-  Write-Error "Backend config not found: $backendFile`nEdit the file to point to your team S3 backend and DynamoDB lock table."
-  exit 1
+  tags = merge(var.tags, {
+    ManagedBy = "Terraform"
+  })
 }
 
-if (-not (Test-Path $tfvars)) {
-  Write-Error "tfvars not found: $tfvars"
-  exit 1
+resource "aws_s3_bucket_acl" "tf_state_acl" {
+  bucket = aws_s3_bucket.tf_state.id
+  acl    = "private"
 }
 
-Push-Location $root
-try {
-  Write-Host "Initializing Terraform with backend config: $backendFile"
-  & terraform init "-backend-config=$backendFile" -reconfigure
+resource "aws_s3_bucket_public_access_block" "tf_state_block" {
+  bucket                  = aws_s3_bucket.tf_state.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
 
-  if ($LASTEXITCODE -ne 0) {
-    Write-Error "terraform init failed"
-    exit $LASTEXITCODE
+resource "aws_s3_bucket_versioning" "tf_state_versioning" {
+  bucket = aws_s3_bucket.tf_state.id
+  versioning_configuration {
+    status = "Enabled"
   }
+}
 
-  Write-Host "Planning using var-file: $tfvars"
-  & terraform plan "-var-file=$tfvars" -out=tfplan
-
-  if ($LASTEXITCODE -ne 0) {
-    Write-Error "terraform plan failed"
-    exit $LASTEXITCODE
-  }
-
-  if ($AutoApply) {
-    Write-Host "Applying plan..."
-    & terraform apply -auto-approve tfplan
-    if ($LASTEXITCODE -ne 0) {
-      Write-Error "terraform apply failed"
-      exit $LASTEXITCODE
+resource "aws_s3_bucket_server_side_encryption_configuration" "tf_state_encryption" {
+  bucket = aws_s3_bucket.tf_state.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
     }
-  } else {
-    Write-Host "Plan completed and saved to tfplan. Re-run with -AutoApply to apply."
   }
-} finally {
-  Pop-Location
 }
-'@
 
-Set-Content -Path (Join-Path $root "run-terraform.ps1") -Value $runner
+resource "aws_s3_bucket_logging" "tf_state_logging" {
+  count         = var.logging_bucket_name != null ? 1 : 0
+  bucket        = aws_s3_bucket.tf_state.id
+  target_bucket = var.logging_bucket_name
+  target_prefix = "logs/\${var.s3_bucket_name}/"
+  depends_on    = [aws_s3_bucket_public_access_block.tf_state_block]
+}
 
-Write-Host "✅ Project skeleton created at .\$root"
-Write-Host "`nNext steps:"
-Write-Host "  1) Edit the environment backend config files in '$envPath' (e.g. dev.backend.conf) to point to your team's S3 backend bucket, key, region, and DynamoDB lock table."
-Write-Host "     - e.g. bucket=team-terraform-state-bucket"
-Write-Host "            key=shared/infra/dev/terraform.tfstate"
-Write-Host "            region=eu-central-1"
-Write-Host "            dynamodb_table=team-terraform-locks"
-Write-Host "  2) Edit the env tfvars (dev.tfvars / qa.tfvars / prod.tfvars) to set the desired new_bucket_name and tags."
-Write-Host "  3) Run a plan or apply for an environment (example for dev):"
-Write-Host "       Set-Location .\$root"
-Write-Host "       ./run-terraform.ps1 -Env dev             # runs init & plan"
-Write-Host "       ./run-terraform.ps1 -Env dev -AutoApply  # runs init, plan and apply"
+output "bucket_name" {
+  value = aws_s3_bucket.tf_state.bucket
+}
+"@ | Set-Content "$modulePath/main.tf"
+
+# --- Secure S3 Module variables.tf ---
+@"
+variable "s3_bucket_name" {
+  description = "The name of the S3 bucket to create"
+  type        = string
+}
+
+variable "logging_bucket_name" {
+  description = "Optional S3 bucket name for access logs"
+  type        = string
+  default     = null
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+"@ | Set-Content "$modulePath/variables.tf"
+
+# --- Environment tfvars ---
+@"
+aws_region         = "eu-central-1"
+s3_bucket_name     = "mycompany-tfstate-dev"
+logging_bucket_name = "mycompany-tf-logs"
+tags = {
+  Environment = "dev"
+  Owner       = "DevOpsTeam"
+}
+"@ | Set-Content "$envPath/dev.tfvars"
+
+@"
+aws_region         = "eu-central-1"
+s3_bucket_name     = "mycompany-tfstate-qa"
+logging_bucket_name = "mycompany-tf-logs"
+tags = {
+  Environment = "qa"
+  Owner       = "DevOpsTeam"
+}
+"@ | Set-Content "$envPath/qa.tfvars"
+
+@"
+aws_region         = "eu-central-1"
+s3_bucket_name     = "mycompany-tfstate-prod"
+logging_bucket_name = "mycompany-tf-logs"
+tags = {
+  Environment = "prod"
+  Owner       = "DevOpsTeam"
+}
+"@ | Set-Content "$envPath/prod.tfvars"
+
+# --- Backend configs ---
+@"
+bucket         = "team-shared-terraform-state"
+key            = "dev/terraform.tfstate"
+region         = "eu-central-1"
+dynamodb_table = "terraform-locks"
+encrypt        = true
+"@ | Set-Content "$envPath/dev.backend.conf"
+
+@"
+bucket         = "team-shared-terraform-state"
+key            = "qa/terraform.tfstate"
+region         = "eu-central-1"
+dynamodb_table = "terraform-locks"
+encrypt        = true
+"@ | Set-Content "$envPath/qa.backend.conf"
+
+@"
+bucket         = "team-shared-terraform-state"
+key            = "prod/terraform.tfstate"
+region         = "eu-central-1"
+dynamodb_table = "terraform-locks"
+encrypt        = true
+"@ | Set-Content "$envPath/prod.backend.conf"
+
+# --- GitHub Workflow (terraform-deploy.yml) ---
+$workflowContent = @"
+name: Terraform Secure Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy (dev/qa/prod)'
+        required: true
+        default: 'dev'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: eu-central-1
+      ENV: \${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/GitHubActionsDeployRole
+          aws-region: \${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform Format Check
+        working-directory: terraform-infra
+        run: terraform fmt -check -recursive
+
+      - name: Run TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+      - run: |
+          cd terraform-infra
+          tflint --init
+          tflint
+
+      - name: Run tfsec Security Scan
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: terraform-infra
+
+      - name: Terraform Init
+        working-directory: terraform-infra
+        run: terraform init -backend-config=environments/\${{ env.ENV }}.backend.conf -reconfigure
+
+      - name: Terraform Plan
+        working-directory: terraform-infra
+        run: terraform plan -var-file=environments/\${{ env.ENV }}.tfvars -out=tfplan
+
+      - name: Terraform Apply (Auto for dev/qa)
+        if: \${{ env.ENV != 'prod' }}
+        working-directory: terraform-infra
+        run: terraform apply -auto-approve tfplan
+
+      - name: Terraform Apply (Manual Approval for prod)
+        if: \${{ env.ENV == 'prod' }}
+        uses: chriskilding/approval-action@v2
+        with:
+          approvers: user1,user2
+          min-approvals: 1
+
+      - name: Terraform Apply (After approval)
+        if: \${{ env.ENV == 'prod' }}
+        working-directory: terraform-infra
+        run: terraform apply -auto-approve tfplan
+"@
+
+Set-Content "$workflowPath/terraform-deploy.yml" $workflowContent
+
+Write-Host "`n✅ Secure Terraform + GitHub workflow structure created successfully!"
+Write-Host "Path: $basePath"
+
+
+⸻
+
+🧠 What This Script Does
+
+Step	Purpose
+🗂️ Creates full Terraform folder tree	modules, environments, .github/workflows
+🛡️ Adds secure S3 bucket Terraform module	with ACL, encryption, versioning, block public access, logging
+🔧 Adds environment tfvars & backend configs	dev, qa, prod
+🧰 Adds GitHub workflow	with fmt, tflint, tfsec, plan, apply
+🚀 Supports reusable modules	You can later add EC2, RDS, ALB modules easily
+
+
+⸻
+
+⚙️ How to Run
+	1.	Save as setup-terraform-secure.ps1
+	2.	Run from PowerShell:
+
+./setup-terraform-secure.ps1
+
+
+	3.	Commit & push:
+
+git add .
+git commit -m "Secure Terraform setup with GitHub Actions"
+git push origin main
+
+
+
+⸻
+
+Would you like me to extend this so it auto-detects your AWS account ID from your local AWS CLI profile and replaces <ACCOUNT_ID> in the GitHub workflow automatically?
