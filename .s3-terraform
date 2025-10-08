@@ -1,71 +1,3 @@
-PowerShell sees the *```hcl ... ```* part and gets confused because the string block ends early, causing the *“At line 96: unexpected token”* type of error.
-
----
-
-## ✅ FIXED VERSION
-
-Below is the corrected version of that section (replace in your script from line ~96 onward):
-
-```powershell
-# --- modules/s3-backend/README.md ---
-$readmeContent = @"
-# S3 Backend Module
-
-Creates:
-- S3 bucket for Terraform state
-- DynamoDB for state locking
-
-## Usage Example
-
-\`\`\`hcl
-module "s3_backend" {
-  source         = "../../modules/s3-backend"
-  aws_region     = "us-east-1"
-  s3_bucket_name = "mycompany-tfstate-dev"
-  tags = {
-    Environment = "dev"
-  }
-}
-\`\`\`
-"@
-
-Set-Content "$modulePath/README.md" $readmeContent
-
-
-
-Perfect 👍 — you want:
-	•	A single common Terraform configuration (main files shared across environments).
-	•	Environment-specific variables (*.tfvars) that drive each deployment (e.g., dev, qa, prod).
-	•	Automated folder and file creation via PowerShell.
-
-So instead of separate main.tf per environment, we’ll have this structure:
-
-terraform-infra/
-├── main.tf
-├── variables.tf
-├── outputs.tf
-├── backend.tf
-├── modules/
-│   └── s3-backend/
-│       ├── main.tf
-│       ├── variables.tf
-│       ├── outputs.tf
-│       └── README.md
-├── environments/
-│   ├── dev.tfvars
-│   ├── qa.tfvars
-│   └── prod.tfvars
-├── .github/
-│   └── workflows/
-│       └── terraform.yml
-└── setup-terraform-structure.ps1
-
-Now here’s a PowerShell script that builds this shared main + env tfvars structure automatically.
-
-⸻
-
-🧰 PowerShell Script — setup-terraform-structure.ps1
-
 # =====================================================
 # Terraform Infra Bootstrap Script (Shared Main + Env tfvars)
 # =====================================================
@@ -160,220 +92,158 @@ output "dynamodb_table_name" {
 '@ | Set-Content "$modulePath/outputs.tf"
 
 # --- modules/s3-backend/README.md ---
-@'
+$readmeContent = @"
 # S3 Backend Module
 
 Creates:
 - S3 bucket for Terraform state
 - DynamoDB for state locking
 
-Usage:
-```hcl
+## Usage Example
+
+\`\`\`hcl
 module "s3_backend" {
   source         = "../../modules/s3-backend"
+  aws_region     = "us-east-1"
+  s3_bucket_name = "mycompany-tfstate-dev"
+  tags = {
+    Environment = "dev"
+  }
+}
+\`\`\`
+"@
+Set-Content "$modulePath/README.md" $readmeContent
+
+# =====================================================
+# ROOT (COMMON) TERRAFORM FILES
+# =====================================================
+
+# --- main.tf ---
+@'
+provider "aws" {
+  region = var.aws_region
+}
+
+module "s3_backend" {
+  source         = "./modules/s3-backend"
   aws_region     = var.aws_region
   s3_bucket_name = var.s3_bucket_name
   tags = {
     Environment = var.environment
+    Project     = "terraform-infra"
   }
 }
 
-’@ | Set-Content “$modulePath/README.md”
-
-=====================================================
-
-ROOT (COMMON) TERRAFORM FILES
-
-=====================================================
-
-— main.tf —
-
-@’
-provider “aws” {
-region = var.aws_region
+output "bucket_name" {
+  value = module.s3_backend.s3_bucket_name
 }
 
-module “s3_backend” {
-source         = “./modules/s3-backend”
-aws_region     = var.aws_region
-s3_bucket_name = var.s3_bucket_name
-tags = {
-Environment = var.environment
-Project     = “terraform-infra”
+output "dynamodb_table" {
+  value = module.s3_backend.dynamodb_table_name
 }
-}
+'@ | Set-Content "$root/main.tf"
 
-output “bucket_name” {
-value = module.s3_backend.s3_bucket_name
+# --- variables.tf ---
+@'
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
 }
 
-output “dynamodb_table” {
-value = module.s3_backend.dynamodb_table_name
-}
-’@ | Set-Content “$root/main.tf”
-
-— variables.tf —
-
-@’
-variable “aws_region” {
-description = “AWS region”
-type        = string
+variable "environment" {
+  description = "Deployment environment"
+  type        = string
 }
 
-variable “environment” {
-description = “Deployment environment”
-type        = string
+variable "s3_bucket_name" {
+  description = "Terraform state bucket name"
+  type        = string
 }
+'@ | Set-Content "$root/variables.tf"
 
-variable “s3_bucket_name” {
-description = “Terraform state bucket name”
-type        = string
+# --- outputs.tf ---
+@'
+output "terraform_backend" {
+  value = {
+    bucket         = module.s3_backend.s3_bucket_name
+    dynamodb_table = module.s3_backend.dynamodb_table_name
+    region         = var.aws_region
+  }
 }
-’@ | Set-Content “$root/variables.tf”
+'@ | Set-Content "$root/outputs.tf"
 
-— outputs.tf —
-
-@’
-output “terraform_backend” {
-value = {
-bucket         = module.s3_backend.s3_bucket_name
-dynamodb_table = module.s3_backend.dynamodb_table_name
-region         = var.aws_region
-}
-}
-’@ | Set-Content “$root/outputs.tf”
-
-— backend.tf —
-
-@’
+# --- backend.tf ---
+@'
 terraform {
-backend “s3” {}
+  backend "s3" {}
 }
-’@ | Set-Content “$root/backend.tf”
+'@ | Set-Content "$root/backend.tf"
 
-=====================================================
+# =====================================================
+# ENVIRONMENT-SPECIFIC TFVARS
+# =====================================================
 
-ENVIRONMENT-SPECIFIC TFVARS
+@'
+aws_region      = "us-east-1"
+environment     = "dev"
+s3_bucket_name  = "mycompany-tfstate-dev"
+'@ | Set-Content "$envPath/dev.tfvars"
 
-=====================================================
+@'
+aws_region      = "us-east-1"
+environment     = "qa"
+s3_bucket_name  = "mycompany-tfstate-qa"
+'@ | Set-Content "$envPath/qa.tfvars"
 
-@’
-aws_region      = “us-east-1”
-environment     = “dev”
-s3_bucket_name  = “mycompany-tfstate-dev”
-’@ | Set-Content “$envPath/dev.tfvars”
+@'
+aws_region      = "us-east-1"
+environment     = "prod"
+s3_bucket_name  = "mycompany-tfstate-prod"
+'@ | Set-Content "$envPath/prod.tfvars"
 
-@’
-aws_region      = “us-east-1”
-environment     = “qa”
-s3_bucket_name  = “mycompany-tfstate-qa”
-’@ | Set-Content “$envPath/qa.tfvars”
+# =====================================================
+# GITHUB WORKFLOW
+# =====================================================
 
-@’
-aws_region      = “us-east-1”
-environment     = “prod”
-s3_bucket_name  = “mycompany-tfstate-prod”
-’@ | Set-Content “$envPath/prod.tfvars”
-
-=====================================================
-
-GITHUB WORKFLOW
-
-=====================================================
-
-@’
+@'
 name: Terraform Infra Setup
 
 on:
-push:
-branches:
-- main
-paths:
-- “**/.tf”
-- “environments/.tfvars”
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.tf"
+      - "environments/*.tfvars"
 
 jobs:
-terraform:
-runs-on: ubuntu-latest
-env:
-AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-AWS_DEFAULT_REGION: us-east-1
+  terraform:
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
 
-steps:
-  - name: Checkout Code
-    uses: actions/checkout@v4
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-  - name: Setup Terraform
-    uses: hashicorp/setup-terraform@v3
-    with:
-      terraform_version: 1.9.8
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
 
-  - name: Init
-    run: terraform init
+      - name: Init
+        run: terraform init
 
-  - name: Validate
-    run: terraform validate
+      - name: Validate
+        run: terraform validate
 
-  - name: Plan (Dev)
-    run: terraform plan -var-file=environments/dev.tfvars -out=tfplan
+      - name: Plan (Dev)
+        run: terraform plan -var-file=environments/dev.tfvars -out=tfplan
 
-  - name: Apply (Dev)
-    run: terraform apply -auto-approve tfplan
+      - name: Apply (Dev)
+        run: terraform apply -auto-approve tfplan
+'@ | Set-Content "$workflowPath/terraform.yml"
 
-’@ | Set-Content “$workflowPath/terraform.yml”
-
-Write-Host “✅ Terraform shared structure created successfully at: $root”
-
----
-
-## 🧾 Run the Script
-
-```powershell
-# Run in PowerShell from your working directory
-.\setup-terraform-structure.ps1
-
-
-⸻
-
-✅ Resulting Structure
-
-terraform-infra/
-├── main.tf                # Common logic
-├── variables.tf           # Shared variable definitions
-├── outputs.tf             # Shared outputs
-├── backend.tf             # S3 backend placeholder
-├── modules/
-│   └── s3-backend/
-│       ├── main.tf
-│       ├── variables.tf
-│       ├── outputs.tf
-│       └── README.md
-├── environments/
-│   ├── dev.tfvars
-│   ├── qa.tfvars
-│   └── prod.tfvars
-└── .github/
-    └── workflows/
-        └── terraform.yml
-
-
-⸻
-
-💡 Usage Example
-
-Initialize & apply for a specific environment:
-
-# Dev
-terraform init
-terraform plan -var-file=environments/dev.tfvars
-terraform apply -var-file=environments/dev.tfvars -auto-approve
-
-# QA
-terraform plan -var-file=environments/qa.tfvars
-terraform apply -var-file=environments/qa.tfvars -auto-approve
-
-
-⸻
-
-Would you like me to extend this script so that it also auto-runs terraform init + plan after creating the files (for immediate test setup)?
+Write-Host "✅ Terraform shared structure created successfully at: $root"
