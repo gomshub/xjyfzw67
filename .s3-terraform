@@ -1,249 +1,369 @@
-# =====================================================
-# Terraform Infra Bootstrap Script (Shared Main + Env tfvars)
-# =====================================================
+# ======================================================
+# setup-terraform-s3-remotebackend.ps1
+# Creates a Terraform project that deploys a new S3 bucket
+# and uses an existing team S3 backend (env-specific backend conf)
+# ======================================================
 
 $root = "terraform-infra"
-$modulePath = "$root/modules/s3-backend"
-$envPath = "$root/environments"
-$workflowPath = "$root/.github/workflows"
+$modulePath = Join-Path $root "modules\s3-bucket"
+$envPath = Join-Path $root "environments"
+$workflowPath = Join-Path $root ".github\workflows"
 
-# --- Create Folder Structure ---
+# Create directories
 New-Item -Path $modulePath -ItemType Directory -Force | Out-Null
 New-Item -Path $envPath -ItemType Directory -Force | Out-Null
 New-Item -Path $workflowPath -ItemType Directory -Force | Out-Null
 
-# =====================================================
-# MODULE FILES
-# =====================================================
-
-# --- modules/s3-backend/main.tf ---
+# -----------------------------
+# modules/s3-bucket/main.tf
+# -----------------------------
 @'
-resource "aws_s3_bucket" "tf_state" {
-  bucket = var.s3_bucket_name
-  acl    = "private"
+resource "aws_s3_bucket" "this" {
+  bucket        = var.bucket_name
+  acl           = var.acl
+  force_destroy = var.force_destroy
 
   versioning {
-    enabled = true
+    enabled = var.versioning_enabled
   }
 
   server_side_encryption_configuration {
     rule {
       apply_server_side_encryption_by_default {
-        sse_algorithm = "AES256"
+        sse_algorithm = var.sse_algorithm
       }
     }
   }
 
-  tags = merge(
-    {
-      ManagedBy = "Terraform"
-    },
-    var.tags
-  )
+  tags = var.tags
 }
+'@ | Set-Content -Path (Join-Path $modulePath "main.tf")
 
-resource "aws_dynamodb_table" "tf_lock" {
-  name         = "${var.s3_bucket_name}-lock"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  tags = merge(
-    {
-      ManagedBy = "Terraform"
-    },
-    var.tags
-  )
-}
-'@ | Set-Content "$modulePath/main.tf"
-
-# --- modules/s3-backend/variables.tf ---
+# -----------------------------
+# modules/s3-bucket/variables.tf
+# -----------------------------
 @'
-variable "aws_region" {
-  description = "AWS region for S3 bucket and DynamoDB"
+variable "bucket_name" {
+  description = "Name of the bucket to create"
   type        = string
 }
 
-variable "s3_bucket_name" {
-  description = "S3 bucket name for storing Terraform state"
+variable "acl" {
+  description = "ACL for the bucket"
   type        = string
+  default     = "private"
+}
+
+variable "force_destroy" {
+  description = "Allow destroy even if bucket non-empty"
+  type        = bool
+  default     = false
+}
+
+variable "versioning_enabled" {
+  description = "Enable versioning on the bucket"
+  type        = bool
+  default     = true
+}
+
+variable "sse_algorithm" {
+  description = "Server-side encryption algorithm"
+  type        = string
+  default     = "AES256"
 }
 
 variable "tags" {
-  description = "Tags for resources"
+  description = "Tags for the bucket"
   type        = map(string)
   default     = {}
 }
-'@ | Set-Content "$modulePath/variables.tf"
+'@ | Set-Content -Path (Join-Path $modulePath "variables.tf")
 
-# --- modules/s3-backend/outputs.tf ---
+# -----------------------------
+# modules/s3-bucket/outputs.tf
+# -----------------------------
 @'
-output "s3_bucket_name" {
-  value = aws_s3_bucket.tf_state.bucket
+output "bucket_id" {
+  value = aws_s3_bucket.this.id
 }
 
-output "dynamodb_table_name" {
-  value = aws_dynamodb_table.tf_lock.name
+output "bucket_arn" {
+  value = aws_s3_bucket.this.arn
 }
-'@ | Set-Content "$modulePath/outputs.tf"
+'@ | Set-Content -Path (Join-Path $modulePath "outputs.tf")
 
-# --- modules/s3-backend/README.md ---
-$readmeContent = @"
-# S3 Backend Module
+# -----------------------------
+# modules/s3-bucket/README.md
+# Use double-quote here-string and escape backticks to avoid PS issues
+# -----------------------------
+$moduleReadme = @"
+# S3 Bucket Module
 
-Creates:
-- S3 bucket for Terraform state
-- DynamoDB for state locking
+Creates a single S3 bucket with sensible defaults (versioning, SSE, tags).
 
-## Usage Example
+## Example usage
 
 \`\`\`hcl
-module "s3_backend" {
-  source         = "../../modules/s3-backend"
-  aws_region     = "us-east-1"
-  s3_bucket_name = "mycompany-tfstate-dev"
+module "new_bucket" {
+  source       = "../../modules/s3-bucket"
+  bucket_name  = "mycompany-new-bucket-dev"
+  acl          = "private"
+  force_destroy = false
   tags = {
-    Environment = "dev"
+    Project = "infra"
+    Owner   = "team@example.com"
   }
 }
 \`\`\`
 "@
-Set-Content "$modulePath/README.md" $readmeContent
 
-# =====================================================
-# ROOT (COMMON) TERRAFORM FILES
-# =====================================================
+Set-Content -Path (Join-Path $modulePath "README.md") -Value $moduleReadme
 
-# --- main.tf ---
+# -----------------------------
+# Root (common) Terraform files
+# -----------------------------
+
+# main.tf (common)
 @'
 provider "aws" {
   region = var.aws_region
 }
 
-module "s3_backend" {
-  source         = "./modules/s3-backend"
-  aws_region     = var.aws_region
-  s3_bucket_name = var.s3_bucket_name
-  tags = {
-    Environment = var.environment
-    Project     = "terraform-infra"
-  }
-}
+module "new_s3_bucket" {
+  source = "./modules/s3-bucket"
 
-output "bucket_name" {
-  value = module.s3_backend.s3_bucket_name
+  bucket_name        = var.new_bucket_name
+  acl                = var.bucket_acl
+  force_destroy      = var.bucket_force_destroy
+  versioning_enabled = var.bucket_versioning
+  sse_algorithm      = var.bucket_sse_algorithm
+  tags               = merge(var.common_tags, { Environment = var.environment })
 }
+'@ | Set-Content -Path (Join-Path $root "main.tf")
 
-output "dynamodb_table" {
-  value = module.s3_backend.dynamodb_table_name
-}
-'@ | Set-Content "$root/main.tf"
-
-# --- variables.tf ---
+# variables.tf (common)
 @'
 variable "aws_region" {
-  description = "AWS region"
+  description = "AWS region to deploy into"
   type        = string
+  default     = "eu-central-1"
 }
 
 variable "environment" {
-  description = "Deployment environment"
+  description = "Environment name (dev/qa/prod)"
   type        = string
 }
 
-variable "s3_bucket_name" {
-  description = "Terraform state bucket name"
+variable "new_bucket_name" {
+  description = "Name of the new S3 bucket to create"
   type        = string
 }
-'@ | Set-Content "$root/variables.tf"
 
-# --- outputs.tf ---
+variable "bucket_acl" {
+  description = "ACL for the new bucket"
+  type        = string
+  default     = "private"
+}
+
+variable "bucket_force_destroy" {
+  description = "Allow destroy even if bucket non-empty"
+  type        = bool
+  default     = false
+}
+
+variable "bucket_versioning" {
+  description = "Enable versioning on the bucket"
+  type        = bool
+  default     = true
+}
+
+variable "bucket_sse_algorithm" {
+  description = "SSE algorithm for the bucket"
+  type        = string
+  default     = "AES256"
+}
+
+variable "common_tags" {
+  description = "Common tags applied to resources"
+  type        = map(string)
+  default     = {}
+}
+'@ | Set-Content -Path (Join-Path $root "variables.tf")
+
+# outputs.tf (common)
 @'
-output "terraform_backend" {
-  value = {
-    bucket         = module.s3_backend.s3_bucket_name
-    dynamodb_table = module.s3_backend.dynamodb_table_name
-    region         = var.aws_region
-  }
+output "deployed_bucket_id" {
+  value = module.new_s3_bucket.bucket_id
 }
-'@ | Set-Content "$root/outputs.tf"
 
-# --- backend.tf ---
+output "deployed_bucket_arn" {
+  value = module.new_s3_bucket.bucket_arn
+}
+'@ | Set-Content -Path (Join-Path $root "outputs.tf")
+
+# backend.tf (placeholder - will be configured at init by backend conf per env)
 @'
 terraform {
   backend "s3" {}
 }
-'@ | Set-Content "$root/backend.tf"
+'@ | Set-Content -Path (Join-Path $root "backend.tf")
 
-# =====================================================
-# ENVIRONMENT-SPECIFIC TFVARS
-# =====================================================
+# -----------------------------
+# Environments (tfvars + backend conf placeholders)
+# -----------------------------
+# Dev
+@'
+aws_region = "eu-central-1"
+environment = "dev"
+new_bucket_name = "mycompany-new-bucket-dev"
+bucket_acl = "private"
+bucket_force_destroy = false
+bucket_versioning = true
+bucket_sse_algorithm = "AES256"
+common_tags = {
+  Project = "myproject"
+  Owner   = "team@example.com"
+}
+'@ | Set-Content -Path (Join-Path $envPath "dev.tfvars")
 
 @'
-aws_region      = "us-east-1"
-environment     = "dev"
-s3_bucket_name  = "mycompany-tfstate-dev"
-'@ | Set-Content "$envPath/dev.tfvars"
+# Backend config for dev environment.
+# EDIT these values to match your team's common S3 backend.
+# Example:
+# bucket=team-terraform-state-bucket
+# key=shared/infra/dev/terraform.tfstate
+# region=eu-central-1
+# dynamodb_table=team-terraform-locks
+# encrypt=true
+
+bucket=team-terraform-state-bucket
+key=shared/infra/dev/terraform.tfstate
+region=eu-central-1
+dynamodb_table=team-terraform-locks
+encrypt=true
+'@ | Set-Content -Path (Join-Path $envPath "dev.backend.conf")
+
+# QA
+@'
+aws_region = "eu-central-1"
+environment = "qa"
+new_bucket_name = "mycompany-new-bucket-qa"
+bucket_acl = "private"
+bucket_force_destroy = false
+bucket_versioning = true
+bucket_sse_algorithm = "AES256"
+common_tags = {
+  Project = "myproject"
+  Owner   = "team@example.com"
+}
+'@ | Set-Content -Path (Join-Path $envPath "qa.tfvars")
 
 @'
-aws_region      = "us-east-1"
-environment     = "qa"
-s3_bucket_name  = "mycompany-tfstate-qa"
-'@ | Set-Content "$envPath/qa.tfvars"
+# Backend config for qa environment - edit to match team settings
+bucket=team-terraform-state-bucket
+key=shared/infra/qa/terraform.tfstate
+region=eu-central-1
+dynamodb_table=team-terraform-locks
+encrypt=true
+'@ | Set-Content -Path (Join-Path $envPath "qa.backend.conf")
+
+# Prod
+@'
+aws_region = "eu-central-1"
+environment = "prod"
+new_bucket_name = "mycompany-new-bucket-prod"
+bucket_acl = "private"
+bucket_force_destroy = false
+bucket_versioning = true
+bucket_sse_algorithm = "AES256"
+common_tags = {
+  Project = "myproject"
+  Owner   = "team@example.com"
+}
+'@ | Set-Content -Path (Join-Path $envPath "prod.tfvars")
 
 @'
-aws_region      = "us-east-1"
-environment     = "prod"
-s3_bucket_name  = "mycompany-tfstate-prod"
-'@ | Set-Content "$envPath/prod.tfvars"
+# Backend config for prod environment - edit to match team settings
+bucket=team-terraform-state-bucket
+key=shared/infra/prod/terraform.tfstate
+region=eu-central-1
+dynamodb_table=team-terraform-locks
+encrypt=true
+'@ | Set-Content -Path (Join-Path $envPath "prod.backend.conf")
 
-# =====================================================
-# GITHUB WORKFLOW
-# =====================================================
+# -----------------------------
+# Helper script: run-terraform.ps1
+# Usage:
+#   .\run-terraform.ps1 -Env dev [-AutoApply]
+# -----------------------------
+$runner = @'
+param(
+  [Parameter(Mandatory=$true)]
+  [ValidateSet("dev","qa","prod")]
+  [string]$Env,
 
-@'
-name: Terraform Infra Setup
+  [switch]$AutoApply
+)
 
-on:
-  push:
-    branches:
-      - main
-    paths:
-      - "**/*.tf"
-      - "environments/*.tfvars"
+$root = "terraform-infra"
+$envPath = Join-Path $root "environments"
+$backendFile = Join-Path $envPath ("$Env.backend.conf")
+$tfvars = Join-Path $envPath ("$Env.tfvars")
 
-jobs:
-  terraform:
-    runs-on: ubuntu-latest
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: us-east-1
+if (-not (Test-Path $backendFile)) {
+  Write-Error "Backend config not found: $backendFile`nEdit the file to point to your team S3 backend and DynamoDB lock table."
+  exit 1
+}
 
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+if (-not (Test-Path $tfvars)) {
+  Write-Error "tfvars not found: $tfvars"
+  exit 1
+}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.8
+Push-Location $root
+try {
+  Write-Host "Initializing Terraform with backend config: $backendFile"
+  & terraform init "-backend-config=$backendFile" -reconfigure
 
-      - name: Init
-        run: terraform init
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "terraform init failed"
+    exit $LASTEXITCODE
+  }
 
-      - name: Validate
-        run: terraform validate
+  Write-Host "Planning using var-file: $tfvars"
+  & terraform plan "-var-file=$tfvars" -out=tfplan
 
-      - name: Plan (Dev)
-        run: terraform plan -var-file=environments/dev.tfvars -out=tfplan
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "terraform plan failed"
+    exit $LASTEXITCODE
+  }
 
-      - name: Apply (Dev)
-        run: terraform apply -auto-approve tfplan
-'@ | Set-Content "$workflowPath/terraform.yml"
+  if ($AutoApply) {
+    Write-Host "Applying plan..."
+    & terraform apply -auto-approve tfplan
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "terraform apply failed"
+      exit $LASTEXITCODE
+    }
+  } else {
+    Write-Host "Plan completed and saved to tfplan. Re-run with -AutoApply to apply."
+  }
+} finally {
+  Pop-Location
+}
+'@
 
-Write-Host "✅ Terraform shared structure created successfully at: $root"
+Set-Content -Path (Join-Path $root "run-terraform.ps1") -Value $runner
+
+Write-Host "✅ Project skeleton created at .\$root"
+Write-Host "`nNext steps:"
+Write-Host "  1) Edit the environment backend config files in '$envPath' (e.g. dev.backend.conf) to point to your team's S3 backend bucket, key, region, and DynamoDB lock table."
+Write-Host "     - e.g. bucket=team-terraform-state-bucket"
+Write-Host "            key=shared/infra/dev/terraform.tfstate"
+Write-Host "            region=eu-central-1"
+Write-Host "            dynamodb_table=team-terraform-locks"
+Write-Host "  2) Edit the env tfvars (dev.tfvars / qa.tfvars / prod.tfvars) to set the desired new_bucket_name and tags."
+Write-Host "  3) Run a plan or apply for an environment (example for dev):"
+Write-Host "       Set-Location .\$root"
+Write-Host "       ./run-terraform.ps1 -Env dev             # runs init & plan"
+Write-Host "       ./run-terraform.ps1 -Env dev -AutoApply  # runs init, plan and apply"
