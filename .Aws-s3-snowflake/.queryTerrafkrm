@@ -1,0 +1,133 @@
+Perfect — if your Snowflake query is long and multi-line, you have 3 good options to handle it cleanly in Lambda + Terraform without breaking the JSON/HCL syntax.
+
+Let’s go step-by-step 👇
+
+⸻
+
+🧩 Option 1 (Recommended) — Store query in an external .sql file
+
+✅ Why
+	•	Keeps Terraform clean and readable
+	•	Easier to modify query later
+	•	Supports multiline formatting naturally
+
+⸻
+
+1️⃣ Folder structure
+
+snowflake-to-s3/
+├── main.tf
+├── variables.tf
+├── terraform.tfvars
+├── query.sql
+└── lambda/
+    └── lambda_function.py
+
+
+⸻
+
+2️⃣ Example query.sql
+
+SELECT 
+    CUSTOMER_ID,
+    SUM(AMOUNT) AS TOTAL_AMOUNT,
+    COUNT(DISTINCT ORDER_ID) AS UNIQUE_ORDERS
+FROM ORDERS
+WHERE ORDER_DATE >= DATEADD(DAY, -1, CURRENT_DATE())
+GROUP BY CUSTOMER_ID
+ORDER BY TOTAL_AMOUNT DESC;
+
+
+⸻
+
+3️⃣ Terraform changes (inject query file content as env variable)
+
+In your main.tf, add:
+
+data "local_file" "query" {
+  filename = "${path.module}/query.sql"
+}
+
+resource "aws_lambda_function" "snowflake_to_s3" {
+  function_name = "snowflake_to_s3"
+  role          = aws_iam_role.lambda_role.arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.12"
+  filename      = data.archive_file.lambda_zip.output_path
+  timeout       = 900
+
+  environment {
+    variables = {
+      SNOWFLAKE_USER      = var.snowflake_user
+      SNOWFLAKE_PASSWORD  = var.snowflake_password
+      SNOWFLAKE_ACCOUNT   = var.snowflake_account
+      SNOWFLAKE_DATABASE  = var.snowflake_database
+      SNOWFLAKE_SCHEMA    = var.snowflake_schema
+      SNOWFLAKE_WAREHOUSE = var.snowflake_warehouse
+      S3_BUCKET           = var.s3_bucket_name
+      SNOWFLAKE_QUERY     = data.local_file.query.content
+    }
+  }
+}
+
+✅ Terraform automatically reads the .sql file and injects it as an environment variable.
+✅ The Lambda can use it directly without changing code.
+
+⸻
+
+4️⃣ Lambda code (no change needed)
+
+Your existing Lambda still works fine:
+
+QUERY = os.environ['SNOWFLAKE_QUERY']
+cur.execute(QUERY)
+
+
+⸻
+
+🧩 Option 2 — Store query in S3
+
+If the query is very large (hundreds of lines) or frequently updated:
+	•	Store it in an S3 bucket as query.sql
+	•	Lambda reads it at runtime:
+
+s3 = boto3.client('s3')
+query_obj = s3.get_object(Bucket='my-query-bucket', Key='query.sql')
+QUERY = query_obj['Body'].read().decode('utf-8')
+
+You can then modify the SQL directly in S3 without redeploying Terraform/Lambda.
+
+⸻
+
+🧩 Option 3 — Use Terraform HEREDOC (inline, less preferred)
+
+If you want to keep it self-contained inside Terraform:
+
+variable "snowflake_query" {
+  default = <<-EOT
+    SELECT CUSTOMER_ID,
+           SUM(AMOUNT) AS TOTAL_AMOUNT
+    FROM ORDERS
+    WHERE ORDER_DATE >= DATEADD(DAY, -1, CURRENT_DATE())
+    GROUP BY CUSTOMER_ID;
+  EOT
+}
+
+This works fine, but editing long SQL in Terraform can be messy.
+
+⸻
+
+✅ Recommended setup for your use case
+
+Part	Implementation
+Query	query.sql file in repo
+Terraform	Reads SQL via data "local_file"
+Lambda	Executes it from environment
+Schedule	CloudWatch cron daily
+Output	S3 CSV under daily/YYYY-MM-DD/results.csv
+
+
+⸻
+
+Would you like me to show the final cleaned-up Terraform + Lambda code (with the query.sql file integration already included)?
+I can paste the full working version next (ready to copy/paste and run).
