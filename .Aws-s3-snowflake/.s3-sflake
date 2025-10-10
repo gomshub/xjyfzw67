@@ -1,3 +1,100 @@
+
+Excellent question — and yes, we can absolutely simplify the scheduling part 😎
+
+CloudWatch Event Rule (EventBridge) is the AWS-native way to do a “cron job” in the cloud — but if you find it too verbose in Terraform, we can reduce it to a very small, simple block instead of multiple resources.
+
+⸻
+
+✅ Simplified Cron-based Lambda Trigger in Terraform
+
+Here’s the minimal and clean way to schedule your Lambda on a cron expression:
+
+🧱 Updated Terraform (Simplified)
+
+Replace the CloudWatch section in your existing main.tf with this ⬇️
+
+# -------------------------------
+# Simple Cron-based Lambda Trigger
+# -------------------------------
+resource "aws_cloudwatch_event_rule" "daily_cron" {
+  name                = "snowflake_daily_trigger"
+  description         = "Triggers Lambda to fetch Snowflake data daily"
+  schedule_expression = "cron(0 2 * * ? *)" # Runs daily at 2 AM UTC
+}
+
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = aws_cloudwatch_event_rule.daily_cron.name
+  target_id = "lambda_snowflake_target"
+  arn       = aws_lambda_function.snowflake_to_s3.arn
+}
+
+resource "aws_lambda_permission" "allow_cloudwatch_trigger" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.snowflake_to_s3.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.daily_cron.arn
+}
+
+That’s it — only 3 short resources, easy to understand:
+	•	One rule (aws_cloudwatch_event_rule) defines the cron schedule.
+	•	One target (aws_cloudwatch_event_target) links it to your Lambda.
+	•	One permission (aws_lambda_permission) lets CloudWatch invoke it.
+
+⸻
+
+🕓 Common Cron Examples
+
+Schedule	Expression	Meaning
+Every day at 2 AM UTC	cron(0 2 * * ? *)	✅ Good for daily data jobs
+Every 6 hours	rate(6 hours)	Simple repeating schedule
+Every Monday at 5 AM	cron(0 5 ? * MON *)	Weekly trigger
+Every 30 minutes	rate(30 minutes)	Continuous smaller jobs
+
+
+⸻
+
+🧭 Simple Explanation
+
+If you come from a Linux background —
+Think of this as your crontab line, but defined in Terraform:
+
+0 2 * * *   →   cron(0 2 * * ? *)
+
+It means:
+	•	Minute = 0
+	•	Hour = 2
+	•	Day of Month = *
+	•	Month = *
+	•	Day of Week = ?
+	•	Year = *
+
+AWS adds the ? and * syntax to make it CloudWatch-compatible.
+
+⸻
+
+🧾 Updated README (Trigger Section)
+
+🕒 Scheduling
+
+The Lambda is automatically triggered daily at 2 AM UTC via a CloudWatch cron expression:
+
+schedule_expression = "cron(0 2 * * ? *)"
+
+If you want to change it, just update this line and reapply Terraform:
+
+terraform apply -auto-approve
+
+You can use any standard cron schedule or use simpler rate() syntax like:
+
+schedule_expression = "rate(1 day)"
+
+
+⸻
+
+Would you like me to modify the full Terraform + README (including this simpler cron) so you can copy and apply in one go?
+
+
 Excellent 👍 — let’s make this production-grade:
 ✅ Lambda runs in private VPC (via PrivateLink)
 ✅ Query read from queries.yml config
