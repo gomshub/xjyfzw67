@@ -612,4 +612,405 @@ Would you like me to:
 	2.	Or generate a Helm chart version so you can deploy it with helm install mcp-desktop?
 
 
+Nice — I’ll give you a complete, ready-to-use deployment package that includes (A) a Helm chart for the Streamlit MCP-desktop app, (B) two authentication options (Basic Auth and OIDC via oauth2-proxy), and (C) TLS/HTTPS via cert-manager (Let’s Encrypt) or by mounting an existing TLS secret. I’ll also include step-by-step commands to install everything.
+
+Everything below is copy-paste-ready. If you want, I can also produce the files as a tar/zip, but for now I’ll give the files and commands so you can apply them immediately.
+
+⸻
+
+What you’ll get
+	1.	Helm chart mcp-desktop (Chart.yaml, values.yaml, templates/*).
+	2.	Ingress config that supports TLS and auth.
+	3.	Option A — Basic Auth (simple, quick).
+	4.	Option B — OIDC / SSO via oauth2-proxy (recommended for production).
+	5.	cert-manager instructions to issue TLS certs from Let’s Encrypt (or use existing TLS secret).
+	6.	Commands to deploy everything.
+
+⸻
+
+Folder layout (what to create)
+
+mcp-desktop-helm/
+├── Chart.yaml
+├── values.yaml
+├── templates/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── ingress.yaml
+│   ├── secret-basic-auth.yaml        # optional (not installed by default)
+│   ├── oauth2-proxy-deployment.yaml  # optional (only if using OIDC)
+│   └── NOTES.txt
+
+
+⸻
+
+1) Chart metadata — Chart.yaml
+
+apiVersion: v2
+name: mcp-desktop
+description: "Streamlit MCP Desktop (Claude-like) - Helm chart"
+type: application
+version: 0.1.0
+appVersion: "1.0"
+
+
+⸻
+
+2) Defaults — values.yaml
+
+(Adjust image, domain, MCP URL, and auth type here.)
+
+replicaCount: 1
+
+image:
+  repository: myregistry/mcp-desktop
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  port: 8501
+  type: ClusterIP
+
+mcp:
+  # default MCP server the app will point to (in-cluster service DNS)
+  url: "http://mcp-service.default.svc.cluster.local:8000"
+
+ingress:
+  enabled: true
+  hosts:
+    - host: mcp-desktop.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    enabled: true
+    # If using cert-manager with Let's Encrypt, set certificateIssuer below; otherwise set secretName to your existing secret
+    secretName: mcp-desktop-tls
+    certificateIssuer: "letsencrypt-prod"   # ClusterIssuer name for cert-manager; set to null to skip cert-manager annotations
+
+auth:
+  # "none" | "basic" | "oauth2-proxy"
+  type: basic
+
+  # Basic auth config (if type: basic)
+  basic:
+    # create secret manually using htpasswd (instructions below)
+    secretName: mcp-desktop-basic-auth
+    realm: "MCP Desktop"
+
+  # oauth2-proxy config (if type: oauth2-proxy)
+  oauth2:
+    enabled: false
+    # provider-specific config
+    clientID: ""
+    clientSecret: ""
+    cookieSecret: ""   # 16/24/32 bytes base64
+    # extraRedirectURL: example: "https://mcp-desktop.example.com/oauth2/callback"
+    # provider: "google" / "github" / "azure" etc.
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+
+⸻
+
+3) Deployment — templates/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mcp-desktop.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "mcp-desktop.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "mcp-desktop.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "mcp-desktop.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: mcp-desktop
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+          env:
+            - name: MCP_SERVER_URL
+              value: "{{ .Values.mcp.url }}"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources: {{ toYaml .Values.resources | nindent 12 }}
+      nodeSelector: {{ toYaml .Values.nodeSelector | nindent 6 }}
+      tolerations: {{ toYaml .Values.tolerations | nindent 6 }}
+      affinity: {{ toYaml .Values.affinity | nindent 6 }}
+
+
+⸻
+
+4) Service — templates/service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mcp-desktop.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "mcp-desktop.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "mcp-desktop.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.port }}
+      protocol: TCP
+      name: http
+  type: {{ .Values.service.type }}
+
+
+⸻
+
+5) Ingress — templates/ingress.yaml
+
+This template supports both Basic Auth and oauth2-proxy. It also adds cert-manager annotations if certificateIssuer is set.
+
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "mcp-desktop.fullname" . }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Basic auth annotations (if selected)
+    {{- if eq .Values.auth.type "basic" }}
+    nginx.ingress.kubernetes.io/auth-type: "basic"
+    nginx.ingress.kubernetes.io/auth-secret: "{{ .Values.auth.basic.secretName }}"
+    nginx.ingress.kubernetes.io/auth-realm: "{{ .Values.auth.basic.realm }}"
+    {{- end }}
+    # oauth2-proxy annotations (if selected)
+    {{- if eq .Values.auth.type "oauth2-proxy" }}
+    nginx.ingress.kubernetes.io/auth-url: "https://$host/oauth2/start"
+    nginx.ingress.kubernetes.io/auth-signin: "https://$host/oauth2/start?rd=$request_uri"
+    {{- end }}
+    {{- if .Values.ingress.tls.enabled }}
+    {{- if .Values.ingress.tls.certificateIssuer }}
+    # cert-manager: annotate for Let’s Encrypt
+    cert-manager.io/cluster-issuer: "{{ .Values.ingress.tls.certificateIssuer }}"
+    {{- end }}
+    {{- end }}
+spec:
+  ingressClassName: nginx
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "mcp-desktop.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port }}
+          {{- end }}
+    {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        {{- range .Values.ingress.hosts }}
+        - {{ .host }}
+        {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+{{- end }}
+
+Note: This Ingress assumes the cluster uses an NGINX Ingress Controller. If you use another controller, adjust annotations.
+
+⸻
+
+6) Helpers / NOTES — templates/NOTES.txt
+
+1. To install the chart:
+   helm install mcp-desktop ./mcp-desktop -n my-namespace --create-namespace
+
+2. If using Basic Auth:
+   - Create htpasswd and Kubernetes secret (see instructions below).
+
+3. If using cert-manager / Let's Encrypt:
+   - Make sure cert-manager is installed and ClusterIssuer exists.
+
+4. After install, access the app at: https://{{ .Values.ingress.hosts[0].host }}
+
+
+⸻
+
+Authentication choices (pick one)
+
+Option A — Basic Auth (quick)
+	1.	Create an htpasswd entry (locally):
+
+# install apache2-utils or use docker image for htpasswd
+# example: single user "alice" with password chosen interactively
+htpasswd -c auth alice
+
+or with Docker:
+
+docker run --rm httpd:2.4-alpine htpasswd -nbB alice 'YourPassword' > auth
+
+	2.	Create Kubernetes secret (replace auth file):
+
+kubectl create secret generic mcp-desktop-basic-auth --from-file=auth -n my-namespace
+
+	3.	Set values.yaml:
+
+auth:
+  type: basic
+  basic:
+    secretName: mcp-desktop-basic-auth
+    realm: "MCP Desktop"
+
+	4.	Helm upgrade/install:
+
+helm install mcp-desktop ./mcp-desktop -n my-namespace
+# or upgrade:
+helm upgrade --install mcp-desktop ./mcp-desktop -n my-namespace
+
+This uses the NGINX ingress basic auth annotations (nginx.ingress.kubernetes.io/auth-type: basic) and the secret created.
+
+⸻
+
+Option B — OIDC / oauth2-proxy (recommended for real usage)
+
+Use oauth2-proxy + your OIDC provider (Google/GitHub/Azure AD) so users sign in with SSO.
+
+High-level steps:
+	1.	Deploy oauth2-proxy as sidecar or as separate deployment (I can provide manifest).
+	2.	Configure OAuth client (clientID/clientSecret) in your identity provider with redirect URI https://mcp-desktop.example.com/oauth2/callback.
+	3.	Create k8s secret with client credentials:
+
+kubectl create secret generic oauth2-proxy-secret \
+  --from-literal=client-id=YOUR_ID \
+  --from-literal=client-secret=YOUR_SECRET \
+  --from-literal=cookie-secret=$(python -c "import os,base64;print(base64.urlsafe_b64encode(os.urandom(16)).decode())") \
+  -n my-namespace
+
+	4.	Deploy oauth2-proxy (I can give a manifest); annotate Ingress as shown (auth-url/auth-signin). The oauth2-proxy will handle auth and set headers forwarded to the app.
+
+If you want I’ll paste a full oauth2-proxy Deployment + Service + Ingress snippet and show how to set environment variables for provider type and cookie secret.
+
+⸻
+
+TLS/HTTPS
+
+Option 1 — Use cert-manager + Let’s Encrypt (recommended)
+
+Install cert-manager (if not present):
+
+kubectl apply --validate=false -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+
+Create a ClusterIssuer (example production Let’s Encrypt):
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: your-email@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+
+Apply:
+
+kubectl apply -f cluster-issuer.yaml
+
+Set values.yaml:
+
+ingress:
+  tls:
+    enabled: true
+    secretName: mcp-desktop-tls
+    certificateIssuer: letsencrypt-prod
+  hosts:
+    - host: mcp-desktop.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+cert-manager will create the TLS secret automatically.
+
+Option 2 — Provide existing TLS secret
+
+If you already have a TLS secret mcp-desktop-tls in the namespace (with keys tls.crt/tls.key), set certificateIssuer to null and secretName to that secret; the ingress will use it.
+
+⸻
+
+Install steps (all together)
+	1.	Build/push your image:
+
+docker build -t myregistry/mcp-desktop:latest .
+docker push myregistry/mcp-desktop:latest
+
+	2.	Prepare Helm chart folder mcp-desktop (copy the files above).
+	3.	(Optional) Create Basic Auth secret (see above).
+	4.	(Optional) Install cert-manager and create ClusterIssuer.
+	5.	Install the chart:
+
+helm upgrade --install mcp-desktop ./mcp-desktop -n my-namespace --create-namespace \
+  --set image.repository=myregistry/mcp-desktop \
+  --set image.tag=latest \
+  --set ingress.hosts[0].host=mcp-desktop.example.com \
+  --set mcp.url="http://mcp-service.default.svc.cluster.local:8000" \
+  --set auth.type=basic \
+  --set auth.basic.secretName=mcp-desktop-basic-auth
+
+	6.	Verify resources:
+
+kubectl -n my-namespace get deploy,svc,ingress,secret
+
+	7.	Open https://mcp-desktop.example.com (or port-forward as fallback):
+
+kubectl -n my-namespace port-forward svc/mcp-desktop 8501:8501
+# open http://localhost:8501
+
+
+⸻
+
+Want me to generate the oauth2-proxy manifest?
+
+I can produce a complete oauth2-proxy Deployment + Service + sample config and show exactly how to wire it with the chart and Ingress (including cookie secret generation and provider-specific settings). I can also output a full Helm chart archive if you prefer.
+
+Which one should I give you now:
+	•	A) Full Basic Auth helm chart + exact commands (we already covered it), or
+	•	B) Full OIDC / oauth2-proxy manifests + wiring (step-by-step), or
+	•	C) Both, plus an example ClusterIssuer and cert-manager commands?
+
+Tell me which and I’ll paste the exact manifest(s) next.
+
 
