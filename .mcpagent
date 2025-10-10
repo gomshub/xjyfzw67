@@ -1,0 +1,615 @@
+Nice — thanks for clarifying. Below is a single, clear, ready-to-run Python app that mimics Claude Desktop behavior (interactive chat UI + tool invocation) and plugs directly into your MCP server (HTTP or WebSocket). It’s built with Streamlit so you get a desktop-like browser UI, and the client auto-detects whether your MCP server is http://.../https://... or ws://.../wss://....
+
+I kept it explicit and minimal so you can drop it into your laptop or container, point it at the MCP server URL for the service deployed in your Kubernetes cluster, and start chatting + calling tools.
+
+⸻
+
+What you get
+	•	A single file: mcp_desktop.py (Streamlit app).
+	•	Supports both HTTP JSON-RPC (POST) and WebSocket JSON-RPC.
+	•	Shows chat history, lists tools, and calls tools interactively.
+	•	Optionally performs simple automatic tool suggestion using string matching (no external LLM required).
+	•	Instructions to run locally and notes for plugging into a Kubernetes-deployed MCP server.
+
+⸻
+
+Requirements
+
+Install these Python packages:
+
+pip install streamlit requests websocket-client rapidfuzz
+
+	•	requests for HTTP JSON-RPC.
+	•	websocket-client for a thread-based WebSocket client (works well inside Streamlit).
+	•	rapidfuzz for simple fuzzy matching to suggest an appropriate tool name.
+
+⸻
+
+The app — mcp_desktop.py
+
+Save the following to mcp_desktop.py:
+
+#!/usr/bin/env python3
+"""
+mcp_desktop.py
+Streamlit-based Claude-desktop-like client that connects to an MCP server (HTTP or WebSocket).
+Usage:
+  STREAMLIT:
+    streamlit run mcp_desktop.py
+  Then open the URL Streamlit prints (usually http://localhost:8501)
+Notes:
+ - Provide MCP server URL in the input box. Examples:
+    http://mcp-service.default.svc.cluster.local:8000
+    http://localhost:8000
+    ws://localhost:8000
+    wss://mcp.example.com
+"""
+import streamlit as st
+import requests
+import json
+import threading
+import time
+from queue import Queue, Empty
+from websocket import WebSocketApp
+from rapidfuzz import process, fuzz
+
+st.set_page_config(page_title="MCP Desktop (Python)", layout="wide")
+
+# ---------------------
+# MCP Client (HTTP or WS)
+# ---------------------
+class MCPClient:
+    def __init__(self, url: str):
+        self.url = url.rstrip("/")
+        self.transport = "ws" if url.startswith("ws://") or url.startswith("wss://") else "http"
+        self.rpc_id = 0
+        self.recv_q = Queue()
+        self.ws_app = None
+        self.ws_thread = None
+        self.connected = False
+
+        # cached tool list (populated after initialize/tools/list)
+        self.tools = []
+
+    def _next_id(self):
+        self.rpc_id += 1
+        return self.rpc_id
+
+    # HTTP: post payload to base URL
+    def _http_post(self, payload):
+        try:
+            resp = requests.post(self.url, json=payload, timeout=15)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            return {"error": str(e)}
+
+    # WS callbacks
+    def _on_message(self, ws, message):
+        try:
+            obj = json.loads(message)
+        except Exception:
+            obj = {"raw": message}
+        self.recv_q.put(obj)
+
+    def _on_open(self, ws):
+        self.connected = True
+        self.recv_q.put({"system": "ws_open"})
+
+    def _on_close(self, ws, close_status_code, close_msg):
+        self.connected = False
+        self.recv_q.put({"system": "ws_closed", "code": close_status_code, "msg": str(close_msg)})
+
+    def _on_error(self, ws, error):
+        self.recv_q.put({"system": "ws_error", "error": str(error)})
+
+    def _start_ws(self):
+        self.ws_app = WebSocketApp(self.url,
+                                   on_message=self._on_message,
+                                   on_open=self._on_open,
+                                   on_close=self._on_close,
+                                   on_error=self._on_error)
+        # run forever in separate thread
+        self.ws_app.run_forever()
+
+    def connect(self):
+        if self.transport == "ws":
+            # start websocket thread if not already started
+            if not self.ws_thread or not self.ws_thread.is_alive():
+                self.ws_thread = threading.Thread(target=self._start_ws, daemon=True)
+                self.ws_thread.start()
+                # wait a little for connection
+                for _ in range(10):
+                    time.sleep(0.1)
+                    try:
+                        msg = self.recv_q.get_nowait()
+                        # swallow initial message
+                    except Empty:
+                        pass
+        else:
+            # HTTP has no persistent connect; just mark connected True
+            self.connected = True
+
+    def close(self):
+        if self.transport == "ws" and self.ws_app:
+            try:
+                self.ws_app.close()
+            except Exception:
+                pass
+            self.connected = False
+
+    # generic send: returns response (for HTTP) or None (for WS, result appears on recv_q)
+    def send_rpc(self, method, params=None):
+        payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": self._next_id()}
+        if self.transport == "http":
+            return self._http_post(payload)
+        else:
+            # send over ws
+            if not self.ws_app:
+                return {"error": "WebSocket not started"}
+            try:
+                self.ws_app.send(json.dumps(payload))
+                return {"sent": payload}
+            except Exception as e:
+                return {"error": str(e)}
+
+    # convenience wrappers
+    def initialize(self, client_name="python-mcp-desktop"):
+        return self.send_rpc("initialize", {"client_name": client_name})
+
+    def list_tools(self):
+        # try "tools/list" RPC
+        resp = self.send_rpc("tools/list")
+        # for HTTP, parse direct; for WS, we need to wait for a response in recv_q
+        if self.transport == "http":
+            try:
+                tools = resp.get("result", {}).get("tools", [])
+            except Exception:
+                tools = []
+            self.tools = tools
+            return resp
+        else:
+            # wait up to 3s for response
+            try:
+                obj = self.recv_q.get(timeout=3)
+                if "result" in obj:
+                    tools = obj.get("result", {}).get("tools", [])
+                else:
+                    tools = []
+                self.tools = tools
+                return obj
+            except Empty:
+                return {"error": "no response from server (tools/list)"}
+
+    def call_tool(self, name: str, arguments: dict):
+        return self.send_rpc("tools/call", {"name": name, "arguments": arguments})
+
+
+# ---------------------
+# Simple helper utilities
+# ---------------------
+def pretty_json(obj):
+    try:
+        return json.dumps(obj, indent=2)
+    except Exception:
+        return str(obj)
+
+def suggest_tool(tools, user_text, top_n=3):
+    # tools: list of tool dicts with at least 'name' and maybe 'description'
+    choices = []
+    for t in tools:
+        name = t.get("name", "")
+        desc = t.get("description", "")
+        display = f"{name} — {desc}" if desc else name
+        choices.append((display, name))
+    if not choices:
+        return []
+    # use rapidfuzz to get top matches by both name and description
+    texts = [c[0] for c in choices]
+    results = process.extract(user_text, texts, scorer=fuzz.WRatio, limit=top_n)
+    # results: list of (match_text, score, index)
+    suggested = []
+    for match_text, score, idx in results:
+        suggested.append({"display": texts[idx], "name": choices[idx][1], "score": score})
+    return suggested
+
+# ---------------------
+# Streamlit UI
+# ---------------------
+st.title("💬 MCP Desktop (Python) — Claude-like interactive agent")
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    st.header("Connection")
+    mcp_url = st.text_input("MCP Server URL", value="http://localhost:8000")
+    if "client" not in st.session_state:
+        st.session_state.client = None
+    if st.button("Connect"):
+        st.session_state.client = MCPClient(mcp_url)
+        st.session_state.client.connect()
+        init_res = st.session_state.client.initialize()
+        st.session_state.last_init = init_res
+        st.session_state.chat = st.session_state.get("chat", [])
+        # try list tools automatically
+        list_res = st.session_state.client.list_tools()
+        st.session_state.tools = st.session_state.client.tools
+        st.experimental_rerun()
+
+    if st.button("Disconnect"):
+        if st.session_state.client:
+            st.session_state.client.close()
+            st.session_state.client = None
+            st.experimental_rerun()
+
+    st.markdown("**Connection status**")
+    if st.session_state.client and st.session_state.client.connected:
+        st.success(f"Connected ({st.session_state.client.transport.upper()})")
+    else:
+        st.warning("Not connected")
+
+    st.markdown("**Last initialize result**")
+    st.code(pretty_json(st.session_state.get("last_init", {})), language="json")
+
+    st.markdown("**Tools (cached)**")
+    tools = st.session_state.get("tools", [])
+    if tools:
+        for t in tools:
+            name = t.get("name")
+            desc = t.get("description") or ""
+            st.markdown(f"- **{name}** — {desc}")
+    else:
+        st.write("_No tools cached. Press Connect or /list in chat._")
+
+with col2:
+    st.header("Chat (interactive)")
+    if "chat" not in st.session_state:
+        st.session_state.chat = []
+
+    # render chat messages
+    for m in st.session_state.chat:
+        role = m.get("role", "assistant")
+        content = m.get("content", "")
+        if role == "user":
+            st.markdown(f"**You:** {content}")
+        elif role == "assistant":
+            st.markdown(f"**Assistant:**\n```\n{content}\n```")
+        else:
+            st.markdown(f"**{role}:** {content}")
+
+    # user input
+    user_input = st.text_input("Type a message (free text) or use commands: /list, /call <tool> k=v ...", key="input_text")
+
+    if st.button("Send"):
+        if not user_input:
+            st.warning("Enter input")
+        else:
+            st.session_state.chat.append({"role": "user", "content": user_input})
+
+            client = st.session_state.client
+            if not client or not client.connected:
+                st.session_state.chat.append({"role": "assistant", "content": "⚠️ Not connected to MCP server. Connect first."})
+                st.experimental_rerun()
+
+            # commands
+            if user_input.strip() == "/list":
+                resp = client.list_tools()
+                st.session_state.tools = client.tools
+                st.session_state.chat.append({"role": "assistant", "content": pretty_json(resp)})
+                st.experimental_rerun()
+
+            if user_input.startswith("/call "):
+                parts = user_input.split()
+                tool = parts[1]
+                args = {}
+                for p in parts[2:]:
+                    if "=" in p:
+                        k, v = p.split("=", 1)
+                        args[k] = v
+                res = client.call_tool(tool, args)
+                st.session_state.chat.append({"role": "assistant", "content": pretty_json(res)})
+                st.experimental_rerun()
+
+            # free text: suggest tools and let user choose
+            # Simple auto-suggestion (no LLM)
+            tools_list = st.session_state.get("tools", [])
+            suggestions = suggest_tool(tools_list, user_input, top_n=3)
+            if suggestions:
+                suggestion_text = "I suggest these tools (click to call):\n" + "\n".join([f"{s['name']} (score {s['score']}) — {s['display']}" for s in suggestions])
+                st.session_state.chat.append({"role": "assistant", "content": suggestion_text})
+                # add action buttons under the UI (Streamlit can't add dynamic per-message buttons easily; show below)
+                st.session_state.last_suggestions = suggestions
+            else:
+                st.session_state.chat.append({"role": "assistant", "content": "No tool suggestions found. Use /list to view tools or /call <tool> ..."})
+
+            st.experimental_rerun()
+
+    st.markdown("---")
+    st.subheader("Tool suggestions / actions")
+    if st.session_state.get("last_suggestions"):
+        for s in st.session_state.last_suggestions:
+            colA, colB = st.columns([3,1])
+            with colA:
+                st.write(f"**{s['name']}** — {s['display']} (score {s['score']})")
+            with colB:
+                if st.button(f"Call {s['name']}", key=f"call_{s['name']}"):
+                    # ask for arguments via modal-ish approach: simple input
+                    arg_str = st.text_input(f"Arguments for {s['name']} (k=v space-separated)", key=f"args_{s['name']}")
+                    # If user fills and presses a second call button, call it
+                    if arg_str:
+                        args = {}
+                        for part in arg_str.split():
+                            if "=" in part:
+                                k, v = part.split("=",1)
+                                args[k] = v
+                        res = st.session_state.client.call_tool(s['name'], args)
+                        st.session_state.chat.append({"role": "assistant", "content": f"Tool {s['name']} result:\n{pretty_json(res)}"})
+                        # refresh tools cache
+                        st.session_state.tools = st.session_state.client.tools
+                        st.experimental_rerun()
+
+    st.markdown("---")
+    st.markdown("**Manual tool call**")
+    tool_to_call = st.text_input("Tool name", key="manual_tool")
+    manual_args_str = st.text_input("Args (k=v space-separated)", key="manual_args")
+    if st.button("Call tool manually"):
+        if not tool_to_call:
+            st.warning("Provide tool name")
+        else:
+            args = {}
+            for part in manual_args_str.split():
+                if "=" in part:
+                    k, v = part.split("=",1)
+                    args[k] = v
+            res = st.session_state.client.call_tool(tool_to_call, args)
+            st.session_state.chat.append({"role": "assistant", "content": f"Tool {tool_to_call} result:\n{pretty_json(res)}"})
+            st.experimental_rerun()
+
+# teardown on exit (not strictly necessary in streamlit, but tidy)
+def _on_exit():
+    if st.session_state.get("client"):
+        try:
+            st.session_state.client.close()
+        except Exception:
+            pass
+
+# Streamlit does not guarantee exit hook; keep simple.
+
+
+⸻
+
+How to run locally
+	1.	Start your MCP server (in your cluster or locally).
+	2.	If MCP service is in Kubernetes and not externally exposed:
+	•	Use kubectl port-forward to forward the service to your machine:
+
+kubectl port-forward svc/mcp-service 8000:8000 -n my-namespace
+
+Then point the Streamlit UI to http://localhost:8000 (or ws://localhost:8000 if it’s a websocket).
+
+	3.	Run the Streamlit app:
+
+streamlit run mcp_desktop.py
+
+
+	4.	In the app:
+	•	Enter your MCP server URL and click Connect.
+	•	Use commands in chat:
+	•	/list — list tools
+	•	/call <tool> k=v ... — call a tool manually
+	•	Or type natural language; the app will suggest tools (simple fuzzy match). Click suggestion to call.
+
+⸻
+
+Notes about Kubernetes / networking
+	•	If your MCP server is deployed inside the cluster and exposed via a ClusterIP, you can use:
+	•	kubectl port-forward (recommended for local testing)
+	•	or create an Ingress / LoadBalancer to expose it externally (ensure TLS for wss:// when public).
+	•	For WebSocket (ws:// or wss://), ensure your Ingress / Proxy supports WebSocket upgrade headers.
+	•	If your MCP server requires authentication (token, mTLS), you’ll need to add headers or certificate handling — I can show that if you tell me the auth mechanism.
+
+⸻
+
+Next steps I can help with (pick any)
+	•	Add an LLM-based “planner” that interprets natural language and automatically decides which tool to call (I can show OpenAI / Anthropic integration).
+	•	Add streaming/typing animation for long tool responses (simulate Claude).
+	•	Produce a Dockerfile + Kubernetes Deployment/Ingress manifest for deploying this UI inside your cluster.
+	•	Add authentication support (Bearer token header or mTLS).
+
+Which of the above do you want next?
+
+Perfect 👍 — let’s extend your Claude-like MCP Desktop (Python) into a Kubernetes-deployable web app.
+
+Below, I’ll give you a clean deployment bundle (Dockerfile + Kubernetes manifests) that lets you run this Streamlit-based agent inside your cluster and connect to your existing MCP server service.
+
+⸻
+
+🧱 1. Folder structure
+
+mcp-desktop/
+ ├── mcp_desktop.py         # The Streamlit app (from earlier)
+ ├── requirements.txt
+ ├── Dockerfile
+ ├── k8s/
+ │    ├── deployment.yaml
+ │    ├── service.yaml
+ │    ├── ingress.yaml
+
+
+⸻
+
+🧩 2. requirements.txt
+
+streamlit==1.39.0
+requests
+websocket-client
+rapidfuzz
+
+
+⸻
+
+🐳 3. Dockerfile
+
+# ---- Build Claude-like MCP Desktop image ----
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy Streamlit app
+COPY mcp_desktop.py .
+
+# Streamlit default port
+EXPOSE 8501
+
+# Streamlit requires an entrypoint with config
+ENTRYPOINT ["streamlit", "run", "mcp_desktop.py", "--server.port=8501", "--server.address=0.0.0.0"]
+
+✅ You can build and push it:
+
+docker build -t myregistry/mcp-desktop:latest .
+docker push myregistry/mcp-desktop:latest
+
+
+⸻
+
+☸️ 4. k8s/deployment.yaml
+
+This runs one replica of the MCP Desktop UI and points to your internal MCP service URL.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-desktop
+  labels:
+    app: mcp-desktop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-desktop
+  template:
+    metadata:
+      labels:
+        app: mcp-desktop
+    spec:
+      containers:
+        - name: mcp-desktop
+          image: myregistry/mcp-desktop:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8501
+          env:
+            # You can optionally define default MCP URL here
+            - name: MCP_SERVER_URL
+              value: "http://mcp-service.default.svc.cluster.local:8000"
+
+Replace mcp-service.default.svc.cluster.local:8000 with your actual MCP service DNS and port.
+
+⸻
+
+🌐 5. k8s/service.yaml
+
+Expose Streamlit UI inside the cluster.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-desktop
+  labels:
+    app: mcp-desktop
+spec:
+  type: ClusterIP
+  selector:
+    app: mcp-desktop
+  ports:
+    - port: 8501
+      targetPort: 8501
+      protocol: TCP
+      name: http
+
+
+⸻
+
+🚀 6. k8s/ingress.yaml
+
+(Optional) Expose the UI publicly via your Ingress controller.
+
+Example (Nginx Ingress):
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mcp-desktop
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: mcp-desktop.mycompany.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mcp-desktop
+                port:
+                  number: 8501
+  tls:
+    - hosts:
+        - mcp-desktop.mycompany.com
+      secretName: mcp-desktop-tls
+
+You can skip this if you only need internal access (port-forward or VPN).
+
+⸻
+
+🧭 7. Deploy everything
+
+kubectl apply -f k8s/
+
+Verify:
+
+kubectl get pods,svc,ingress
+
+If you’re testing locally (without ingress):
+
+kubectl port-forward svc/mcp-desktop 8501:8501
+
+Then open http://localhost:8501.
+
+⸻
+
+🔐 8. Optional: environment-based MCP URL default
+
+You can make the Python app auto-load the MCP URL from an environment variable.
+
+Just add at the top of mcp_desktop.py (before Streamlit UI):
+
+import os
+default_mcp_url = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
+mcp_url = st.text_input("MCP Server URL", value=default_mcp_url)
+
+This way, the container defaults to your in-cluster MCP endpoint but can be overridden manually in the UI.
+
+⸻
+
+✅ Result
+
+You now have:
+	•	A web UI that mimics Claude Desktop’s chat with your MCP server.
+	•	Runs inside Kubernetes.
+	•	Can securely connect to your MCP service via ClusterIP or Ingress.
+	•	Fully containerized and redeployable.
+
+⸻
+
+Would you like me to:
+	1.	Add authentication (OIDC / token header) to protect this desktop UI?
+	2.	Or generate a Helm chart version so you can deploy it with helm install mcp-desktop?
+
+
+
