@@ -1,4 +1,133 @@
 
+Excellent and very practical question 👏 —
+you’re thinking exactly like a DevOps engineer who wants to keep deployment simple inside EUC.
+
+Let’s break this down carefully:
+
+⸻
+
+⚙️ Why PyQt vs Browser-based (Streamlit or FastAPI UI)
+
+Comparison	PyQt GUI (desktop app)	Browser-based GUI (Streamlit / FastAPI + React)
+Access method	Opens as a native desktop window on the EUC	Accessed via browser (e.g., http://localhost:8501)
+Hosting requirement	Runs directly in EUC (no server)	Needs a lightweight web server (Streamlit/FastAPI)
+Firewall complexity	Only outbound HTTPS to MCP server	Same — but open local port (e.g. 8501) in EUC
+User interface style	Feels like Claude Desktop (standalone window)	Feels like a modern web app (like ChatGPT/Claude web)
+Multi-user support	Single user per desktop	Easier to share among users (browser access)
+Deployment in AWS EUC	Installable EXE or python mcp_desktop_gui.py	Just run streamlit run app.py and open browser
+Packaging	Needs PyInstaller for EXE	No packaging needed
+Look & feel	Closer to a native chat app	More flexible for quick prototyping & dashboards
+
+
+⸻
+
+💡 In Your Case (EUC + On-prem MCP + Bedrock)
+
+You actually have both options valid — but each suits a different goal:
+
+✅ Option 1: PyQt (Claude Desktop-style)
+	•	Good if you want a true desktop experience inside EUC (no browser tab).
+	•	Best for single user or test bench setup.
+	•	Runs even if browser policies are strict in EUC.
+
+✅ Option 2: Browser-based Streamlit App (recommended for simplicity)
+	•	No special GUI libraries.
+	•	Very quick to test and share.
+	•	Easier to containerize or deploy on EUC WorkSpaces or even as a small ECS app.
+	•	Uses the same code flow — just rendered as a web chat page.
+
+⸻
+
+🧠 So yes — you can absolutely access it from a browser.
+
+Let me show you that equivalent browser-based version 👇
+that works exactly like the MCP-only PyQt app you saw earlier — just open via browser.
+
+⸻
+
+🌐 Streamlit version — “Claude Desktop (Browser GUI, MCP-only)”
+
+mcp_desktop_browser.py
+
+import streamlit as st
+import requests
+import json
+
+st.set_page_config(page_title="Claude Desktop - MCP Only", layout="wide")
+
+st.title("💬 Claude Desktop (Browser UI - MCP Only)")
+
+# MCP URL input
+mcp_url = st.text_input("🔗 MCP Server URL", "https://mcp-server.onprem.mycompany.com:8080")
+
+# Query input
+query = st.text_area("💭 Ask me anything:", placeholder="Type your question here...")
+
+if st.button("🚀 Send to MCP Server"):
+    if not query:
+        st.warning("Please enter a query first.")
+    else:
+        try:
+            st.info("⏳ Sending query to MCP Server...")
+            payload = {"input": query}
+            response = requests.post(f"{mcp_url}/infer", json=payload, verify=False, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            st.success("✅ MCP Server Response:")
+            st.json(data)
+        except Exception as e:
+            st.error(f"❌ Error contacting MCP Server: {e}")
+
+
+⸻
+
+🚀 Run it
+
+pip install streamlit requests
+streamlit run mcp_desktop_browser.py
+
+Then open the link printed in your EUC terminal, e.g.:
+
+Local URL: http://localhost:8501
+
+It opens a Claude-like chat page in your browser (inside EUC).
+
+⸻
+
+🖥️ What You’ll See
+
+💬 Claude Desktop (Browser UI - MCP Only)
+-------------------------------------------------
+🔗 MCP Server URL: [https://mcp-server.onprem.mycompany.com:8080]
+💭 Ask me anything:
+[ get pipeline health metrics ]    [🚀 Send]
+-------------------------------------------------
+✅ MCP Server Response:
+{
+  "records": 10520,
+  "errors": 12,
+  "status": "healthy"
+}
+
+
+⸻
+
+✅ Recommended approach for you
+
+Since you’re running in AWS EUC with firewall open to on-prem,
+and just need to hit the MCP API and see responses:
+
+👉 Use the Streamlit (browser) version first
+It’s easier to run, debug, and later extend with Bedrock integration.
+
+⸻
+
+Would you like me to extend this Streamlit (browser) version so that it:
+	•	Maintains chat history (Claude-like), and
+	•	Later can easily plug in Bedrock when ready?
+
+
+
 Got it ✅ — you want a true native desktop app (like Claude Desktop),
 not a browser-based Streamlit UI.
 
