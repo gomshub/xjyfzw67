@@ -1,0 +1,203 @@
+Got it! Here's a **clear `README_DEV.md`** explaining how to build the MCP Desktop Agent using your exact **PowerShell / PyInstaller procedure** for **Windows** and **Linux**, including Streamlit bundling.
+
+---
+
+# MCP Desktop Agent - Developer Build Guide
+
+## Overview
+
+This guide explains how to build the MCP Desktop Agent locally and generate a standalone executable (`.exe` on Windows, binary on Linux).
+
+This build process:
+
+* Bundles all Python modules (`gui.py`, `web.py`, `mcp_client.py`, `mcp_client_v2.py`, `llm_client.py`)
+* Bundles `config.json`
+* Detects and bundles **Streamlit** runtime automatically for the web agent
+* Produces a single-file executable
+
+---
+
+## Prerequisites
+
+* Python 3.11+
+* Pip
+* Git
+* PowerShell 7+ (Windows) or Bash shell (Linux)
+* Virtual environment support (`venv`)
+* PyInstaller installed (`pip install pyinstaller`)
+
+---
+
+## 1. Clone the repository
+
+```bash
+git clone <your-repo-url>
+cd <repo-folder>
+```
+
+---
+
+## 2. Create and activate a virtual environment
+
+### Windows
+
+```powershell
+python -m venv mcp_venv
+.\mcp_venv\Scripts\Activate.ps1
+```
+
+### Linux / macOS
+
+```bash
+python3 -m venv mcp_venv
+source mcp_venv/bin/activate
+```
+
+---
+
+## 3. Install dependencies
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+* Includes Streamlit, requests, sseclient-py, pyperclip, boto3, PyInstaller, etc.
+
+---
+
+## 4. Test locally
+
+### GUI Agent
+
+```bash
+python main.py
+```
+
+### Browser Agent
+
+```bash
+python main.py --mode browser
+```
+
+* GUI opens a desktop window
+* Browser agent runs via Streamlit
+
+---
+
+## 5. Build standalone executable
+
+### Windows (PowerShell)
+
+1. Open PowerShell in the project root.
+2. Run the build command (example):
+
+```powershell
+# Navigate to project folder
+cd path\to\repo
+
+# Run PyInstaller with automatic Streamlit detection
+$streamlitPath = $null
+$sitePackages = $null
+try {
+    $pyOut = & python -c "import streamlit, os; print(os.path.dirname(streamlit.__file__)); print(os.path.dirname(os.path.dirname(streamlit.__file__)))" 2>$null
+    if ($LASTEXITCODE -eq 0 -and $pyOut) {
+        $lines = $pyOut -split "`n"
+        if ($lines.Count -ge 2) {
+            $streamlitPath = $lines[0].Trim()
+            $sitePackages = $lines[1].Trim()
+        }
+    }
+} catch {}
+
+# Collect dist-info directories
+$distInfos = @()
+if ($sitePackages -and (Test-Path $sitePackages)) {
+    $distInfos = Get-ChildItem -Path $sitePackages -Filter "streamlit-*.dist-info" -ErrorAction SilentlyContinue
+}
+
+# Build pyinstaller args
+$pyArgs = @(
+    '--onefile',
+    '--name', 'MCPDesktopAgent',
+    '--add-data', 'config.json;.',
+    '--add-data', 'web.py;.',
+    '--add-data', 'mcp_client.py;.',
+    '--add-data', 'mcp_client_v2.py;.',
+    '--add-data', 'llm_client.py;.',
+    '--add-data', 'gui.py;.'
+)
+
+if ($streamlitPath -and (Test-Path $streamlitPath)) {
+    $pyArgs += '--add-data'
+    $pyArgs += "${streamlitPath};streamlit"
+}
+foreach ($d in $distInfos) {
+    $pyArgs += '--add-data'
+    $pyArgs += "$($d.FullName);$($d.Name)"
+}
+
+$pyArgs += '--paths'
+$pyArgs += "$PWD"
+$pyArgs += 'main.py'
+
+# Run PyInstaller
+pyinstaller @pyArgs
+```
+
+* The final executable will be in `dist\MCPDesktopAgent.exe`
+
+---
+
+### Linux / macOS
+
+```bash
+# Activate venv
+source mcp_venv/bin/activate
+
+# Run PyInstaller manually (adjust paths as needed)
+pyinstaller --onefile --name MCPDesktopAgent \
+    --add-data "config.json:." \
+    --add-data "web.py:." \
+    --add-data "mcp_client.py:." \
+    --add-data "mcp_client_v2.py:." \
+    --add-data "llm_client.py:." \
+    --add-data "gui.py:." \
+    main.py
+```
+
+* Output binary will be in `dist/MCPDesktopAgent`
+* Make it executable:
+
+```bash
+chmod +x dist/MCPDesktopAgent
+```
+
+---
+
+## 6. Run the executable
+
+```bash
+# Windows
+dist\MCPDesktopAgent.exe --config config.json
+
+# Linux / macOS
+./dist/MCPDesktopAgent --config config.json
+```
+
+* Optional: omit `--config` to use default bundled `config.json`
+
+---
+
+## 7. Notes
+
+* Streamlit runtime files are automatically bundled for the web agent.
+* AWS credentials required if using LLM backend (`USE_LLM_BACKEND=true`).
+* MCP server must be reachable from your machine.
+* Windows build tested with PowerShell 7+.
+
+---
+
+I can also create a **Bamboo YAML build pipeline** that automatically runs this script for **Windows and Linux**, builds the executable, and pushes to Artifactory, if you want.
+
+Do you want me to prepare that next?
