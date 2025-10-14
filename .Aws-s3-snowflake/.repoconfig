@@ -1,0 +1,46 @@
+# === GitHub Repository Configuration ===
+# This YAML defines the repository structure, metadata, visibility,
+# and governance rules for AWS S3 deployment code across LTQ and PROD.
+
+name: aws-s3-deployment                     # Repository name on GitHub
+description: "Terraform-based AWS S3 bucket deployment for ltq and prod"  # Short summary shown in repo header
+visibility: private                         # Can be 'public', 'private', or 'internal'
+auto_init: true                             # Initializes repo with a README.md on creation
+default_branch: main                        # Sets 'main' as the default branch
+has_issues: true                            # Enables GitHub Issues tab for tracking bugs/tasks
+has_projects: false                         # Disables Projects feature (Kanban boards)
+has_wiki: false                             # Disables Wiki tab to reduce clutter
+delete_branch_on_merge: true                # Auto-deletes feature branches after PR merge
+allow_squash_merge: true                    # Allows "Squash and merge" for clean commit history
+allow_merge_commit: false                   # Disables "Create a merge commit" option
+allow_rebase_merge: false                   # Disables "Rebase and merge" option
+gitignore_template: Terraform               # Adds default .gitignore suited for Terraform repos
+license_template: mit                       # Adds an MIT License file to the repo automatically
+
+# === Ruleset Section ===
+# Enforces branch protection and workflow compliance on 'main' branch.
+
+rulesets:
+  - name: "Protect main branch"             # Friendly name for the ruleset
+    target: branch                          # Type of target (branch-level rule)
+    enforcement: active                     # Enforces rule immediately ('active' or 'evaluate')
+    conditions:
+      include:
+        - main                              # Rule applies to 'main' branch only
+
+    rules:
+      require_pull_request:
+        required_approving_review_count: 1  # Requires at least 1 approving review before merge
+      required_status_checks:
+        strict: true                        # Requires branch to be up-to-date with main before merging
+        contexts:
+          - terraform-validate              # Status check 1: Terraform validation job
+          - terraform-plan                  # Status check 2: Terraform plan job
+      restrict_pushes:
+        teams:
+          - devops-team                     # Only members of this team can push directly to main
+
+    bypass_actors:                          # Defines users or integrations that can bypass these rules
+      - actor_id: 4                         # '4' is the default GitHub Actions bot ID
+        actor_type: Integration             # Actor is a GitHub App/Integration
+        bypass_mode: always                 # Always allowed to bypass rules (used for CI/CD automation)
