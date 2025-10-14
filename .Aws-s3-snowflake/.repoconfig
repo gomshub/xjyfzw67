@@ -1,3 +1,274 @@
+# ==============================================
+# setup-s3-repo.ps1
+# Purpose: Generate AWS S3 Terraform repo structure + GitHub Actions pipeline
+# ==============================================
+
+# Create base folders
+$folders = @(
+    ".github/workflows",
+    "ltq",
+    "prod"
+)
+
+foreach ($folder in $folders) {
+    New-Item -ItemType Directory -Force -Path $folder | Out-Null
+}
+
+# ---------------------
+# repo-config.yml
+# ---------------------
+@"
+name: aws-s3-deployment
+description: "Terraform-based AWS S3 bucket deployment for ltq and prod"
+visibility: private
+auto_init: true
+default_branch: main
+has_issues: true
+has_projects: false
+has_wiki: false
+delete_branch_on_merge: true
+allow_squash_merge: true
+allow_merge_commit: false
+allow_rebase_merge: false
+gitignore_template: Terraform
+license_template: mit
+
+rulesets:
+  - name: "Protect main branch"
+    target: branch
+    enforcement: active
+    conditions:
+      include:
+        - main
+    rules:
+      require_pull_request:
+        required_approving_review_count: 1
+      required_status_checks:
+        strict: true
+        contexts:
+          - terraform-validate
+          - terraform-plan
+      restrict_pushes:
+        teams:
+          - devops-team
+    bypass_actors:
+      - actor_id: 4
+        actor_type: Integration
+        bypass_mode: always
+"@ | Out-File -FilePath "repo-config.yml" -Encoding UTF8
+
+# ---------------------
+# Terraform files (LTQ)
+# ---------------------
+@'
+provider "aws" {
+  region = var.region
+}
+
+resource "aws_s3_bucket" "ltq_bucket" {
+  bucket = "ltiq-app-bucket-${var.env}"
+  acl    = "private"
+
+  tags = {
+    Environment = var.env
+    ManagedBy   = "Terraform"
+  }
+}
+'@ | Out-File -FilePath "ltq/main.tf" -Encoding UTF8
+
+@'
+variable "env" {
+  type    = string
+  default = "ltq"
+}
+
+variable "region" {
+  type    = string
+  default = "us-east-1"
+}
+'@ | Out-File -FilePath "ltq/variables.tf" -Encoding UTF8
+
+@'
+output "bucket_name" {
+  value = aws_s3_bucket.ltq_bucket.bucket
+}
+'@ | Out-File -FilePath "ltq/outputs.tf" -Encoding UTF8
+
+@'
+region = "us-east-1"
+env    = "ltq"
+'@ | Out-File -FilePath "ltq/terraform.tfvars" -Encoding UTF8
+
+# ---------------------
+# Terraform files (PROD)
+# ---------------------
+@'
+provider "aws" {
+  region = var.region
+}
+
+resource "aws_s3_bucket" "prod_bucket" {
+  bucket = "prod-app-bucket-${var.env}"
+  acl    = "private"
+
+  tags = {
+    Environment = var.env
+    ManagedBy   = "Terraform"
+  }
+}
+'@ | Out-File -FilePath "prod/main.tf" -Encoding UTF8
+
+@'
+variable "env" {
+  type    = string
+  default = "prod"
+}
+
+variable "region" {
+  type    = string
+  default = "us-east-1"
+}
+'@ | Out-File -FilePath "prod/variables.tf" -Encoding UTF8
+
+@'
+output "bucket_name" {
+  value = aws_s3_bucket.prod_bucket.bucket
+}
+'@ | Out-File -FilePath "prod/outputs.tf" -Encoding UTF8
+
+@'
+region = "us-east-1"
+env    = "prod"
+'@ | Out-File -FilePath "prod/terraform.tfvars" -Encoding UTF8
+
+# ---------------------
+# GitHub Actions Workflow
+# ---------------------
+@'
+name: Deploy AWS S3 Buckets
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/*"
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        env:
+          - ltq
+          - prod
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets['AWS_ACCESS_KEY_ID_' + (matrix.env | upper)] }}
+          aws-secret-access-key: ${{ secrets['AWS_SECRET_ACCESS_KEY_' + (matrix.env | upper)] }}
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        run: terraform -chdir=${{ matrix.env }} init
+
+      - name: Terraform Validate
+        run: terraform -chdir=${{ matrix.env }} validate
+
+      - name: Terraform Plan
+        run: terraform -chdir=${{ matrix.env }} plan -out=tfplan
+
+      - name: Terraform Apply (LTQ - auto)
+        if: github.ref != 'refs/heads/main' && matrix.env == 'ltq'
+        run: terraform -chdir=${{ matrix.env }} apply -auto-approve tfplan
+
+      - name: Terraform Apply (PROD - manual)
+        if: github.ref == 'refs/heads/main' && matrix.env == 'prod'
+        run: terraform -chdir=${{ matrix.env }} apply -auto-approve tfplan
+        env:
+          MANUAL_APPROVAL: ${{ github.event.inputs.manual_approval }}
+'@ | Out-File -FilePath ".github/workflows/deploy.yml" -Encoding UTF8
+
+# ---------------------
+# README.md
+# ---------------------
+@"
+# AWS S3 Deployment Repo
+
+This repository automates the creation and deployment of AWS S3 buckets for two environments:
+- **LTQ (lower/test/QA)** → auto-deployed on branch push (feature/*)
+- **PROD (production)** → manual approval and deployment on main branch
+
+---
+
+## 🔧 Repository Structure
+
+\`\`\`
+aws-s3-deployment/
+├── ltq/        # Terraform for LTQ environment
+├── prod/       # Terraform for Production
+└── .github/workflows/deploy.yml   # CI/CD pipeline
+\`\`\`
+
+---
+
+## 🚀 CI/CD Flow
+
+| Branch | Environment | Action | Type |
+|---------|--------------|--------|------|
+| feature/* | LTQ | Deploy automatically | Auto |
+| main | PROD | Deploy after manual approval | Manual |
+
+---
+
+## 🔐 GitHub Secrets Required
+
+| Secret Name | Description |
+|--------------|-------------|
+| AWS_ACCESS_KEY_ID_LTQ | AWS access key for LTQ account |
+| AWS_SECRET_ACCESS_KEY_LTQ | AWS secret key for LTQ |
+| AWS_ACCESS_KEY_ID_PROD | AWS access key for PROD account |
+| AWS_SECRET_ACCESS_KEY_PROD | AWS secret key for PROD |
+
+---
+
+## 🧱 Terraform Commands (local use)
+
+\`\`\`bash
+cd ltq
+terraform init
+terraform plan
+terraform apply
+\`\`\`
+
+\`\`\`bash
+cd prod
+terraform init
+terraform plan
+terraform apply
+\`\`\`
+
+---
+
+## ⚙️ Notes
+
+- Branch protection and PR rules are defined in **repo-config.yml**
+- The **ltq** environment auto-deploys to AWS when you push to feature branches.
+- The **prod** deployment triggers only when changes are merged into the main branch.
+"@ | Out-File -FilePath "README.md" -Encoding UTF8
+
+Write-Host "`n✅ AWS S3 Terraform repo structure generated successfully!"
+
+
+
 # === GitHub Repository Configuration ===
 # This YAML defines the repository structure, metadata, visibility,
 # and governance rules for AWS S3 deployment code across LTQ and PROD.
