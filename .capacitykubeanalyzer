@@ -1,0 +1,403 @@
+Nice — below is a single, self-contained automation script you can run locally that:
+	•	Reads a CSV of your 15 services (name + namespace + optional proposed memory limit per pod),
+	•	Uses kubectl to read cluster node allocatable capacity and current Deployments (replicas + container requests/limits),
+	•	Normalizes mixed memory units (Mi/Gi/MB/GB),
+	•	Calculates current cluster requested memory, free headroom, and a safe recommended new limit per service (respecting safety margin and not exceeding a configurable multiplier),
+	•	Writes a human-readable Excel/CSV report and returns non-zero (fail) if any requested/proposed change would exceed safe capacity (so you can plug it into CI / block an ArgoCD sync).
+
+Everything here is designed to work when you only have kubectl access for node capacity and pod/deployment specs.
+
+⸻
+
+What it does (high level)
+	1.	Load services.csv listing: service,namespace,proposed_limit (proposed_limit optional, units allowed: Mi, Gi, MB, GB).
+	2.	Query cluster node allocatable memory (via kubectl get nodes).
+	3.	Query each Deployment to read number of replicas and container resources for the named service.
+	4.	Compute total requested memory across cluster (requests × replicas).
+	5.	Compute free memory = allocatable_total - requested_total.
+	6.	For each service:
+	•	If proposed_limit provided → check if cluster can absorb it.
+	•	If not provided → compute a safe suggested limit (based on free headroom, safety margin, and multiplier cap).
+	7.	Output capacity_check_report_<timestamp>.xlsx and capacity_check_report_<timestamp>.csv.
+	8.	Exit code non-zero if any proposed/inferred changes are unsafe.
+
+⸻
+
+Requirements
+	•	Python 3.8+
+	•	kubectl configured to target the cluster (kubeconfig/context) where you will apply changes.
+	•	Python packages: pandas, openpyxl
+Install:
+
+pip install pandas openpyxl
+
+
+⸻
+
+Sample input file (services.csv)
+
+Create services.csv with header:
+
+service,namespace,proposed_limit_per_pod
+svc-a,default,
+svc-b,payments,2Gi
+svc-c,default,
+svc-d,db, # usually stateful; include for reporting
+svc-crash,default,
+...
+
+	•	proposed_limit_per_pod optional — when provided the script will validate it; when empty the script recommends a safe limit.
+
+⸻
+
+The Script — pre_deploy_capacity_check.py
+
+Save this file and run with python pre_deploy_capacity_check.py --services-file services.csv
+
+#!/usr/bin/env python3
+"""
+pre_deploy_capacity_check.py
+
+Usage:
+  python pre_deploy_capacity_check.py --services-file services.csv [--safety-margin 0.9] [--max-mult 2.0]
+
+This script:
+ - Reads a CSV listing services (service, namespace, optional proposed_limit_per_pod)
+ - Uses kubectl to query node allocatable memory and deployment specs for those services
+ - Normalizes memory units to MiB, computes cluster requested memory, free headroom
+ - Validates proposed limits (if provided) or recommends safe new limits
+ - Outputs Excel and CSV report and exits non-zero if any proposed changes are NOT safe
+"""
+import subprocess, json, sys, argparse, re
+import pandas as pd
+from datetime import datetime
+from math import floor
+
+# -------------------------
+# Unit conversion utilities
+# -------------------------
+def to_mib(v):
+    if v is None: return 0.0
+    s = str(v).strip()
+    if s == "": return 0.0
+    m = re.match(r"^([0-9.]+)\s*([a-zA-Z]*)$", s)
+    if not m:
+        try:
+            return float(s)
+        except:
+            return 0.0
+    num, unit = m.groups()
+    num = float(num)
+    unit = unit.lower()
+    if unit in ("", "mi", "mib"): return num
+    if unit in ("gi", "gib"): return num * 1024.0
+    if unit == "mb": return num * 0.9537
+    if unit == "gb": return num * 953.7
+    if unit in ("k", "ki", "kb"): return num / 1024.0
+    # kubernetes sometimes uses plain integer bytes? fallback:
+    return num
+
+def mib_to_human(mi):
+    if mi >= 1024:
+        return f"{mi/1024:.2f}Gi"
+    return f"{mi:.0f}Mi"
+
+# -------------------------
+# kubectl helpers
+# -------------------------
+def kubectl_json(args):
+    cmd = ["kubectl"] + args + ["-o", "json"]
+    # run, capture output
+    try:
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        return json.loads(out)
+    except subprocess.CalledProcessError as e:
+        print("ERROR calling kubectl:", " ".join(cmd))
+        print(e.output.decode())
+        raise
+
+def get_nodes_allocatable():
+    data = kubectl_json(["get", "nodes"])
+    total_mi = 0.0
+    nodes = []
+    for n in data.get("items", []):
+        name = n["metadata"]["name"]
+        alloc = n.get("status", {}).get("allocatable", {})
+        mem = alloc.get("memory")  # example "32761156Ki" or "31Gi"
+        # kubernetes often returns memory in Ki
+        # convert numeric Ki to Mi: if string ends with Ki -> divide by 1024
+        if mem is None:
+            mi = 0.0
+        else:
+            # handle Ki (e.g. "32761156Ki") or Gi / Mi
+            m = re.match(r"^([0-9]+)Ki$", mem)
+            if m:
+                mi = float(m.group(1)) / 1024.0
+            else:
+                mi = to_mib(mem)
+        nodes.append({"name": name, "alloc_mib": mi, "raw": mem})
+        total_mi += mi
+    return nodes, total_mi
+
+def get_deployment_info(name, namespace):
+    # returns dict: replicas, containers: list of {name, req_mem_mi, lim_mem_mi}
+    try:
+        data = kubectl_json(["get", "deploy", name, "-n", namespace])
+    except Exception:
+        # Try to get ReplicaSet or fallback to pods by label
+        print(f"Warning: deployment {name} in {namespace} not found via kubectl get deploy. Attempting fallback get pods by name...")
+        # fallback: get pods in namespace and try to match name prefix
+        pods = kubectl_json(["get", "pods", "-n", namespace])
+        matched = [p for p in pods.get("items", []) if p["metadata"]["name"].startswith(name)]
+        if not matched:
+            raise RuntimeError(f"Cannot find deployment or pods for {name} in {namespace}.")
+        # combine pod spec container resources as representative
+        pod = matched[0]
+        containers = []
+        for c in pod["spec"]["containers"]:
+            r = c.get("resources", {}).get("requests", {}).get("memory")
+            l = c.get("resources", {}).get("limits", {}).get("memory")
+            containers.append({
+                "name": c.get("name"),
+                "req_mib": to_mib(r),
+                "lim_mib": to_mib(l)
+            })
+        replicas = len(matched)
+        return {"replicas": replicas, "containers": containers, "found_by": "pod-fallback"}
+    spec = data.get("spec", {})
+    replicas = spec.get("replicas") or 1
+    template = spec.get("template", {}).get("spec", {})
+    containers = []
+    for c in template.get("containers", []):
+        r = c.get("resources", {}).get("requests", {}).get("memory")
+        l = c.get("resources", {}).get("limits", {}).get("memory")
+        containers.append({
+            "name": c.get("name"),
+            "req_mib": to_mib(r),
+            "lim_mib": to_mib(l)
+        })
+    return {"replicas": replicas, "containers": containers, "found_by": "deployment"}
+
+# -------------------------
+# Main logic
+# -------------------------
+def main(args):
+    df = pd.read_csv(args.services_file, dtype=str).fillna("")
+    # expected columns: service, namespace, proposed_limit_per_pod (optional)
+    if not {"service","namespace"}.issubset(set(df.columns)):
+        print("CSV must contain at least 'service' and 'namespace' columns.")
+        sys.exit(2)
+
+    # Query cluster nodes
+    print("Querying cluster nodes (kubectl)...")
+    nodes, total_cluster_mib = get_nodes_allocatable()
+    print(f"Total cluster allocatable memory: {mib_to_human(total_cluster_mib)} ({total_cluster_mib:.0f} Mi)")
+
+    # Gather current cluster requested memory by enumerating all deployments in all namespaces? We'll
+    # compute requested sum only for the services present + all other deployments (best-effort).
+    # For safety we should sum across all Deployments; do that:
+    print("Querying all deployments to compute current requested memory (this may take a few seconds)...")
+    all_deps = kubectl_json(["get", "deploy", "-A"])
+    total_requested_mib = 0.0
+    # iterate deployments
+    for dep in all_deps.get("items", []):
+        spec = dep.get("spec", {})
+        replicas = spec.get("replicas") or 1
+        templ = spec.get("template", {}).get("spec", {})
+        for c in templ.get("containers", []):
+            r = c.get("resources", {}).get("requests", {}).get("memory")
+            reqmi = to_mib(r)
+            total_requested_mib += reqmi * replicas
+
+    free_mib = total_cluster_mib - total_requested_mib
+    print(f"Total requested memory (all deployments): {mib_to_human(total_requested_mib)}")
+    print(f"Free headroom (allocatable - requested): {mib_to_human(free_mib)}")
+
+    # For per-service evaluation, gather current limits & requests for each service listed
+    results = []
+    unsafe_flag = False
+    safety_margin = float(args.safety_margin)
+    max_mult = float(args.max_mult)
+    # We'll allocate safety buffer of free_mib * safety_margin for all suggestions.
+    safe_free = max(0.0, free_mib * safety_margin)
+
+    for idx, row in df.iterrows():
+        svc = row["service"].strip()
+        ns = row["namespace"].strip()
+        proposed = row.get("proposed_limit_per_pod", "").strip()
+        try:
+            info = get_deployment_info(svc, ns)
+        except Exception as e:
+            print(f"ERROR: {e}")
+            results.append({
+                "service": svc, "namespace": ns,
+                "error": str(e)
+            })
+            unsafe_flag = True
+            continue
+
+        replicas = int(info["replicas"] or 1)
+        # choose the container with the highest limit as representative (or single container)
+        if len(info["containers"]) == 0:
+            print(f"Warning: no containers found for {svc} in {ns}")
+            req_mib = 0.0
+            lim_mib = 0.0
+        else:
+            # if multiple containers, sum them (safe approach) per pod
+            req_mib = sum([c.get("req_mib",0.0) for c in info["containers"]])
+            lim_mib = sum([c.get("lim_mib",0.0) for c in info["containers"]])
+
+        current_total_by_service = lim_mib * replicas
+        # compute how much additional memory per pod could be allocated if we split safe_free across all replicas of all services:
+        # A pragmatic approach: allow each evaluated service to take safe_free divided by number of services (equal share)
+        # but we also compute exact feasibility when proposed set.
+        equal_share_per_service_total = safe_free / max(1, len(df))
+        equal_share_per_pod = equal_share_per_service_total / max(1, replicas)
+
+        # recommended limit per pod: don't exceed current * max_mult nor current + equal_share_per_pod
+        recommended = min(lim_mib * max_mult if lim_mib>0 else lim_mib + equal_share_per_pod,
+                          lim_mib + equal_share_per_pod)
+        # if no current limit set (lim_mib == 0) but request exists, use request as baseline
+        if lim_mib == 0 and req_mib > 0:
+            recommended = min(req_mib * max_mult, req_mib + equal_share_per_pod)
+
+        # If user provided a proposed value, parse and check
+        proposed_mib = None
+        proposed_safe = None
+        if proposed != "":
+            proposed_mib = to_mib(proposed)
+            extra_needed_total = (proposed_mib - lim_mib) * replicas
+            if extra_needed_total <= safe_free:
+                proposed_safe = True
+            else:
+                proposed_safe = False
+                unsafe_flag = True
+        else:
+            # when no proposed, mark recommendation safe if extra needed <= safe_free
+            extra_needed_total = (recommended - lim_mib) * replicas
+            if extra_needed_total <= safe_free:
+                proposed_safe = True
+            else:
+                proposed_safe = False
+                unsafe_flag = True
+
+        results.append({
+            "service": svc,
+            "namespace": ns,
+            "found_by": info.get("found_by",""),
+            "replicas": replicas,
+            "current_request_per_pod_mib": req_mib,
+            "current_limit_per_pod_mib": lim_mib,
+            "current_total_alloc_mib": current_total_by_service,
+            "proposed_input": proposed or "",
+            "proposed_input_mib": proposed_mib if proposed_mib is not None else "",
+            "recommended_new_limit_per_pod_mib": recommended,
+            "extra_needed_total_mib": round(extra_needed_total,1),
+            "proposed_safe": proposed_safe
+        })
+
+    # Save report
+    rdf = pd.DataFrame(results)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_xlsx = f"capacity_check_report_{ts}.xlsx"
+    out_csv = f"capacity_check_report_{ts}.csv"
+
+    summary = {
+        "total_cluster_alloc_mib": total_cluster_mib,
+        "total_requested_mib": total_requested_mib,
+        "free_mib": free_mib,
+        "safe_free_mib": safe_free,
+        "services_checked": len(df),
+        "unsafe_detected": unsafe_flag
+    }
+
+    with pd.ExcelWriter(out_xlsx, engine="openpyxl") as w:
+        pd.DataFrame([summary]).to_excel(w, sheet_name="summary", index=False)
+        rdf.to_excel(w, sheet_name="service_checks", index=False)
+    rdf.to_csv(out_csv, index=False)
+
+    print("\nReport written:")
+    print(" -", out_xlsx)
+    print(" -", out_csv)
+    print("\nSummary:")
+    print(f" Total cluster allocatable: {mib_to_human(summary['total_cluster_alloc_mib'])}")
+    print(f" Total requested (current): {mib_to_human(summary['total_requested_mib'])}")
+    print(f" Free headroom: {mib_to_human(summary['free_mib'])}")
+    print(f" Safety margin applied: {safety_margin*100:.0f}% -> safe_free = {mib_to_human(summary['safe_free_mib'])}")
+    print(f" Services checked: {summary['services_checked']}")
+    print(f" Unsafe proposals found: {1 if unsafe_flag else 0}")
+
+    if unsafe_flag:
+        print("\n⚠️  Some proposed changes or recommendations exceed safe cluster headroom.")
+        print("Return code 2 (unsafe).")
+        sys.exit(2)
+    else:
+        print("\n✅ All proposals/recommendations fit within safe headroom.")
+        sys.exit(0)
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser(description="Pre-deploy cluster capacity check for multiple services (kubectl required).")
+    p.add_argument("--services-file", required=True, help="CSV file with columns: service,namespace,proposed_limit_per_pod(optional)")
+    p.add_argument("--safety-margin", default=0.9, help="Fraction of free memory to consider safe (default 0.9 -> leave 10% buffer)")
+    p.add_argument("--max-mult", default=2.0, help="Maximum multiplier on current limits for recommended increase (default 2.0)")
+    args = p.parse_args()
+    main(args)
+
+
+⸻
+
+Sample run & sample output
+
+Command:
+
+python pre_deploy_capacity_check.py --services-file services.csv --safety-margin 0.9 --max-mult 2.0
+
+Console (example):
+
+Querying cluster nodes (kubectl)...
+Total cluster allocatable memory: 210.00Gi (215040 Mi)
+Querying all deployments to compute current requested memory (this may take a few seconds)...
+Total requested memory (all deployments): 160.00Gi
+Free headroom (allocatable - requested): 50.00Gi
+Report written:
+ - capacity_check_report_20251018_131512.xlsx
+ - capacity_check_report_20251018_131512.csv
+
+Summary:
+ Total cluster allocatable: 210.00Gi
+ Total requested (current): 160.00Gi
+ Free headroom: 50.00Gi
+ Safety margin applied: 90% -> safe_free = 45.00Gi
+ Services checked: 15
+ Unsafe proposals found: 0
+
+✅ All proposals/recommendations fit within safe headroom.
+
+If a proposed limit exceeds safe space, the script prints warnings and exits with code 2 so a CI job can block the merge/sync.
+
+⸻
+
+How to use this in your GitOps flow (ArgoCD)
+	•	Add this script as a pre-sync / pre-merge check step in your CI pipeline (GitHub Actions / Jenkins / Bamboo).
+	•	When a PR updates a service manifest (memory increases), the pipeline:
+	1.	Ensures kubeconfig is available to run kubectl against the target cluster.
+	2.	Runs this script using the services file (which can be compiled from the changed manifests or static list).
+	3.	If exit code 0: allow merge / ArgoCD sync.
+If exit code 2: block merge and surface the Excel report for the team to review.
+
+⸻
+
+Notes & caveats
+	•	This script uses resource requests (not actual runtime usage) to determine scheduling safety — this is the correct conservative approach to avoid scheduling failures / OOMs.
+	•	If you have multiple containers per pod, the script sums their memory (safe approach).
+	•	For more advanced placement checks (node-level bin-packing), you’d need to implement scheduling simulation or call the Kubernetes scheduler (complex). This script is a pragmatic, cluster-level headroom check suitable for pre-deploy gating.
+	•	If a service is stateful (StatefulSet, PVCs) the script still reports data but you should treat stateful changes more carefully (backup, scale tests).
+
+⸻
+
+If you want, I can:
+	•	Produce an alternate version that reads proposed manifests from a directory (the Git branch) and automatically extracts proposed resources.limits.memory values, or
+	•	Add support to check CPU headroom as well,
+	•	Or help you convert this into a GitHub Action / Bamboo task that runs automatically on PRs.
+
+Which of those would you like next?
