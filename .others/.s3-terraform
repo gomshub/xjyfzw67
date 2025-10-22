@@ -1,3 +1,224 @@
+Perfect — let’s structure this the best-practice way 🔥
+
+You want:
+	•	IAM + KMS policies for the “infrastructure access” part → in one Terraform file
+	•	S3 bucket with KMS encryption → in a separate Terraform file
+
+I’ll give you both clearly separated, clean, and ready to use.
+
+⸻
+
+🧩 Folder Structure (recommended)
+
+terraform/
+├── iam_infra.tf        # IAM user, roles, policies, KMS key
+└── s3_encryption.tf    # S3 bucket with SSE-KMS encryption
+
+
+⸻
+
+🧱 File 1: iam_infra.tf
+
+Creates:
+	•	KMS key for S3 encryption
+	•	IAM user
+	•	IAM role (with permissions for S3 + KMS)
+	•	IAM policy for the user to assume the role
+
+#################################################
+# IAM & KMS INFRASTRUCTURE CONFIGURATION
+#################################################
+
+data "aws_caller_identity" "current" {}
+
+# --- Create KMS Key ---
+resource "aws_kms_key" "s3_kms_key" {
+  description             = "KMS key for encrypting S3 objects"
+  deletion_window_in_days = 10
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Allow account access"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# --- IAM User ---
+resource "aws_iam_user" "infra_user" {
+  name = "infra-user"
+}
+
+# --- IAM Role (S3 + KMS Access) ---
+resource "aws_iam_role" "infra_role" {
+  name = "infra-s3-kms-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/${aws_iam_user.infra_user.name}"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+# --- IAM Policy for S3 + KMS Access ---
+resource "aws_iam_policy" "infra_s3_kms_policy" {
+  name        = "infra-s3-kms-policy"
+  description = "Allow access to S3 and KMS decryption for infra role"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowS3Access"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket",
+          "s3:GetObject",
+          "s3:PutObject"
+        ]
+        Resource = [
+          "arn:aws:s3:::*",
+          "arn:aws:s3:::*/*"
+        ]
+      },
+      {
+        Sid    = "AllowKMSDecrypt"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Resource = aws_kms_key.s3_kms_key.arn
+      }
+    ]
+  })
+}
+
+# --- Attach policy to role ---
+resource "aws_iam_role_policy_attachment" "infra_role_attach" {
+  role       = aws_iam_role.infra_role.name
+  policy_arn = aws_iam_policy.infra_s3_kms_policy.arn
+}
+
+# --- IAM Policy for User to Assume the Role ---
+resource "aws_iam_policy" "allow_assume_infra_role" {
+  name        = "allow-assume-infra-role"
+  description = "Allow user to assume infra role"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "sts:AssumeRole"
+        Resource = aws_iam_role.infra_role.arn
+      }
+    ]
+  })
+}
+
+# --- Attach AssumeRole Policy to User ---
+resource "aws_iam_user_policy_attachment" "user_assume_infra_role_attach" {
+  user       = aws_iam_user.infra_user.name
+  policy_arn = aws_iam_policy.allow_assume_infra_role.arn
+}
+
+
+⸻
+
+🪣 File 2: s3_encryption.tf
+
+Creates:
+	•	S3 bucket
+	•	Enables server-side encryption (SSE-KMS)
+	•	Enforces that all uploads use KMS encryption
+
+#################################################
+# S3 BUCKET WITH SSE-KMS ENCRYPTION
+#################################################
+
+resource "aws_s3_bucket" "infra_bucket" {
+  bucket = "infra-secure-bucket-example"
+}
+
+# --- S3 Bucket Encryption ---
+resource "aws_s3_bucket_server_side_encryption_configuration" "infra_encryption" {
+  bucket = aws_s3_bucket.infra_bucket.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.s3_kms_key.arn
+    }
+  }
+}
+
+# --- Enforce Encryption on All PUT Requests ---
+resource "aws_s3_bucket_policy" "enforce_sse_kms" {
+  bucket = aws_s3_bucket.infra_bucket.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyUnEncryptedObjectUploads"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.infra_bucket.arn}/*"
+        Condition = {
+          StringNotEquals = {
+            "s3:x-amz-server-side-encryption" = "aws:kms"
+          }
+        }
+      }
+    ]
+  })
+}
+
+
+⸻
+
+✅ How to Deploy
+
+cd terraform
+terraform init
+terraform apply
+
+
+⸻
+
+🧩 Summary of What You Get
+
+File	Purpose
+iam_infra.tf	Creates IAM user, role, policies, and KMS key
+s3_encryption.tf	Creates S3 bucket and applies SSE-KMS encryption + policy enforcement
+
+
+⸻
+
+Would you like me to extend this setup to include multiple IAM users that can assume the same infra role (for a shared DevOps or automation team)?
+
+
+=======
+
 Perfect 👍 — here’s the complete all-in-one PowerShell script that builds a secure, reusable Terraform module repo with:
 ✅ secure S3 bucket (ACL, encryption, versioning, public-block, logging)
 ✅ reusable environment tfvars & backend configs
