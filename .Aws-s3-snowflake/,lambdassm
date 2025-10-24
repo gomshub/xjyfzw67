@@ -1,0 +1,193 @@
+Excellent — this is a really good question 👏 and one that comes up a lot in secure DevOps workflows.
+
+Let’s break it down clearly and practically:
+✅ Yes, secrets can be stored in AWS Systems Manager (SSM) Parameter Store,
+but it’s important to understand how it compares to Secrets Manager, and when to choose one over the other.
+
+⸻
+
+🧩 1️⃣ SSM Parameter Store vs Secrets Manager
+
+Feature	SSM Parameter Store (SecureString)	Secrets Manager
+Purpose	General configuration and secrets	Secrets and credentials (rotatable)
+Encryption	Uses KMS (same encryption strength)	Uses KMS
+Rotation	❌ Manual only	✅ Automatic rotation (Lambda-based)
+Versioning	✅ Supported	✅ Supported
+Cost	✅ Free (except KMS usage)	💰 ~$0.40 per secret/month
+Integration	✅ Works with Lambda, ECS, EC2, etc.	✅ Works with same + RDS rotation
+API calls	ssm:GetParameter	secretsmanager:GetSecretValue
+Best for	Static configs, API keys, non-rotated secrets	Database credentials, tokens needing rotation
+
+So, yes — you can use SSM Parameter Store instead of Secrets Manager, especially if you:
+	•	Don’t need automatic secret rotation
+	•	Want to save cost
+	•	Are okay managing secrets manually
+
+⸻
+
+🛠️ 2️⃣ How to Store Secrets in SSM
+
+You can create them manually or in Terraform.
+
+Example Secret:
+
+aws ssm put-parameter \
+  --name "/snowflake/lambda/creds" \
+  --type "SecureString" \
+  --value '{"snowflake_user":"LAMBDA_CI","snowflake_password":"StrongPassword!","snowflake_account":"abc12345.us-east-1.privatelink","snowflake_database":"MY_DB","snowflake_schema":"PUBLIC","snowflake_warehouse":"COMPUTE_WH"}'
+
+
+⸻
+
+🧱 3️⃣ Terraform Example: Store in SSM
+
+resource "aws_ssm_parameter" "snowflake_creds" {
+  name  = "/snowflake/lambda/creds"
+  type  = "SecureString"
+  value = jsonencode({
+    snowflake_user      = "LAMBDA_CI"
+    snowflake_password  = "StrongPassword!"
+    snowflake_account   = "abc12345.us-east-1.privatelink"
+    snowflake_database  = "MY_DB"
+    snowflake_schema    = "PUBLIC"
+    snowflake_warehouse = "COMPUTE_WH"
+  })
+}
+
+
+⸻
+
+🧠 4️⃣ Update Your Lambda Code
+
+Instead of fetching from Secrets Manager, use SSM via boto3.client('ssm'):
+
+import boto3
+import os
+import json
+import yaml
+import snowflake.connector
+import pandas as pd
+from io import StringIO
+from datetime import datetime
+
+def lambda_handler(event, context):
+    ssm_param = os.environ["SSM_PARAM_NAME"]
+    s3_bucket = os.environ["S3_BUCKET"]
+
+    ssm = boto3.client('ssm')
+    response = ssm.get_parameter(Name=ssm_param, WithDecryption=True)
+    creds = json.loads(response['Parameter']['Value'])
+
+    with open(os.path.join(os.path.dirname(__file__), "queries.yml"), "r") as f:
+        config = yaml.safe_load(f)
+    query_name = os.environ.get("QUERY_NAME", "daily_sales_report")
+    query = config['queries'][query_name]
+
+    conn = snowflake.connector.connect(
+        user=creds["snowflake_user"],
+        password=creds["snowflake_password"],
+        account=creds["snowflake_account"],
+        warehouse=creds["snowflake_warehouse"],
+        database=creds["snowflake_database"],
+        schema=creds["snowflake_schema"]
+    )
+
+    cur = conn.cursor()
+    cur.execute(query)
+    df = cur.fetch_pandas_all()
+    cur.close()
+    conn.close()
+
+    s3 = boto3.client('s3')
+    csv_buffer = StringIO()
+    df.to_csv(csv_buffer, index=False)
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    key = f"daily/{today}/{query_name}.csv"
+
+    s3.put_object(Bucket=s3_bucket, Key=key, Body=csv_buffer.getvalue())
+
+    return {"status": "success", "s3_key": key}
+
+
+⸻
+
+🧩 5️⃣ Terraform IAM Policy Update (for SSM Access)
+
+Replace the Secrets Manager permissions with this:
+
+resource "aws_iam_policy" "lambda_ssm_access" {
+  name = "lambda_ssm_snowflake_access"
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParameterHistory"
+        ],
+        Effect   = "Allow",
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.ssm_param_name}"
+      },
+      {
+        Action = [
+          "kms:Decrypt"
+        ],
+        Effect = "Allow",
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+✅ Least privilege to read only your parameter and decrypt it.
+
+⸻
+
+⚙️ 6️⃣ Update Terraform Environment Variables for Lambda
+
+Replace SECRET_NAME with SSM_PARAM_NAME:
+
+environment {
+  variables = {
+    AWS_REGION      = data.aws_region.current.name
+    S3_BUCKET       = var.s3_bucket_name
+    QUERY_NAME      = var.query_name
+    SSM_PARAM_NAME  = var.ssm_param_name
+  }
+}
+
+
+⸻
+
+📘 7️⃣ Add to variables.tf
+
+variable "ssm_param_name" {
+  description = "Name of the SSM parameter that stores Snowflake credentials"
+  type        = string
+}
+
+
+⸻
+
+✅ 8️⃣ When to Use SSM vs Secrets Manager
+
+Use Case	Recommended Service
+Store static credentials (rarely rotated)	SSM Parameter Store
+Store database credentials, tokens, or passwords requiring rotation	Secrets Manager
+Need cross-service config storage (e.g. app settings + secrets)	SSM
+Need automatic rotation	Secrets Manager
+Cost sensitive, simple setup	SSM
+
+
+⸻
+
+🧭 TL;DR
+	•	✅ You can safely use SSM Parameter Store (SecureString) for Snowflake credentials.
+	•	🔒 It uses KMS encryption — just like Secrets Manager.
+	•	💰 It’s cheaper, simpler, but doesn’t support auto-rotation.
+	•	👨‍💻 Lambda code only changes from boto3.client('secretsmanager') → boto3.client('ssm').
+
+⸻
+
+Would you like me to give you the final Terraform + Lambda code combo (using SSM instead of Secrets Manager) so you can directly deploy that version?
