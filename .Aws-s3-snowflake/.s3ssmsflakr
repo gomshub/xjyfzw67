@@ -1,3 +1,335 @@
+
+Perfect 👍 So your setup will look like this:
+
+You’ll have a full Terraform + GitHub Actions + Lambda container + S3 backend pipeline that does the following:
+	1.	Stores Terraform state in S3.
+	2.	Uses GitHub OIDC to assume a role in AWS (no access keys needed).
+	3.	Builds and pushes a Lambda container image to ECR.
+	4.	Deploys Terraform that:
+	•	Creates an S3 bucket for results.
+	•	Creates SSM parameters for Snowflake credentials (dummy creds).
+	•	Creates a Lambda function from the ECR image.
+	•	Creates an EventBridge rule to run the Lambda every day at 7 AM UTC.
+	•	Connects to Snowflake over Private VPN (VPC config ready).
+	•	Reads SQL query from a config file in the container.
+
+⸻
+
+Let’s break down the deliverables — I’ll generate all these Terraform and GitHub files for you:
+
+📁 Folder Structure
+
+snowflake-to-s3/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml
+├── terraform/
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── provider.tf
+│   ├── ssm.tf
+│   ├── lambda.tf
+│   ├── s3.tf
+│   ├── eventbridge.tf
+│   └── backend.tf
+├── lambda/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── app.py
+│   └── config/
+│       └── query.sql
+
+
+⸻
+
+🪣 S3 Backend (terraform/backend.tf)
+
+terraform {
+  backend "s3" {
+    bucket         = "my-tf-backend-bucket"
+    key            = "snowflake-lambda/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "terraform-lock"
+  }
+}
+
+
+⸻
+
+☁️ Provider & OIDC Role (terraform/provider.tf)
+
+provider "aws" {
+  region = var.region
+}
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_iam_openid_connect_provider" "github" {
+  url             = "https://token.actions.githubusercontent.com"
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+}
+
+resource "aws_iam_role" "github_actions_role" {
+  name = "github-actions-terraform-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.github.arn
+      },
+      Action = "sts:AssumeRoleWithWebIdentity",
+      Condition = {
+        StringLike = {
+          "token.actions.githubusercontent.com:sub" = "repo:<your_github_username>/<your_repo>:ref:refs/heads/main"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "github_terraform_policy" {
+  role       = aws_iam_role.github_actions_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
+
+⸻
+
+🔐 SSM Parameters (terraform/ssm.tf)
+
+resource "aws_ssm_parameter" "snowflake_user" {
+  name  = "/snowflake/ci_user"
+  type  = "SecureString"
+  value = "dummy_user"
+}
+
+resource "aws_ssm_parameter" "snowflake_password" {
+  name  = "/snowflake/ci_password"
+  type  = "SecureString"
+  value = "dummy_password"
+}
+
+
+⸻
+
+🪣 S3 Bucket (terraform/s3.tf)
+
+resource "aws_s3_bucket" "data_bucket" {
+  bucket = "snowflake-export-data"
+}
+
+resource "aws_s3_bucket_versioning" "versioning" {
+  bucket = aws_s3_bucket.data_bucket.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+
+⸻
+
+🧩 Lambda Function (terraform/lambda.tf)
+
+resource "aws_ecr_repository" "lambda_repo" {
+  name = "snowflake-to-s3-lambda"
+}
+
+resource "aws_lambda_function" "snowflake_lambda" {
+  function_name = "snowflake-to-s3"
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}:latest"
+  role          = aws_iam_role.lambda_exec.arn
+  timeout       = 900
+
+  vpc_config {
+    subnet_ids         = var.private_subnet_ids
+    security_group_ids = var.lambda_sg_ids
+  }
+
+  environment {
+    variables = {
+      S3_BUCKET_NAME  = aws_s3_bucket.data_bucket.bucket
+      SSM_USER_PARAM  = aws_ssm_parameter.snowflake_user.name
+      SSM_PASS_PARAM  = aws_ssm_parameter.snowflake_password.name
+    }
+  }
+}
+
+resource "aws_iam_role" "lambda_exec" {
+  name = "lambda-snowflake-exec"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Principal = { Service = "lambda.amazonaws.com" },
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_logs" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_access" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "s3_access" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+}
+
+
+⸻
+
+⏰ EventBridge Schedule (terraform/eventbridge.tf)
+
+resource "aws_cloudwatch_event_rule" "daily_7am" {
+  name                = "daily-7am-rule"
+  schedule_expression = "cron(0 7 * * ? *)"
+}
+
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = aws_cloudwatch_event_rule.daily_7am.name
+  target_id = "snowflake-lambda"
+  arn       = aws_lambda_function.snowflake_lambda.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.snowflake_lambda.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.daily_7am.arn
+}
+
+
+⸻
+
+🐍 Lambda Code (lambda/app.py)
+
+import os
+import boto3
+import snowflake.connector
+
+def lambda_handler(event, context):
+    s3 = boto3.client('s3')
+    ssm = boto3.client('ssm')
+
+    user = ssm.get_parameter(Name=os.environ['SSM_USER_PARAM'], WithDecryption=True)['Parameter']['Value']
+    password = ssm.get_parameter(Name=os.environ['SSM_PASS_PARAM'], WithDecryption=True)['Parameter']['Value']
+    s3_bucket = os.environ['S3_BUCKET_NAME']
+
+    with open("/app/config/query.sql") as f:
+        query = f.read()
+
+    conn = snowflake.connector.connect(
+        user=user,
+        password=password,
+        account="your_account",
+        warehouse="your_wh",
+        database="your_db",
+        schema="your_schema"
+    )
+
+    cursor = conn.cursor()
+    cursor.execute(query)
+    results = cursor.fetchall()
+
+    csv_data = "\n".join([",".join(map(str, row)) for row in results])
+    file_key = f"exports/result.csv"
+    s3.put_object(Bucket=s3_bucket, Key=file_key, Body=csv_data.encode())
+
+    cursor.close()
+    conn.close()
+    return {"status": "success", "file": file_key}
+
+
+⸻
+
+🐳 Lambda Dockerfile (lambda/Dockerfile)
+
+FROM public.ecr.aws/lambda/python:3.10
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY app.py ${LAMBDA_TASK_ROOT}
+COPY config/query.sql /app/config/query.sql
+
+CMD ["app.lambda_handler"]
+
+requirements.txt
+
+boto3
+snowflake-connector-python
+
+
+⸻
+
+⚙️ GitHub Workflow (.github/workflows/deploy.yml)
+
+name: Deploy Terraform & Lambda
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/github-actions-terraform-role
+          aws-region: us-east-1
+
+      - name: Build Lambda Docker image
+        run: |
+          cd lambda
+          docker build -t snowflake-to-s3-lambda .
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
+          docker tag snowflake-to-s3-lambda:latest <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/snowflake-to-s3-lambda:latest
+          docker push <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/snowflake-to-s3-lambda:latest
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Terraform Init & Apply
+        working-directory: ./terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve
+
+
+⸻
+
+Would you like me to:
+	•	Fill in your AWS region, account ID, and repo name placeholders?
+	•	Add VPN subnet + SG example configuration in the Lambda VPC block for private Snowflake connectivity?
+
+===
+
 Great — below are ready-to-use, production-style Terraform files that:
 	•	Create an ECR repo, Lambda (container), S3 output bucket, SSM SecureString parameter (with dummy creds you asked for), IAM role/policies, and an EventBridge schedule to run the Lambda daily.
 	•	Use Lambda in VPC (you pass private subnet IDs & security groups) so it can reach Snowflake over your private VPN.
