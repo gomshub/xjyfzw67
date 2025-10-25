@@ -1,0 +1,525 @@
+Great — below are ready-to-use, production-style Terraform files that:
+	•	Create an ECR repo, Lambda (container), S3 output bucket, SSM SecureString parameter (with dummy creds you asked for), IAM role/policies, and an EventBridge schedule to run the Lambda daily.
+	•	Use Lambda in VPC (you pass private subnet IDs & security groups) so it can reach Snowflake over your private VPN.
+	•	Include a remote backend configuration for storing Terraform state in S3 (with DynamoDB locking) — I also give a bootstrap.sh you can run once to create the backend bucket / DynamoDB table before terraform init.
+	•	Environment / variables are parameterized and documented. Replace the placeholders and secrets after deployment (you requested storing dummy creds in SSM via Terraform — done).
+
+Important notes (read first)
+	1.	Bootstrap step required: Terraform remote backend (S3 + DynamoDB) must exist before you run terraform init. Use the included bootstrap.sh to create the backend S3 bucket and DynamoDB table (or create them manually).
+	2.	The schedule default is 07:00 UTC (cron(0 7 * * ? *)). EventBridge cron expressions use UTC. If you want 07:00 Europe/Zurich, you must convert to UTC (and remember DST differences). I explain below how to set that.
+	3.	This repo does not create the Lambda container image — it assumes CI (GitHub Actions) will push an image to ECR with tag (we wire Terraform to accept lambda_image_tag variable). If you want, I can also provide the GitHub workflow and Dockerfile next.
+	4.	Replace all REPLACE_ME values (VPC, subnet IDs, SGs, backend bucket name, etc.) before applying.
+
+⸻
+
+Files (drop into terraform/)
+
+⸻
+
+terraform/backend-bootstrap.sh
+
+Use this once (locally) to create the S3 backend bucket and DynamoDB table for state locking. Populate BOOTSTRAP_BUCKET and AWS_REGION first.
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Edit these values:
+BOOTSTRAP_BUCKET="my-tf-backend-bucket-REPLACE_ME"   # must be globally unique
+DYNAMODB_TABLE="tf-state-locks-REPLACE_ME"
+AWS_REGION="eu-central-1"
+
+echo "Creating backend bucket: $BOOTSTRAP_BUCKET in region $AWS_REGION"
+
+aws s3api create-bucket \
+  --bucket "$BOOTSTRAP_BUCKET" \
+  --region "$AWS_REGION" \
+  --create-bucket-configuration LocationConstraint="$AWS_REGION"
+
+aws s3api put-bucket-versioning \
+  --bucket "$BOOTSTRAP_BUCKET" \
+  --versioning-configuration Status=Enabled
+
+echo "Creating DynamoDB table $DYNAMODB_TABLE for state locking"
+aws dynamodb create-table \
+  --table-name "$DYNAMODB_TABLE" \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH \
+  --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
+  --region "$AWS_REGION"
+
+echo "Backend bootstrap complete. Use this bucket name in the backend.tf configuration and run 'terraform init'."
+
+
+⸻
+
+terraform/backend.tf
+
+(Replace bucket, key, and region before terraform init unless you used bootstrap.sh with the same name)
+
+terraform {
+  required_version = ">= 1.3.0"
+  backend "s3" {
+    bucket         = "REPLACE_ME_TF_STATE_BUCKET"    # <- change
+    key            = "snowflake-lambda/terraform.tfstate"
+    region         = "eu-central-1"                  # <- change if needed
+    dynamodb_table = "REPLACE_ME_TF_DDB_TABLE"       # <- change
+    encrypt        = true
+  }
+}
+
+
+⸻
+
+terraform/providers.tf
+
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+
+⸻
+
+terraform/variables.tf
+
+variable "region" {
+  type    = string
+  default = "eu-central-1"
+}
+
+variable "vpc_id" {
+  type = string
+}
+
+variable "private_subnet_ids" {
+  type = list(string)
+}
+
+variable "lambda_security_group_ids" {
+  type = list(string)
+}
+
+variable "s3_bucket_name" {
+  type = string
+  description = "S3 bucket to store query results from Snowflake"
+}
+
+variable "ecr_repo_name" {
+  type    = string
+  default = "lambda-snowflake-repo"
+}
+
+variable "lambda_image_tag" {
+  type    = string
+  default = "latest" # CI should pass git SHA/tag
+}
+
+variable "lambda_function_name" {
+  type    = string
+  default = "lambda-snowflake-query-runner"
+}
+
+variable "ssm_snowflake_param_name" {
+  type    = string
+  default = "/ci/snowflake/creds"
+}
+
+variable "lambda_timeout" {
+  type    = number
+  default = 900
+}
+
+variable "lambda_memory" {
+  type    = number
+  default = 1024
+}
+
+variable "schedule_cron" {
+  type        = string
+  description = "EventBridge cron schedule expression (UTC). Default runs at 07:00 UTC daily"
+  default     = "cron(0 7 * * ? *)"
+}
+
+
+⸻
+
+terraform/data.tf
+
+data "aws_region" "current" {}
+
+data "aws_caller_identity" "current" {}
+
+
+⸻
+
+terraform/ecr.tf
+
+resource "aws_ecr_repository" "lambda_repo" {
+  name = var.ecr_repo_name
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  lifecycle_policy {
+    policy = jsonencode({
+      rules = [
+        {
+          rulePriority = 1
+          description  = "Expire images older than 30 days"
+          selection = {
+            tagStatus = "any"
+          }
+          action = {
+            type = "expire"
+          }
+        }
+      ]
+    })
+  }
+}
+
+output "ecr_repository_url" {
+  value = aws_ecr_repository.lambda_repo.repository_url
+}
+
+
+⸻
+
+terraform/s3.tf
+
+resource "aws_s3_bucket" "results_bucket" {
+  bucket = var.s3_bucket_name
+  acl    = "private"
+
+  versioning {
+    enabled = true
+  }
+
+  server_side_encryption_configuration {
+    rule {
+      apply_server_side_encryption_by_default {
+        sse_algorithm = "AES256"
+      }
+    }
+  }
+
+  lifecycle_rule {
+    id      = "expire-old"
+    enabled = true
+    expiration {
+      days = 365
+    }
+  }
+}
+
+output "results_s3_bucket_name" {
+  value = aws_s3_bucket.results_bucket.id
+}
+
+
+⸻
+
+terraform/ssm.tf  (creates dummy SecureString cred as requested)
+
+# Store dummy Snowflake credential JSON in SSM SecureString.
+# Replace value after deployment through AWS Console or aws cli with your real credentials.
+resource "aws_ssm_parameter" "snowflake_creds" {
+  name        = var.ssm_snowflake_param_name
+  type        = "SecureString"
+  value       = jsonencode({
+    user      = "ci_user_dummy",
+    password  = "ChangeMe123!",
+    account   = "REPLACE_ME_ACCOUNT",
+    warehouse = "REPLACE_ME_WH",
+    database  = "REPLACE_ME_DB",
+    schema    = "PUBLIC",
+    role      = "REPLACE_IF_NEEDED"
+  })
+  overwrite   = true
+  tags = {
+    created_by = "terraform"
+    purpose    = "dummy-ssm-snowflake-creds"
+  }
+}
+
+
+⸻
+
+terraform/iam.tf
+
+data "aws_iam_policy_document" "lambda_assume" {
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+resource "aws_iam_role" "lambda_role" {
+  name               = "${var.lambda_function_name}-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+  tags = {
+    created_by = "terraform"
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_policy" {
+  name = "${var.lambda_function_name}-policy"
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Sid = "S3Access"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:PutObjectAcl",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.results_bucket.arn,
+          "${aws_s3_bucket.results_bucket.arn}/*"
+        ]
+      },
+      {
+        Sid = "SSMRead"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = [
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.ssm_snowflake_param_name}"
+        ]
+      },
+      {
+        Sid = "ECRPull"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid = "ENI"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateNetworkInterface",
+          "ec2:DescribeNetworkInterfaces",
+          "ec2:DeleteNetworkInterface",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeVpcs"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+
+⸻
+
+terraform/lambda.tf
+
+# Use the ECR repo created earlier to form image URI
+data "aws_ecr_repository" "repo" {
+  name = aws_ecr_repository.lambda_repo.name
+}
+
+locals {
+  image_uri = "${data.aws_ecr_repository.repo.repository_url}:${var.lambda_image_tag}"
+}
+
+resource "aws_lambda_function" "sf_lambda" {
+  function_name = var.lambda_function_name
+  package_type  = "Image"
+  image_uri     = local.image_uri
+  role          = aws_iam_role.lambda_role.arn
+  timeout       = var.lambda_timeout
+  memory_size   = var.lambda_memory
+  architectures = ["x86_64"]
+
+  vpc_config {
+    subnet_ids         = var.private_subnet_ids
+    security_group_ids = var.lambda_security_group_ids
+  }
+
+  environment {
+    variables = {
+      OUTPUT_S3_BUCKET = var.s3_bucket_name
+      CONFIG_S3_BUCKET = ""  # optional: set if using S3-hosted config
+      CONFIG_S3_KEY    = ""  # e.g. configs/queries.yml
+      SSM_SF_PARAM     = var.ssm_snowflake_param_name
+      QUERY_NAME       = ""  # optional single query name from config
+    }
+  }
+
+  tags = {
+    created_by = "terraform"
+  }
+}
+
+output "lambda_function_name" {
+  value = aws_lambda_function.sf_lambda.function_name
+}
+
+
+⸻
+
+terraform/eventbridge.tf
+
+resource "aws_cloudwatch_event_rule" "daily_schedule" {
+  name                = "${var.lambda_function_name}-daily"
+  schedule_expression = var.schedule_cron
+  description         = "Daily schedule to run the Snowflake Lambda"
+}
+
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule = aws_cloudwatch_event_rule.daily_schedule.name
+  arn  = aws_lambda_function.sf_lambda.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.sf_lambda.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.daily_schedule.arn
+}
+
+
+⸻
+
+terraform/outputs.tf
+
+output "lambda_function_name" {
+  value = aws_lambda_function.sf_lambda.function_name
+}
+
+output "ecr_repo_url" {
+  value = aws_ecr_repository.lambda_repo.repository_url
+}
+
+output "s3_results_bucket" {
+  value = aws_s3_bucket.results_bucket.id
+}
+
+output "ssm_snowflake_param_name" {
+  value = aws_ssm_parameter.snowflake_creds.name
+}
+
+output "eventbridge_rule" {
+  value = aws_cloudwatch_event_rule.daily_schedule.name
+}
+
+
+⸻
+
+terraform/terraform.tfvars.example (fill and copy to terraform.tfvars)
+
+region = "eu-central-1"
+vpc_id = "vpc-REPLACE_ME"
+private_subnet_ids = ["subnet-AAA","subnet-BBB"]
+lambda_security_group_ids = ["sg-REPLACE_ME"]
+s3_bucket_name = "my-snowflake-results-bucket-REPLACE_ME"
+ecr_repo_name = "lambda-snowflake-repo"
+lambda_image_tag = "latest"
+ssm_snowflake_param_name = "/ci/snowflake/creds"
+lambda_function_name = "lambda-snowflake-query-runner"
+
+# schedule expression in UTC; default is 07:00 UTC daily
+schedule_cron = "cron(0 7 * * ? *)"
+
+
+⸻
+
+How to deploy — quick step-by-step
+	1.	Edit backend.tf: replace REPLACE_ME_TF_STATE_BUCKET and REPLACE_ME_TF_DDB_TABLE with a globally unique S3 bucket name and a DynamoDB table name you want to use.
+	2.	Bootstrap backend (run locally):
+	•	Edit backend-bootstrap.sh bucket/table names and run:
+
+chmod +x backend-bootstrap.sh
+./backend-bootstrap.sh
+
+
+	•	Or create the S3 bucket & DynamoDB table manually in the AWS Console / AWS CLI.
+
+	3.	Create terraform.tfvars:
+	•	Copy terraform.tfvars.example → terraform.tfvars and fill your real VPC, subnet IDs, SGs, and bucket name.
+	4.	Initialize & apply:
+
+cd terraform
+terraform init
+terraform plan -out plan.tfplan
+terraform apply "plan.tfplan"
+
+	•	Terraform will create ECR, S3, Lambda role, SSM parameter (dummy creds), and EventBridge rule.
+
+	5.	Push Container Image (CI):
+	•	After ECR exists, your CI should build/push a container image to the ECR repo and pass the tag to Terraform (or update the Lambda image via aws lambda update-function-code --image-uri ...).
+	•	Example flow in GitHub Actions: build image, push to ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/${{ secrets.ECR_REPO_NAME }}:sha, then run terraform apply -var="lambda_image_tag=sha".
+	6.	Replace dummy SSM creds:
+	•	The SSM parameter created by Terraform has dummy JSON. Update it via AWS Console or CLI:
+
+aws ssm put-parameter \
+  --name "/ci/snowflake/creds" \
+  --value '{"user":"ci_user","password":"REAL_PASSWORD","account":"ACCOUNT_ID","warehouse":"WH","database":"DB","schema":"SC"}' \
+  --type "SecureString" --overwrite --region eu-central-1
+
+
+
+⸻
+
+About the schedule / timezones (important)
+	•	Terraform variable schedule_cron defaults to "cron(0 7 * * ? *)" which triggers 07:00 UTC daily.
+	•	If you need 07:00 Europe/Zurich:
+	•	During CET (UTC+1) → set schedule_cron = "cron(0 6 * * ? *)" to run at 07:00 CET (6:00 UTC).
+	•	During CEST (UTC+2) → set schedule_cron = "cron(0 5 * * ? *)" to run at 07:00 CEST (5:00 UTC).
+	•	Because EventBridge uses UTC and does not automatically adjust for DST, you must pick an approach:
+	•	Keep Lambda at 07:00 UTC always (consistent, but not local 07:00).
+	•	Or adjust the cron twice a year to keep local 07:00 Europe/Zurich. (You can automate adjusting schedule via a small CloudWatch Event or external scheduler — tell me if you want that.)
+
+⸻
+
+Security & cleanup notes
+	•	The SSM parameter is stored as SecureString. After you replace dummy values, ensure IAM authorization is limited only to the Lambda role (the IAM policy already restricts the specific parameter ARN).
+	•	If you destroy the stack, SSM param will be removed (because Terraform created it). If you prefer to keep it persistent and manage out-of-band, remove the aws_ssm_parameter resource and create it manually.
+	•	Remove dummy secrets from shell history & CI logs.
+
+⸻
+
+If you want now:
+	•	I can produce the GitHub Actions workflow that builds the Docker image and pushes to the ECR repo created by this Terraform (and then triggers Terraform apply passing the image tag).
+	•	Or I can generate the Dockerfile and app.py Lambda code (container) that reads queries.yml and uses the SSM parameter (we already drafted an app.py previously — tell me whether you want it included in the repo).
+	•	Or I can adjust the schedule to strictly match 07:00 Europe/Zurich automatically (I can provide a small script to update the EventBridge rule twice a year, or show an O(1) approach using a Lambda that calculates next-run times).
+
+Which of the above would you like next?
