@@ -1,4 +1,81 @@
 
+Perfect 👍 — we’ll include staging.tfvars and prod.tfvars with placeholder values that you can later replace with your actual AWS and VPC info.
+
+Below are the ready-to-use tfvars files that integrate smoothly with the PowerShell setup, Terraform modules, and .env structure we’ve discussed.
+These files go in:
+📁 terraform/environments/
+
+⸻
+
+✅ terraform/environments/staging.tfvars
+
+# ===========================
+# Environment: STAGING
+# ===========================
+
+region              = "eu-central-1"
+environment         = "staging"
+
+# VPC and networking (Private connectivity to Snowflake)
+vpc_id              = "vpc-xxxxxxx"
+private_subnet_ids  = ["subnet-aaaaaaa", "subnet-bbbbbbb"]
+lambda_sg_ids       = ["sg-xxxxxxx"]
+
+# Snowflake VPN connection settings (optional placeholders)
+snowflake_vpn_ip    = "10.0.10.10"
+snowflake_vpn_port  = 443
+
+# Tags
+tags = {
+  Project     = "snow2s3"
+  Environment = "staging"
+  ManagedBy   = "Terraform"
+}
+
+
+⸻
+
+✅ terraform/environments/prod.tfvars
+
+# ===========================
+# Environment: PRODUCTION
+# ===========================
+
+region              = "eu-central-1"
+environment         = "prod"
+
+# VPC and networking (Private connectivity to Snowflake)
+vpc_id              = "vpc-yyyyyyy"
+private_subnet_ids  = ["subnet-ccccccc", "subnet-ddddddd"]
+lambda_sg_ids       = ["sg-yyyyyyy"]
+
+# Snowflake VPN connection settings (optional placeholders)
+snowflake_vpn_ip    = "10.0.20.20"
+snowflake_vpn_port  = 443
+
+# Tags
+tags = {
+  Project     = "snow2s3"
+  Environment = "prod"
+  ManagedBy   = "Terraform"
+}
+
+
+⸻
+
+💡 How It Works
+	•	These .tfvars files get automatically selected in:
+	•	The PowerShell deploy script (scripts/deploy.ps1).
+	•	The GitHub Actions workflow (.github/workflows/deploy.yml).
+	•	You only need to update VPC/Subnet/SG IDs and Snowflake VPN endpoint later.
+	•	The region and environment variables propagate across modules, automatically tagging everything.
+
+⸻
+
+Would you like me to now generate the final PowerShell script + Terraform root + GitHub Actions workflow — all in one, integrated, production-ready version (including the combined JSON output logic and OIDC configuration)?
+
+
+====
 Perfect ✅ — here’s the final, production-ready .github/workflows/deploy.yml for your snow2s3 project.
 This workflow:
 	•	Authenticates to AWS via OIDC (no static credentials)
