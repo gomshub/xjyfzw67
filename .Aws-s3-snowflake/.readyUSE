@@ -1,3 +1,177 @@
+
+Perfect ✅ — here’s the final, production-ready .github/workflows/deploy.yml for your snow2s3 project.
+This workflow:
+	•	Authenticates to AWS via OIDC (no static credentials)
+	•	Loads environment variables from .env files
+	•	Builds and pushes the Lambda Docker image to ECR
+	•	Ensures the Terraform backend S3 bucket exists
+	•	Runs Terraform init + apply using environment-specific tfvars
+	•	Exports all Terraform outputs into terraform/outputs/all_outputs.json
+	•	Uploads that JSON file as a GitHub Actions artifact
+
+⸻
+
+📄 .github/workflows/deploy.yml
+
+name: Deploy snow2s3 Infrastructure
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy (staging or prod)"
+        required: true
+        default: "staging"
+
+permissions:
+  id-token: write   # Required for OIDC
+  contents: read
+
+env:
+  PROJECT: snow2s3
+  AWS_REGION: eu-central-1
+  TERRAFORM_DIR: terraform
+  ECR_REPO: snow2s3-lambda
+  OUTPUT_FILE: terraform/outputs/all_outputs.json
+  TF_BACKEND_BUCKET: snow2s3-tf-backend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Load environment configs
+        id: load-env
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          echo "ENV=$ENV" >> $GITHUB_ENV
+
+          # Load .env.common first
+          if [ -f config/.env.common ]; then
+            export $(grep -v '^#' config/.env.common | xargs)
+          fi
+          # Load environment-specific env file
+          if [ -f config/.env.$ENV ]; then
+            export $(grep -v '^#' config/.env.$ENV | xargs)
+          fi
+
+          echo "Loaded configuration for environment: $ENV"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<AWS_ACCOUNT_ID>:role/github-actions-terraform-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure Terraform backend bucket exists
+        run: |
+          aws s3api head-bucket --bucket $TF_BACKEND_BUCKET 2>/dev/null || \
+          aws s3api create-bucket --bucket $TF_BACKEND_BUCKET --region $AWS_REGION --create-bucket-configuration LocationConstraint=$AWS_REGION
+          echo "✅ Terraform backend bucket ensured: $TF_BACKEND_BUCKET"
+
+      - name: Get Lambda version
+        id: version
+        run: echo "VERSION=$(cat lambda/version.txt)" >> $GITHUB_ENV
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
+
+      - name: Build and Push Lambda Docker Image
+        run: |
+          IMAGE_URI="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:${{ env.VERSION }}"
+          docker build -t $ECR_REPO:${{ env.VERSION }} ./lambda
+          docker tag $ECR_REPO:${{ env.VERSION }} $IMAGE_URI
+          docker push $IMAGE_URI
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          echo "✅ Lambda image pushed: $IMAGE_URI"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Terraform Init
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform init -reconfigure
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          terraform apply -auto-approve -var-file="environments/${{ env.ENV }}.tfvars"
+          mkdir -p terraform/outputs
+          terraform output -json > ${{ env.OUTPUT_FILE }}
+          echo "✅ Outputs exported to ${{ env.OUTPUT_FILE }}"
+
+      - name: Upload Outputs JSON as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs-${{ env.ENV }}
+          path: ${{ env.OUTPUT_FILE }}
+
+
+⸻
+
+🧩 Key Notes
+	1.	Environment Selection
+	•	Default: staging
+	•	You can deploy prod manually:
+
+gh workflow run deploy.yml -f environment=prod
+
+
+	2.	OIDC Role Setup Required in AWS IAM
+	•	Create a role named github-actions-terraform-role
+	•	Trust policy:
+
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<AWS_ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:yourname/snow2s3:*"
+        }
+      }
+    }
+  ]
+}
+
+
+	•	Attach permissions:
+	•	AmazonS3FullAccess
+	•	AmazonEC2ReadOnlyAccess
+	•	AmazonSSMFullAccess
+	•	AmazonECRFullAccess
+	•	AWSLambda_FullAccess
+	•	CloudWatchFullAccess
+	•	IAMReadOnlyAccess
+
+	3.	Outputs
+After each Terraform apply, you’ll get:
+
+terraform/outputs/all_outputs.json
+
+and it’s also available as a downloadable artifact in the workflow run.
+
+⸻
+
+Would you like me to also generate the OIDC IAM role Terraform code (modules/iam/oidc-role.tf) so that this setup can be completely provisioned by Terraform too (instead of creating it manually in AWS Console)?
+
+
+==
+
 Awesome — below is the final, ready-to-run PowerShell script that creates the entire project scaffold for snow2s3, including:
 	•	full Terraform module layout (s3, lambda, ssm, eventbridge, ecr, iam),
 	•	Terraform backend S3 (no DynamoDB) and automatic creation of the backend bucket if it doesn’t exist (uses AWS CLI),
