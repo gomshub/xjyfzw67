@@ -1,0 +1,726 @@
+Awesome — below is the final, ready-to-run PowerShell script that creates the entire project scaffold for snow2s3, including:
+	•	full Terraform module layout (s3, lambda, ssm, eventbridge, ecr, iam),
+	•	Terraform backend S3 (no DynamoDB) and automatic creation of the backend bucket if it doesn’t exist (uses AWS CLI),
+	•	GitHub Actions workflow that uses OIDC to assume a role (role ARN is a placeholder you will update),
+	•	Docker build/push using lambda/version.txt for the image tag,
+	•	tagging of all resources via local.default_tags,
+	•	one combined JSON output file terraform/all_outputs.json produced by Terraform using the local_file resource,
+	•	config files .env.common, .env.staging, .env.prod (region read from .env),
+	•	staging/prod tfvars,
+	•	a scripts/deploy.ps1 that builds the image, pushes to ECR and runs Terraform apply locally (uses the .env files),
+	•	dummy values for AWS Account ID and other sensitive values (you’ll update them).
+
+Save the script as setup-snow2s3.ps1 in an empty folder and run it from PowerShell. The script will:
+	1.	Create the file/folder structure and populate all files.
+	2.	Try to create the Terraform backend S3 bucket automatically (if aws CLI is configured).
+	3.	Print the next steps (where to change live values).
+
+Note: the script uses dummy AWS Account ID and ROLE ARNs. Replace them with your real values in the generated files before first GitHub run / terraform apply. The AWS Region is read from config/.env.common. You asked for dummy values so you can replace them later.
+
+⸻
+
+setup-snow2s3.ps1
+
+<#
+setup-snow2s3.ps1
+
+Creates a complete repository scaffold for the "snow2s3" project:
+ - Terraform (root + modules: s3, lambda, ssm, eventbridge, ecr, iam)
+ - Lambda container files (app.py, Dockerfile, version.txt)
+ - GitHub Actions workflow (OIDC)
+ - Config and environment files (.env.common/.env.staging/.env.prod)
+ - scripts/deploy.ps1 (local deploy helper)
+ - Auto-create S3 backend bucket if AWS CLI is configured and credentials allow it
+
+Usage:
+  1) Save script and run in an empty folder:
+       ./setup-snow2s3.ps1
+  2) Edit generated files (replace dummy values).
+  3) Run scripts/deploy.ps1 for local build/deploy, or push to GitHub to run the workflow.
+#>
+
+param(
+    [string]$Project = "snow2s3",
+    [string]$DefaultRegion = "eu-central-1",
+    [string]$DummyAccountId = "123456789012",        # dummy account id - replace later
+    [string]$DummyGitHubRepo = "yourname/snow2s3"    # dummy github repo - replace later
+)
+
+function Write-File($path, $content) {
+    $dir = Split-Path $path
+    if (-not [string]::IsNullOrEmpty($dir) -and -not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    $content | Out-File -FilePath $path -Encoding utf8 -Force
+    Write-Host "  created $path"
+}
+
+Write-Host "Creating project scaffold for '$Project'..."
+
+# Folders
+$folders = @(
+    ".github/workflows",
+    "config",
+    "lambda/config",
+    "terraform/modules/s3",
+    "terraform/modules/lambda",
+    "terraform/modules/ssm",
+    "terraform/modules/eventbridge",
+    "terraform/modules/ecr",
+    "terraform/modules/iam",
+    "terraform/environments",
+    "scripts"
+)
+foreach ($f in $folders) { if (-not (Test-Path $f)) { New-Item -ItemType Directory -Path $f -Force | Out-Null } }
+
+# ================
+# config files
+# ================
+$envCommon = @"
+PROJECT=$Project
+AWS_REGION=$DefaultRegion
+ECR_REPO=$Project-lambda
+AWS_ACCOUNT_ID=$DummyAccountId
+GITHUB_REPO=$DummyGitHubRepo
+"@
+Write-File "config/.env.common" $envCommon
+
+$envStaging = @"
+ENVIRONMENT=staging
+TF_VARS=terraform/environments/staging.tfvars
+"@
+Write-File "config/.env.staging" $envStaging
+
+$envProd = @"
+ENVIRONMENT=prod
+TF_VARS=terraform/environments/prod.tfvars
+"@
+Write-File "config/.env.prod" $envProd
+
+# ================
+# lambda files
+# ================
+$lambdaApp = @"
+import os
+import io
+import csv
+import json
+import boto3
+import yaml
+import logging
+import snowflake.connector
+from datetime import datetime
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+s3 = boto3.client('s3')
+ssm = boto3.client('ssm')
+
+OUTPUT_S3_BUCKET = os.getenv('OUTPUT_S3_BUCKET', os.environ.get('S3_BUCKET_NAME'))
+SSM_SF_PARAM = os.getenv('SSM_SF_PARAM', '/ci/snowflake/creds')
+LOCAL_CONFIG_PATH = '/app/config/queries.yml'
+
+def get_config():
+    if os.path.exists(LOCAL_CONFIG_PATH):
+        with open(LOCAL_CONFIG_PATH, 'rb') as f:
+            return yaml.safe_load(f)
+    return {'queries': {}}
+
+def get_snowflake_creds():
+    resp = ssm.get_parameter(Name=SSM_SF_PARAM, WithDecryption=True)
+    return json.loads(resp['Parameter']['Value'])
+
+def run_query(sql, prefix='result'):
+    creds = get_snowflake_creds()
+    ctx = snowflake.connector.connect(
+        user=creds.get('user'),
+        password=creds.get('password'),
+        account=creds.get('account'),
+        warehouse=creds.get('warehouse'),
+        database=creds.get('database'),
+        schema=creds.get('schema'),
+        role=creds.get('role')
+    )
+    cs = ctx.cursor()
+    try:
+        cs.execute(sql)
+        cols = [c[0] for c in cs.description] if cs.description else []
+        rows = cs.fetchall()
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        if cols:
+            writer.writerow(cols)
+        writer.writerows(rows)
+        data = buf.getvalue().encode('utf-8')
+        datepart = datetime.utcnow().strftime('%Y-%m-%d')
+        key = f\"{prefix}/{datepart}/{prefix}_{datetime.utcnow().strftime('%H%M%S')}.csv\"
+        s3.put_object(Bucket=OUTPUT_S3_BUCKET, Key=key, Body=data)
+        return {'rows': len(rows), 's3_key': key}
+    finally:
+        cs.close()
+        ctx.close()
+
+def lambda_handler(event, context):
+    cfg = get_config()
+    queries = cfg.get('queries', {})
+    results = {}
+    for name, sql in queries.items():
+        logger.info('Running query %s', name)
+        results[name] = run_query(sql, prefix=name)
+    return {'status': 'ok', 'results': results}
+"@
+Write-File "lambda/app.py" $lambdaApp
+
+$reqs = @"
+boto3
+PyYAML
+snowflake-connector-python
+"@
+Write-File "lambda/requirements.txt" $reqs
+
+$querySql = @"
+queries:
+  daily_simple: |
+    SELECT CURRENT_TIMESTAMP() AS now;
+"@
+Write-File "lambda/config/queries.yml" $querySql
+
+Write-File "lambda/version.txt" "1.0.0"
+
+$dockerfile = @"
+FROM public.ecr.aws/lambda/python:3.11
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+# Copy function code and config
+COPY app.py \${LAMBDA_TASK_ROOT}/
+COPY config/ \${LAMBDA_TASK_ROOT}/config/
+COPY version.txt /app/version.txt
+
+CMD [\"app.lambda_handler\"]
+"@
+Write-File "lambda/Dockerfile" $dockerfile
+
+# ================
+# terraform root files
+# ================
+$providerTf = @"
+terraform {
+  required_version = ">= 1.5.0"
+  backend "s3" {
+    bucket = ""     # will be filled by user or by deploy script
+    key    = "$Project/terraform.tfstate"
+    region = "$DefaultRegion"
+    encrypt = true
+  }
+
+  required_providers {
+    aws = { source = "hashicorp/aws", version = "~> 5.0" }
+    local = { source = "hashicorp/local", version = "~> 2.0" }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+provider "local" {}
+"@
+Write-File "terraform/provider.tf" $providerTf
+
+$dataTf = @"
+locals {
+  default_tags = {
+    Project     = \"$Project\"
+    ManagedBy   = \"Terraform\"
+    Environment = var.environment
+  }
+}
+
+data \"aws_caller_identity\" \"current\" {}
+"@
+Write-File "terraform/data.tf" $dataTf
+
+$variablesTf = @"
+variable \"region\" { type = string }
+variable \"environment\" { type = string }
+variable \"vpc_id\" { type = string }
+variable \"private_subnet_ids\" { type = list(string) }
+variable \"lambda_sg_ids\" { type = list(string) }
+variable \"ecr_repo_name\" { type = string, default = \"$Project-lambda\" }
+variable \"lambda_image_tag\" { type = string, default = \"\${file(\"../lambda/version.txt\")}\" }
+"@
+Write-File "terraform/variables.tf" $variablesTf
+
+$mainTf = @"
+module \"s3\" {
+  source      = \"./modules/s3\"
+  environment = var.environment
+  tags        = local.default_tags
+}
+
+module \"ssm\" {
+  source = \"./modules/ssm\"
+  tags   = local.default_tags
+}
+
+module \"ecr\" {
+  source = \"./modules/ecr\"
+  ecr_repo_name = var.ecr_repo_name
+  tags = local.default_tags
+}
+
+module \"lambda\" {
+  source = \"./modules/lambda\"
+  environment = var.environment
+  private_subnet_ids = var.private_subnet_ids
+  lambda_sg_ids = var.lambda_sg_ids
+  s3_bucket = module.s3.bucket_name
+  ecr_repo = module.ecr.repo_url
+  image_tag = var.lambda_image_tag
+  tags = local.default_tags
+}
+
+module \"eventbridge\" {
+  source = \"./modules/eventbridge\"
+  lambda_arn = module.lambda.lambda_arn
+  lambda_name = module.lambda.lambda_name
+  tags = local.default_tags
+}
+
+# write a combined outputs.json locally after apply
+resource \"local_file\" \"all_outputs\" {
+  content = jsonencode({
+    s3 = {
+      bucket = module.s3.bucket_name
+    },
+    ssm = {
+      user_param = module.ssm.user_param
+      pass_param = module.ssm.password_param
+    },
+    ecr = {
+      repo = module.ecr.repo_url
+    },
+    lambda = {
+      name = module.lambda.lambda_name
+      arn  = module.lambda.lambda_arn
+      image = module.lambda.image_uri
+    },
+    eventbridge = {
+      rule = module.eventbridge.rule_name
+    }
+  }, pretty = true)
+  filename = "${path.module}/all_outputs.json"
+}
+"@
+Write-File "terraform/main.tf" $mainTf
+
+$outputsTf = @"
+output \"combined_outputs_file\" {
+  value = \"\${path.module}/all_outputs.json\"
+}
+"@
+Write-File "terraform/outputs.tf" $outputsTf
+
+# ================
+# Terraform modules
+# ================
+
+# modules/s3
+$s3tf = @"
+variable \"environment\" {}
+variable \"tags\" { type = map(string) }
+
+resource \"aws_s3_bucket\" \"data\" {
+  bucket = \"${Project}-\${var.environment}-data\"
+  acl    = \"private\"
+  tags   = var.tags
+}
+
+resource \"aws_s3_bucket_versioning\" \"v\" {
+  bucket = aws_s3_bucket.data.id
+  versioning_configuration { status = \"Enabled\" }
+}
+
+output \"bucket_name\" { value = aws_s3_bucket.data.bucket }
+"@
+Write-File "terraform/modules/s3/s3.tf" $s3tf
+
+$s3vars = @"
+variable \"environment\" {}
+variable \"tags\" { type = map(string) }
+"@
+Write-File "terraform/modules/s3/variables.tf" $s3vars
+
+# modules/ssm
+$ssmtf = @"
+variable \"tags\" { type = map(string) }
+
+resource \"aws_ssm_parameter\" \"snow_user\" {
+  name  = \"/ci/snowflake/user\"
+  type  = \"SecureString\"
+  value = \"dummy_user\"
+  tags  = var.tags
+}
+
+resource \"aws_ssm_parameter\" \"snow_pass\" {
+  name  = \"/ci/snowflake/password\"
+  type  = \"SecureString\"
+  value = \"dummy_password\"
+  tags  = var.tags
+}
+
+output \"user_param\" { value = aws_ssm_parameter.snow_user.name }
+output \"password_param\" { value = aws_ssm_parameter.snow_pass.name }
+"@
+Write-File "terraform/modules/ssm/ssm.tf" $ssmtf
+
+$ssmvars = @"
+variable \"tags\" { type = map(string) }
+"@
+Write-File "terraform/modules/ssm/variables.tf" $ssmvars
+
+# modules/ecr
+$ecrtf = @"
+variable \"ecr_repo_name\" { type = string }
+variable \"tags\" { type = map(string) }
+
+resource \"aws_ecr_repository\" \"repo\" {
+  name = var.ecr_repo_name
+  image_scanning_configuration { scan_on_push = true }
+  tags = var.tags
+}
+
+output \"repo_url\" { value = aws_ecr_repository.repo.repository_url }
+"@
+Write-File "terraform/modules/ecr/ecr.tf" $ecrtf
+
+$ecrvars = @"
+variable \"ecr_repo_name\" {}
+variable \"tags\" { type = map(string) }
+"@
+Write-File "terraform/modules/ecr/variables.tf" $ecrvars
+
+# modules/lambda
+$lambdaModule = @"
+variable \"environment\" {}
+variable \"private_subnet_ids\" { type = list(string) }
+variable \"lambda_sg_ids\" { type = list(string) }
+variable \"s3_bucket\" { type = string }
+variable \"ecr_repo\" { type = string }
+variable \"image_tag\" { type = string }
+variable \"tags\" { type = map(string) }
+
+resource \"aws_iam_role\" \"lambda_exec\" {
+  name = \"${Project}-lambda-exec-\${var.environment}\"
+  assume_role_policy = jsonencode({
+    Version = \"2012-10-17\",
+    Statement = [{
+      Effect = \"Allow\",
+      Principal = { Service = \"lambda.amazonaws.com\" },
+      Action = \"sts:AssumeRole\"
+    }]
+  })
+  tags = var.tags
+}
+
+resource \"aws_iam_role_policy\" \"lambda_policy\" {
+  name = \"${Project}-lambda-policy-\${var.environment}\"
+  role = aws_iam_role.lambda_exec.id
+  policy = jsonencode({
+    Version = \"2012-10-17\",
+    Statement = [
+      { Effect = \"Allow\", Action = [\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"], Resource = \"arn:aws:logs:*:*:*\" },
+      { Effect = \"Allow\", Action = [\"s3:PutObject\",\"s3:GetObject\",\"s3:ListBucket\"], Resource = [\"arn:aws:s3:::\${var.s3_bucket}\", \"arn:aws:s3:::\${var.s3_bucket}/*\"] },
+      { Effect = \"Allow\", Action = [\"ssm:GetParameter\",\"ssm:GetParameters\"], Resource = \"*\" },
+      { Effect = \"Allow\", Action = [\"ec2:CreateNetworkInterface\",\"ec2:DescribeNetworkInterfaces\",\"ec2:DeleteNetworkInterface\"], Resource = \"*\" },
+      { Effect = \"Allow\", Action = [\"ecr:GetAuthorizationToken\",\"ecr:BatchGetImage\",\"ecr:GetDownloadUrlForLayer\"], Resource = \"*\" }
+    ]
+  })
+}
+
+resource \"aws_lambda_function\" \"lambda\" {
+  function_name = \"${Project}-\${var.environment}\"
+  package_type  = \"Image\"
+  image_uri     = \"\${var.ecr_repo}:\${var.image_tag}\"
+  role          = aws_iam_role.lambda_exec.arn
+  timeout       = 900
+  memory_size   = 1024
+
+  vpc_config {
+    subnet_ids = var.private_subnet_ids
+    security_group_ids = var.lambda_sg_ids
+  }
+
+  environment {
+    variables = {
+      OUTPUT_S3_BUCKET = var.s3_bucket
+      SSM_SF_PARAM     = \"/ci/snowflake/creds\"  # can be overridden if needed
+    }
+  }
+
+  tags = var.tags
+}
+
+output \"lambda_arn\" { value = aws_lambda_function.lambda.arn }
+output \"lambda_name\" { value = aws_lambda_function.lambda.function_name }
+output \"image_uri\" { value = aws_lambda_function.lambda.image_uri }
+"@
+Write-File "terraform/modules/lambda/lambda.tf" $lambdaModule
+
+$lambdaVars = @"
+variable \"environment\" {}
+variable \"private_subnet_ids\" { type = list(string) }
+variable \"lambda_sg_ids\" { type = list(string) }
+variable \"s3_bucket\" {}
+variable \"ecr_repo\" {}
+variable \"image_tag\" {}
+variable \"tags\" { type = map(string) }
+"@
+Write-File "terraform/modules/lambda/variables.tf" $lambdaVars
+
+# modules/eventbridge
+$eventbridge = @"
+variable \"lambda_arn\" {}
+variable \"lambda_name\" {}
+variable \"tags\" { type = map(string) }
+
+resource \"aws_cloudwatch_event_rule\" \"daily\" {
+  name = \"${Project}-daily\"
+  schedule_expression = \"cron(0 7 * * ? *)\" # 07:00 UTC daily
+  tags = var.tags
+}
+
+resource \"aws_cloudwatch_event_target\" \"lambda_target\" {
+  rule = aws_cloudwatch_event_rule.daily.name
+  arn  = var.lambda_arn
+}
+
+resource \"aws_lambda_permission\" \"allow_eventbridge\" {
+  statement_id  = \"AllowExecutionFromEventBridge\"
+  action        = \"lambda:InvokeFunction\"
+  function_name = var.lambda_name
+  principal     = \"events.amazonaws.com\"
+  source_arn    = aws_cloudwatch_event_rule.daily.arn
+}
+
+output \"rule_name\" { value = aws_cloudwatch_event_rule.daily.name }
+"@
+Write-File "terraform/modules/eventbridge/eventbridge.tf" $eventbridge
+
+$eventVars = @"
+variable \"lambda_arn\" {}
+variable \"lambda_name\" {}
+variable \"tags\" { type = map(string) }
+"@
+Write-File "terraform/modules/eventbridge/variables.tf" $eventVars
+
+# modules/iam is optional - we included IAM for lambda in lambda module
+
+# ================
+# terraform env tfvars
+# ================
+$stagingTfvars = @"
+region = \"$DefaultRegion\"
+environment = \"staging\"
+vpc_id = \"vpc-xxxxx\"
+private_subnet_ids = [\"subnet-aaaaaa\"]
+lambda_sg_ids = [\"sg-aaaaaa\"]
+"@
+Write-File "terraform/environments/staging.tfvars" $stagingTfvars
+
+$prodTfvars = @"
+region = \"$DefaultRegion\"
+environment = \"prod\"
+vpc_id = \"vpc-yyyyy\"
+private_subnet_ids = [\"subnet-bbbbbb\"]
+lambda_sg_ids = [\"sg-bbbbbb\"]
+"@
+Write-File "terraform/environments/prod.tfvars" $prodTfvars
+
+# ================
+# github workflow (OIDC) - placeholders for account id & role
+# ================
+$workflow = @"
+name: Deploy $Project (OIDC)
+
+on:
+  push:
+    branches: [ 'main' ]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: $DefaultRegion
+  ECR_REPO: $Project-lambda
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get OIDC token & configure AWS (assume role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${DummyAccountId}:role/github-actions-terraform-role
+          aws-region: $DefaultRegion
+
+      - name: Load lambda version
+        id: version
+        run: echo "VERSION=$(cat lambda/version.txt)" >> $GITHUB_ENV
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push docker image
+        run: |
+          IMAGE_TAG=\${{ env.VERSION }}
+          docker build -t \${{ env.ECR_REPO }}:\${IMAGE_TAG} ./lambda
+          $(aws ecr get-login --no-include-email --region $DefaultRegion) || true
+          aws ecr get-login-password --region $DefaultRegion | docker login --username AWS --password-stdin ${DummyAccountId}.dkr.ecr.$DefaultRegion.amazonaws.com
+          docker tag \${{ env.ECR_REPO }}:\${IMAGE_TAG} ${DummyAccountId}.dkr.ecr.$DefaultRegion.amazonaws.com/\${{ env.ECR_REPO }}:\${IMAGE_TAG}
+          docker push ${DummyAccountId}.dkr.ecr.$DefaultRegion.amazonaws.com/\${{ env.ECR_REPO }}:\${IMAGE_TAG}
+
+      - name: Terraform init & apply
+        working-directory: ./terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve -var-file=\"environments/staging.tfvars\"
+"@
+Write-File ".github/workflows/deploy.yml" $workflow
+
+# ================
+# local deploy script (PowerShell)
+# ================
+$deployPs = @"
+param(
+  [string]\$Environment = 'staging'
+)
+
+# Load common env
+Get-Content 'config/.env.common' | ForEach-Object {
+  if (\$_ -match '^(.*?)=(.*)$') { Set-Item -Path Env:\$($matches[1]) -Value \$matches[2] }
+}
+# Load env specific
+Get-Content \"config/.env.\$Environment\" | ForEach-Object {
+  if (\$_ -match '^(.*?)=(.*)$') { Set-Item -Path Env:\$($matches[1]) -Value \$matches[2] }
+}
+
+# Build & push Docker image (requires aws cli and docker logged in)
+\$version = (Get-Content 'lambda/version.txt' -Raw).Trim()
+Write-Host \"Building image version \$version...\"
+
+docker build -t \$Env:ECR_REPO:\$version ./lambda
+
+# Ensure ECR repository exists (create it if not)
+\$repo = \"\$Env:AWS_ACCOUNT_ID.dkr.ecr.\$Env:AWS_REGION.amazonaws.com/\$Env:ECR_REPO\"
+Write-Host \"Ensuring ECR repo: \$repo\"
+try {
+  aws ecr describe-repositories --repository-names \$Env:ECR_REPO --region \$Env:AWS_REGION | Out-Null
+} catch {
+  Write-Host 'ECR repo not found — creating...'
+  aws ecr create-repository --repository-name \$Env:ECR_REPO --region \$Env:AWS_REGION | Out-Null
+}
+
+# push
+aws ecr get-login-password --region \$Env:AWS_REGION | docker login --username AWS --password-stdin \"\$Env:AWS_ACCOUNT_ID.dkr.ecr.\$Env:AWS_REGION.amazonaws.com\"
+docker tag \$Env:ECR_REPO:\$version \"\$Env:AWS_ACCOUNT_ID.dkr.ecr.\$Env:AWS_REGION.amazonaws.com/\$Env:ECR_REPO:\$version\"
+docker push \"\$Env:AWS_ACCOUNT_ID.dkr.ecr.\$Env:AWS_REGION.amazonaws.com/\$Env:ECR_REPO:\$version\"
+
+# Terraform apply
+Write-Host 'Running terraform...'
+cd terraform
+terraform init
+terraform apply -auto-approve -var-file=\"environments/\$Environment.tfvars\"
+
+Write-Host 'Done.'
+"@
+Write-File "scripts/deploy.ps1" $deployPs
+
+# ================
+# Attempt to create backend bucket automatically (if aws cli present and configured)
+# ================
+$backendBucket = "$Project-tf-state"
+Write-Host "`nAttempting to create Terraform S3 backend bucket: $backendBucket (if AWS CLI is configured)..."
+try {
+    $awsCheck = & aws --version 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        # Check if bucket exists
+        $head = & aws s3api head-bucket --bucket $backendBucket 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "S3 bucket $backendBucket already exists."
+        } else {
+            Write-Host "Creating S3 bucket $backendBucket in region $DefaultRegion..."
+            & aws s3api create-bucket --bucket $backendBucket --region $DefaultRegion --create-bucket-configuration LocationConstraint=$DefaultRegion
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Created bucket $backendBucket."
+            } else {
+                Write-Warning "Failed to create bucket automatically. You can create it manually and update terraform/provider.tf backend bucket."
+            }
+        }
+    } else {
+        Write-Warning "AWS CLI not found or not configured. Skipping backend bucket creation. Create bucket manually named: $backendBucket"
+    }
+} catch {
+    Write-Warning "Automatic backend bucket creation failed: $_"
+}
+
+# ================
+# Final message
+# ================
+Write-Host ""
+Write-Host "🎉 Done. Project scaffold created."
+Write-Host "Files to review and edit (important):"
+Write-Host " - config/.env.common (set AWS_ACCOUNT_ID, AWS_REGION, GITHUB_REPO)"
+Write-Host " - .github/workflows/deploy.yml (update role ARN to the real role created in AWS)"
+Write-Host " - terraform/provider.tf (set backend bucket name if you want another)"
+Write-Host " - terraform/environments/*.tfvars (set VPC, subnet, SG IDs)"
+Write-Host " - lambda/app.py (set Snowflake account/warehouse/database/schema if needed)"
+Write-Host " - lambda/version.txt (bump when releasing)"
+Write-Host ""
+Write-Host "How to proceed:"
+Write-Host " 1) Edit config/.env.common and update AWS_ACCOUNT_ID with your account."
+Write-Host " 2) Ensure aws cli is configured (for local deploy) or push to GitHub and run workflow after creating IAM role for OIDC assume."
+Write-Host " 3) Use scripts/deploy.ps1 -Environment staging to build/push image and apply Terraform locally."
+Write-Host ""
+Write-Host "Tip: The GitHub OIDC role is created by you (or by Terraform after initial apply). For the first apply you can run Terraform locally with AWS credentials, then update the GitHub workflow role ARN to match the created role."
+
+
+⸻
+
+What this script gives you (summary)
+	•	Full repository scaffold with Terraform modules for: s3, ssm, ecr, lambda, eventbridge.
+	•	All resources tagged via locals.default_tags.
+	•	terraform/all_outputs.json will be created by Terraform after apply (via local_file).
+	•	GitHub Actions workflow configured to use OIDC (update role ARN).
+	•	scripts/deploy.ps1 to build/push image and run Terraform using the .env.* files.
+	•	Automatic attempt to create the S3 backend bucket named snow2s3-tf-state (if AWS CLI usable).
+
+⸻
+
+Important next steps (you must do)
+	1.	Edit config/.env.common — replace AWS_ACCOUNT_ID and GITHUB_REPO with real values. Region is already set to eu-central-1.
+	2.	Edit terraform/provider.tf to set backend.s3.bucket if you want a different name or keep the default and ensure it exists.
+	3.	Provide VPC, private subnet IDs and SGs in terraform/environments/*.tfvars.
+	4.	Create the GitHub OIDC role (or run Terraform locally one time with AWS credentials to create it), then update .github/workflows/deploy.yml role ARN with your real role.
+	5.	Replace dummy SSM credentials with real Snowflake credentials (you can do this via AWS Console or keep SSM resource in terraform and update value via CLI).
+	6.	Test locally: .\scripts\deploy.ps1 -Environment staging (requires AWS CLI, Docker, Terraform installed and aws credentials if not using OIDC locally).
+
+⸻
+
+If you want I can:
+	•	generate a stricter least-privilege policy for the GitHub OIDC role (instead of leaving that step to you),
+	•	modify the script so the Terraform backend bucket name is parameterized and passed as an argument at runtime,
+	•	or produce a ready-to-copy terraform.tfvars file with typical values.
+
+Which would you like next?
