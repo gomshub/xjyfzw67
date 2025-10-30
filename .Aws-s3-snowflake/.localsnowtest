@@ -1,0 +1,150 @@
+Perfect 👍 — you already have a complete AWS Lambda that:
+	1.	Reads Snowflake credentials from AWS SSM Parameter Store,
+	2.	Executes SQL queries from a YAML config,
+	3.	Writes results to S3 as CSV files.
+
+Now, you want to test this Lambda locally (from your laptop), without GitHub Actions or AWS resources (like SSM or S3) — only connecting to Snowflake.
+
+Let’s go through this step-by-step setup 👇
+
+⸻
+
+🧩 1. What You’ll Simulate Locally
+
+We’ll mock:
+	•	AWS SSM → local JSON file for Snowflake creds
+	•	AWS S3 → local folder instead of S3 bucket
+	•	Lambda handler invocation → local script
+
+You’ll still connect to Snowflake for real, but without AWS dependencies.
+
+⸻
+
+🧰 2. Create Local Test Files
+
+✅ a) local_creds.json
+
+Store your Snowflake credentials here (replace placeholders):
+
+{
+  "user": "YOUR_SNOWFLAKE_USER",
+  "password": "YOUR_SNOWFLAKE_PASSWORD",
+  "account": "YOUR_SNOWFLAKE_ACCOUNT",
+  "warehouse": "YOUR_SNOWFLAKE_WAREHOUSE",
+  "database": "YOUR_SNOWFLAKE_DATABASE",
+  "schema": "YOUR_SNOWFLAKE_SCHEMA",
+  "role": "YOUR_SNOWFLAKE_ROLE"
+}
+
+
+⸻
+
+✅ b) queries.yml
+
+Example SQLs for testing:
+
+queries:
+  sample_query: "SELECT CURRENT_VERSION()"
+  rowcount_query: "SELECT COUNT(*) AS total FROM YOUR_TABLE_NAME"
+
+
+⸻
+
+⚙️ 3. Modify Your Lambda for Local Testing Mode
+
+We’ll add a “local mode” switch to skip boto3 and use local mocks.
+
+Add these lines at the top of your script:
+
+IS_LOCAL = os.getenv('LOCAL_MODE', 'false').lower() == 'true'
+
+if IS_LOCAL:
+    class MockS3Client:
+        def put_object(self, Bucket, Key, Body):
+            local_path = f"./local_s3/{Key}"
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            with open(local_path, 'wb') as f:
+                f.write(Body)
+            print(f"[LOCAL S3] Saved file to {local_path}")
+
+    class MockSSMClient:
+        def get_parameter(self, Name, WithDecryption):
+            with open('local_creds.json', 'r') as f:
+                creds = json.load(f)
+            return {'Parameter': {'Value': json.dumps(creds)}}
+
+    s3 = MockS3Client()
+    ssm = MockSSMClient()
+    OUTPUT_S3_BUCKET = "local-test-bucket"
+    LOCAL_CONFIG_PATH = 'queries.yml'
+
+That’s it — if LOCAL_MODE=true, it’ll:
+	•	Read credentials from local_creds.json
+	•	Read queries from queries.yml
+	•	Save CSVs under ./local_s3/
+
+⸻
+
+🧪 4. Create a Local Test Runner
+
+test_local.py
+
+import os
+from lambda_function import lambda_handler
+
+# Enable local mode
+os.environ['LOCAL_MODE'] = 'true'
+
+# Call handler with dummy event/context
+event = {}
+context = {}
+
+result = lambda_handler(event, context)
+print("\n=== Lambda Result ===")
+print(result)
+
+
+⸻
+
+🚀 5. Run Locally
+
+Run these commands:
+
+pip install snowflake-connector-python pyyaml boto3
+python test_local.py
+
+Expected output:
+
+[LOCAL S3] Saved file to ./local_s3/sample_query/2025-10-30/sample_query_163012.csv
+=== Lambda Result ===
+{'status': 'ok', 'results': {'sample_query': {'rows': 1, 's3_key': 'sample_query/...'}}}
+
+
+⸻
+
+🧾 6. Local Folder Output
+
+After running:
+
+local_s3/
+  ├── sample_query/
+  │   └── 2025-10-30/
+  │       └── sample_query_163012.csv
+
+Each CSV file will have query results — exactly as it would appear in S3.
+
+⸻
+
+✅ Summary
+
+AWS Service	Local Equivalent
+SSM	local_creds.json
+S3	local_s3/ folder
+Lambda	python test_local.py
+Config file	queries.yml
+
+You can now test any SQL logic, error handling, or CSV formatting entirely offline, while still executing queries in Snowflake.
+
+⸻
+
+Would you like me to show you how to re-enable AWS SSM/S3 only when LOCAL_MODE is false, so you can use the same script both locally and in AWS Lambda?
