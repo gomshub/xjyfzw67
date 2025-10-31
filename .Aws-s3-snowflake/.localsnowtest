@@ -1,3 +1,191 @@
+
+Perfect — you want to test this Lambda end-to-end in a Docker container that simulates the Lambda runtime, connects directly to Snowflake, and avoids AWS resources (no SSM, no S3, no GitHub).
+
+Let’s set up a local Docker-based testing flow 💪
+
+⸻
+
+🧩 Overview
+
+You’ll:
+	1.	🐳 Build a Docker image that mimics Lambda’s Python runtime
+	2.	🧰 Inject local Snowflake creds and YAML queries
+	3.	🧠 Run your Lambda handler locally inside Docker
+	4.	📊 Save “S3 uploads” into a local folder
+
+⸻
+
+🗂 Folder structure
+
+lambda-snowflake-local/
+├── Dockerfile
+├── lambda_function.py       # your lambda code (modified for local mode)
+├── local_creds.json         # Snowflake credentials
+├── queries.yml              # test SQL queries
+├── test_local.py            # invokes lambda_handler
+└── local_s3/                # created automatically
+
+
+⸻
+
+🧰 1. Update lambda_function.py (add local mode)
+
+Add this block at the top before boto3 initialization:
+
+import os, json, io, csv, yaml, logging
+from datetime import datetime
+import snowflake.connector
+
+IS_LOCAL = os.getenv('LOCAL_MODE', 'false').lower() == 'true'
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+if IS_LOCAL:
+    class MockS3Client:
+        def put_object(self, Bucket, Key, Body):
+            local_path = f"./local_s3/{Key}"
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            with open(local_path, 'wb') as f:
+                f.write(Body)
+            print(f"[LOCAL S3] File saved at {local_path}")
+
+    class MockSSMClient:
+        def get_parameter(self, Name, WithDecryption):
+            with open('local_creds.json', 'r') as f:
+                creds = json.load(f)
+            return {'Parameter': {'Value': json.dumps(creds)}}
+
+    s3 = MockS3Client()
+    ssm = MockSSMClient()
+    OUTPUT_S3_BUCKET = "local-test-bucket"
+    LOCAL_CONFIG_PATH = 'queries.yml'
+else:
+    import boto3
+    s3 = boto3.client('s3')
+    ssm = boto3.client('ssm')
+    OUTPUT_S3_BUCKET = os.getenv('OUTPUT_S3_BUCKET')
+    SSM_SF_PARAM = os.getenv('SSM_SF_PARAM')
+    LOCAL_CONFIG_PATH = '/app/config/queries.yml'
+
+✅ This enables dual mode:
+	•	Local: uses JSON + folder
+	•	AWS: uses SSM + S3
+
+⸻
+
+🧩 2. test_local.py
+
+import os
+from lambda_function import lambda_handler
+
+os.environ['LOCAL_MODE'] = 'true'
+
+event = {}
+context = {}
+print("Running Lambda locally...")
+result = lambda_handler(event, context)
+print("\n=== Lambda Output ===")
+print(result)
+
+
+⸻
+
+🧩 3. local_creds.json
+
+{
+  "user": "YOUR_USER",
+  "password": "YOUR_PASSWORD",
+  "account": "YOUR_ACCOUNT",
+  "warehouse": "YOUR_WAREHOUSE",
+  "database": "YOUR_DATABASE",
+  "schema": "YOUR_SCHEMA",
+  "role": "YOUR_ROLE"
+}
+
+
+⸻
+
+🧩 4. queries.yml
+
+queries:
+  test_version: "SELECT CURRENT_VERSION()"
+
+
+⸻
+
+🧱 5. Dockerfile
+
+FROM public.ecr.aws/lambda/python:3.9
+
+# Set working dir
+WORKDIR /app
+
+# Copy all files
+COPY . .
+
+# Install dependencies
+RUN pip install --no-cache-dir snowflake-connector-python boto3 pyyaml
+
+# Set environment for local mode
+ENV LOCAL_MODE=true
+
+# Run the test
+CMD ["python", "test_local.py"]
+
+
+⸻
+
+🚀 6. Build and Run
+
+Build
+
+docker build -t lambda-snowflake-local .
+
+Run
+
+docker run --rm -it \
+    -e LOCAL_MODE=true \
+    -v $(pwd)/local_s3:/app/local_s3 \
+    lambda-snowflake-local
+
+💡 The -v mount ensures any “S3 output” CSVs appear on your host under local_s3/.
+
+⸻
+
+🧾 7. Expected Output
+
+Running Lambda locally...
+[LOCAL S3] File saved at ./local_s3/test_version/2025-10-30/test_version_162503.csv
+
+=== Lambda Output ===
+{'status': 'ok', 'results': {'test_version': {'rows': 1, 's3_key': 'test_version/2025-10-30/test_version_162503.csv'}}}
+
+Then you’ll see a file like:
+
+local_s3/test_version/2025-10-30/test_version_162503.csv
+
+with the query result inside.
+
+⸻
+
+✅ Summary
+
+Component	Local Substitute
+AWS SSM	local_creds.json
+AWS S3	local_s3/ mounted folder
+Lambda Runtime	Docker container
+Config YAML	queries.yml
+Event Input	test_local.py
+
+
+⸻
+
+Would you like me to modify the Dockerfile so you can mount your YAML, creds, and output dynamically (so you don’t rebuild the image every time)? It’s great for iterative testing.
+
+###
+
+
 Perfect 👍 — you already have a complete AWS Lambda that:
 	1.	Reads Snowflake credentials from AWS SSM Parameter Store,
 	2.	Executes SQL queries from a YAML config,
