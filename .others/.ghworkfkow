@@ -1,0 +1,172 @@
+Perfect ✅ — you want both workflows to pass the backend S3 configuration inline during terraform init, rather than relying on the backend block inside main.tf.
+
+Here’s your final, clean two-workflow setup 👇
+(Both use inline -backend-config arguments for bucket, key, region, etc.)
+
+⸻
+
+🧩 1️⃣ .github/workflows/terraform-plan.yml
+
+→ Auto-triggered on push (any branch)
+Runs init, validate, and plan with inline S3 backend config.
+
+name: Terraform Plan
+
+on:
+  push:
+    branches:
+      - "**"   # Run on push to any branch
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: 1.9.8
+  TF_IN_AUTOMATION: true
+  TF_BUCKET: my-terraform-backend-bucket
+  TF_REGION: eu-central-1
+  TF_DYNAMODB_TABLE: terraform-lock-table
+
+jobs:
+  plan:
+    name: Terraform Init, Validate & Plan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init (Inline Backend Config)
+        working-directory: terraform
+        run: |
+          echo "Initializing Terraform with inline backend config..."
+          terraform init \
+            -backend-config="bucket=${{ env.TF_BUCKET }}" \
+            -backend-config="key=plans/${{ github.ref_name }}/terraform.tfstate" \
+            -backend-config="region=${{ env.TF_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.TF_DYNAMODB_TABLE }}" \
+            -input=false
+
+          echo "---- Backend Configuration ----"
+          echo "Bucket:  ${{ env.TF_BUCKET }}"
+          echo "Key:     plans/${{ github.ref_name }}/terraform.tfstate"
+          echo "Region:  ${{ env.TF_REGION }}"
+          echo "Lock DB: ${{ env.TF_DYNAMODB_TABLE }}"
+          echo "--------------------------------"
+
+      - name: Terraform Validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: terraform plan
+
+
+⸻
+
+🧩 2️⃣ .github/workflows/terraform-apply.yml
+
+→ Manual trigger (workflow_dispatch)
+Runs init with inline backend config for selected environment, then applies automatically.
+
+name: Terraform Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment to apply"
+        required: true
+        type: choice
+        options: [dev, qa, prod]
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: 1.9.8
+  TF_IN_AUTOMATION: true
+  TF_BUCKET: my-terraform-backend-bucket
+  TF_REGION: eu-central-1
+  TF_DYNAMODB_TABLE: terraform-lock-table
+
+jobs:
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    env:
+      ENV: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init (Inline Backend Config)
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ env.TF_BUCKET }}" \
+            -backend-config="key=${{ env.ENV }}/terraform.tfstate" \
+            -backend-config="region=${{ env.TF_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.TF_DYNAMODB_TABLE }}" \
+            -input=false
+
+          echo "---- Backend Configuration ----"
+          echo "Bucket:  ${{ env.TF_BUCKET }}"
+          echo "Key:     ${{ env.ENV }}/terraform.tfstate"
+          echo "Region:  ${{ env.TF_REGION }}"
+          echo "Lock DB: ${{ env.TF_DYNAMODB_TABLE }}"
+          echo "--------------------------------"
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply -auto-approve -var-file=envs/${{ env.ENV }}.tfvars
+
+      - name: Show Final Terraform State
+        working-directory: terraform
+        run: |
+          echo "===== Final Terraform State Summary ====="
+          terraform state list || echo "No resources found."
+          echo "========================================="
+
+
+⸻
+
+🧠 Workflow Summary
+
+Workflow	Trigger	Purpose	Backend Key Example
+terraform-plan.yml	On every push	Runs init, validate, plan	plans/<branch>/terraform.tfstate
+terraform-apply.yml	Manually (workflow_dispatch)	Runs init, apply	<env>/terraform.tfstate
+
+
+⸻
+
+🧩 Optional Improvements
+
+✅ Store S3 backend details securely in repo or org secrets:
+
+env:
+  TF_BUCKET: ${{ secrets.TF_BACKEND_BUCKET }}
+  TF_REGION: ${{ secrets.TF_BACKEND_REGION }}
+  TF_DYNAMODB_TABLE: ${{ secrets.TF_BACKEND_LOCK_TABLE }}
+
+✅ Restrict manual apply to admins:
+
+if: github.actor == 'your-github-username'
+
+✅ Support per-environment var-file (already included in apply job).
+
+⸻
+
+Would you like me to extend the terraform-plan.yml to show a summarized plan output (like resource changes count and what will be added/changed/destroyed)?
