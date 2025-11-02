@@ -1,1 +1,0 @@
-sftp -o UserKnownHostsFile=/path/to/your/directory/known_hosts username@hostname

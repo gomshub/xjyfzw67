@@ -1,7 +1,0 @@
-Skip recent updated log file alone and zip other files with name server_*.log using find 
-
-# Step 1: Find the most recent log file
-recent_file=$(find . -type f -name "server_*.log" -exec stat --format='%Y %n' {} + | sort -nr | head -1 | awk '{print $2}')
-
-# Step 2: Zip other files excluding the most recent one
-find . -type f -name "server_*.log" ! -path "$recent_file" -exec zip logs.zip {} +
