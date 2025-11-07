@@ -1,0 +1,504 @@
+Perfect — you want SQL queries themselves to be stored in AWS Systems Manager (SSM) Parameter Store, so that:
+	•	You can easily update or version them without changing your Terraform or container code, and
+	•	Each scheduled task can dynamically fetch the right query by name.
+
+That’s a very clean, modular design — I’ll show you how to add this properly into your existing Fargate + Step Functions + EventBridge architecture.
+
+⸻
+
+✅ Updated Design Overview
+
+Flow
+	1.	SSM Parameter Store → stores SQL text (one parameter per query).
+	2.	Secrets Manager → stores Snowflake credentials (account/user/password).
+	3.	Step Functions → triggered by EventBridge, passes the SSM parameter name (like /snowflake/queries/daily_sales) to ECS.
+	4.	ECS Fargate Task → fetches:
+	•	SQL query from SSM.
+	•	Credentials from Secrets Manager.
+	•	Executes Snowflake query.
+	•	Pushes result to S3.
+
+This way, you can:
+	•	Add new queries by adding new SSM parameters only (no Terraform redeploy needed).
+	•	Schedule each query independently with its own EventBridge rule.
+
+⸻
+
+🧠 Example Directory Structure
+
+terraform/
+│
+├── sql/
+│   ├── daily_sales.sql
+│   ├── monthly_summary.sql
+│   └── top_customers.sql
+│
+├── main.tf
+├── ssm_queries.tf
+├── secrets.tf
+└── variables.tf
+
+
+⸻
+
+🗂️ ssm_queries.tf – Store SQL Queries in SSM
+
+Here’s how you can define SQL queries as parameters (one per file):
+
+# Path prefix for SSM parameters
+variable "ssm_queries_prefix" {
+  type    = string
+  default = "/snowflake/queries/"
+}
+
+# Upload individual SQL queries from local files
+resource "aws_ssm_parameter" "daily_sales" {
+  name  = "${var.ssm_queries_prefix}daily_sales"
+  type  = "String"
+  value = file("${path.module}/sql/daily_sales.sql")
+  tags  = { purpose = "snowflake-query" }
+}
+
+resource "aws_ssm_parameter" "monthly_summary" {
+  name  = "${var.ssm_queries_prefix}monthly_summary"
+  type  = "String"
+  value = file("${path.module}/sql/monthly_summary.sql")
+  tags  = { purpose = "snowflake-query" }
+}
+
+resource "aws_ssm_parameter" "top_customers" {
+  name  = "${var.ssm_queries_prefix}top_customers"
+  type  = "String"
+  value = file("${path.module}/sql/top_customers.sql")
+  tags  = { purpose = "snowflake-query" }
+}
+
+output "ssm_query_params" {
+  value = [
+    aws_ssm_parameter.daily_sales.name,
+    aws_ssm_parameter.monthly_summary.name,
+    aws_ssm_parameter.top_customers.name
+  ]
+}
+
+
+⸻
+
+📦 Example SQL Files (sql/)
+
+sql/daily_sales.sql
+
+SELECT
+  order_date,
+  SUM(total_amount) AS total_sales,
+  COUNT(*) AS num_orders
+FROM orders
+WHERE order_date = CURRENT_DATE()
+GROUP BY order_date;
+
+sql/monthly_summary.sql
+
+SELECT
+  DATE_TRUNC('month', order_date) AS month,
+  SUM(total_amount) AS total_sales
+FROM orders
+GROUP BY month
+ORDER BY month;
+
+sql/top_customers.sql
+
+SELECT
+  customer_id,
+  SUM(total_amount) AS lifetime_value
+FROM orders
+GROUP BY customer_id
+ORDER BY lifetime_value DESC
+LIMIT 10;
+
+
+⸻
+
+🔄 Scheduling Each Query
+
+Each EventBridge rule can start the same Step Function with a different input (different SSM parameter path).
+
+Example in Terraform:
+
+# One schedule per query
+resource "aws_cloudwatch_event_rule" "daily_sales_schedule" {
+  name                = "daily-sales-query-schedule"
+  schedule_expression = "cron(0 2 * * ? *)" # every day at 2AM UTC
+}
+
+resource "aws_cloudwatch_event_rule" "monthly_summary_schedule" {
+  name                = "monthly-summary-query-schedule"
+  schedule_expression = "cron(0 3 1 * ? *)" # 1st of every month
+}
+
+resource "aws_cloudwatch_event_rule" "top_customers_schedule" {
+  name                = "top-customers-query-schedule"
+  schedule_expression = "cron(0 4 * * ? *)" # every day at 4AM UTC
+}
+
+# Common IAM role allowing EventBridge -> Step Functions
+resource "aws_iam_role" "eb_to_sfn" {
+  name = "eventbridge-to-sfn-role"
+  assume_role_policy = data.aws_iam_policy_document.eb_assume.json
+}
+
+data "aws_iam_policy_document" "eb_assume" {
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+resource "aws_iam_role_policy" "eb_start_sfn" {
+  name = "eventbridge-start-sfn"
+  role = aws_iam_role.eb_to_sfn.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Action = ["states:StartExecution"],
+      Resource = aws_sfn_state_machine.run_snow_query.arn
+    }]
+  })
+}
+
+# Target Step Function executions (per query)
+resource "aws_cloudwatch_event_target" "daily_sales_target" {
+  rule      = aws_cloudwatch_event_rule.daily_sales_schedule.name
+  target_id = "StartDailySales"
+  arn       = aws_sfn_state_machine.run_snow_query.arn
+  role_arn  = aws_iam_role.eb_to_sfn.arn
+  input = jsonencode({
+    run_id            = "daily_sales_${timestamp()}"
+    query_param_name  = "/snowflake/queries/daily_sales"
+  })
+}
+
+resource "aws_cloudwatch_event_target" "monthly_summary_target" {
+  rule      = aws_cloudwatch_event_rule.monthly_summary_schedule.name
+  target_id = "StartMonthlySummary"
+  arn       = aws_sfn_state_machine.run_snow_query.arn
+  role_arn  = aws_iam_role.eb_to_sfn.arn
+  input = jsonencode({
+    run_id            = "monthly_summary_${timestamp()}"
+    query_param_name  = "/snowflake/queries/monthly_summary"
+  })
+}
+
+resource "aws_cloudwatch_event_target" "top_customers_target" {
+  rule      = aws_cloudwatch_event_rule.top_customers_schedule.name
+  target_id = "StartTopCustomers"
+  arn       = aws_sfn_state_machine.run_snow_query.arn
+  role_arn  = aws_iam_role.eb_to_sfn.arn
+  input = jsonencode({
+    run_id            = "top_customers_${timestamp()}"
+    query_param_name  = "/snowflake/queries/top_customers"
+  })
+}
+
+
+⸻
+
+🧰 What Happens at Runtime
+	•	Step Function Input Example
+
+{
+  "run_id": "daily_sales_20251107T020000Z",
+  "query_param_name": "/snowflake/queries/daily_sales"
+}
+
+
+	•	Container Environment Variables
+
+SECRETS_NAME=snowflake/credentials
+SSM_QUERIES_PREFIX=/snowflake/queries/
+QUERY_PARAM_PATH=/snowflake/queries/daily_sales
+RESULTS_BUCKET=my-snowflake-results
+RUN_ID=daily_sales_20251107T020000Z
+
+
+	•	Inside your Fargate container:
+	•	Fetch credentials from Secrets Manager.
+	•	Fetch query text from SSM Parameter Store.
+	•	Execute Snowflake query.
+	•	Write to s3://my-snowflake-results/daily_sales_20251107T020000Z/results.csv.
+
+⸻
+
+✅ Benefits of This Setup
+
+Feature	Description
+🔐 Secure	Credentials never hardcoded; stored in Secrets Manager.
+⚙️ Configurable	Queries stored and versioned in SSM, easily updatable.
+⏰ Flexible Scheduling	Each query has its own EventBridge cron/rate expression.
+💰 Cost Efficient	Step Functions only orchestrates; Fargate runs per query (pay-per-use).
+🧩 Scalable	Add new queries just by adding new SSM parameters + schedule rules.
+
+
+⸻
+
+Would you like me to add:
+	•	A Python container script (and Dockerfile) that reads the SSM query and Secrets Manager credentials and executes the Snowflake query (via PrivateLink), then uploads to S3?
+That would complete the whole working chain end-to-end.
+
+
+==
+
+Perfect — you want SQL queries themselves to be stored in AWS Systems Manager (SSM) Parameter Store, so that:
+	•	You can easily update or version them without changing your Terraform or container code, and
+	•	Each scheduled task can dynamically fetch the right query by name.
+
+That’s a very clean, modular design — I’ll show you how to add this properly into your existing Fargate + Step Functions + EventBridge architecture.
+
+⸻
+
+✅ Updated Design Overview
+
+Flow
+	1.	SSM Parameter Store → stores SQL text (one parameter per query).
+	2.	Secrets Manager → stores Snowflake credentials (account/user/password).
+	3.	Step Functions → triggered by EventBridge, passes the SSM parameter name (like /snowflake/queries/daily_sales) to ECS.
+	4.	ECS Fargate Task → fetches:
+	•	SQL query from SSM.
+	•	Credentials from Secrets Manager.
+	•	Executes Snowflake query.
+	•	Pushes result to S3.
+
+This way, you can:
+	•	Add new queries by adding new SSM parameters only (no Terraform redeploy needed).
+	•	Schedule each query independently with its own EventBridge rule.
+
+⸻
+
+🧠 Example Directory Structure
+
+terraform/
+│
+├── sql/
+│   ├── daily_sales.sql
+│   ├── monthly_summary.sql
+│   └── top_customers.sql
+│
+├── main.tf
+├── ssm_queries.tf
+├── secrets.tf
+└── variables.tf
+
+
+⸻
+
+🗂️ ssm_queries.tf – Store SQL Queries in SSM
+
+Here’s how you can define SQL queries as parameters (one per file):
+
+# Path prefix for SSM parameters
+variable "ssm_queries_prefix" {
+  type    = string
+  default = "/snowflake/queries/"
+}
+
+# Upload individual SQL queries from local files
+resource "aws_ssm_parameter" "daily_sales" {
+  name  = "${var.ssm_queries_prefix}daily_sales"
+  type  = "String"
+  value = file("${path.module}/sql/daily_sales.sql")
+  tags  = { purpose = "snowflake-query" }
+}
+
+resource "aws_ssm_parameter" "monthly_summary" {
+  name  = "${var.ssm_queries_prefix}monthly_summary"
+  type  = "String"
+  value = file("${path.module}/sql/monthly_summary.sql")
+  tags  = { purpose = "snowflake-query" }
+}
+
+resource "aws_ssm_parameter" "top_customers" {
+  name  = "${var.ssm_queries_prefix}top_customers"
+  type  = "String"
+  value = file("${path.module}/sql/top_customers.sql")
+  tags  = { purpose = "snowflake-query" }
+}
+
+output "ssm_query_params" {
+  value = [
+    aws_ssm_parameter.daily_sales.name,
+    aws_ssm_parameter.monthly_summary.name,
+    aws_ssm_parameter.top_customers.name
+  ]
+}
+
+
+⸻
+
+📦 Example SQL Files (sql/)
+
+sql/daily_sales.sql
+
+SELECT
+  order_date,
+  SUM(total_amount) AS total_sales,
+  COUNT(*) AS num_orders
+FROM orders
+WHERE order_date = CURRENT_DATE()
+GROUP BY order_date;
+
+sql/monthly_summary.sql
+
+SELECT
+  DATE_TRUNC('month', order_date) AS month,
+  SUM(total_amount) AS total_sales
+FROM orders
+GROUP BY month
+ORDER BY month;
+
+sql/top_customers.sql
+
+SELECT
+  customer_id,
+  SUM(total_amount) AS lifetime_value
+FROM orders
+GROUP BY customer_id
+ORDER BY lifetime_value DESC
+LIMIT 10;
+
+
+⸻
+
+🔄 Scheduling Each Query
+
+Each EventBridge rule can start the same Step Function with a different input (different SSM parameter path).
+
+Example in Terraform:
+
+# One schedule per query
+resource "aws_cloudwatch_event_rule" "daily_sales_schedule" {
+  name                = "daily-sales-query-schedule"
+  schedule_expression = "cron(0 2 * * ? *)" # every day at 2AM UTC
+}
+
+resource "aws_cloudwatch_event_rule" "monthly_summary_schedule" {
+  name                = "monthly-summary-query-schedule"
+  schedule_expression = "cron(0 3 1 * ? *)" # 1st of every month
+}
+
+resource "aws_cloudwatch_event_rule" "top_customers_schedule" {
+  name                = "top-customers-query-schedule"
+  schedule_expression = "cron(0 4 * * ? *)" # every day at 4AM UTC
+}
+
+# Common IAM role allowing EventBridge -> Step Functions
+resource "aws_iam_role" "eb_to_sfn" {
+  name = "eventbridge-to-sfn-role"
+  assume_role_policy = data.aws_iam_policy_document.eb_assume.json
+}
+
+data "aws_iam_policy_document" "eb_assume" {
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+resource "aws_iam_role_policy" "eb_start_sfn" {
+  name = "eventbridge-start-sfn"
+  role = aws_iam_role.eb_to_sfn.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Action = ["states:StartExecution"],
+      Resource = aws_sfn_state_machine.run_snow_query.arn
+    }]
+  })
+}
+
+# Target Step Function executions (per query)
+resource "aws_cloudwatch_event_target" "daily_sales_target" {
+  rule      = aws_cloudwatch_event_rule.daily_sales_schedule.name
+  target_id = "StartDailySales"
+  arn       = aws_sfn_state_machine.run_snow_query.arn
+  role_arn  = aws_iam_role.eb_to_sfn.arn
+  input = jsonencode({
+    run_id            = "daily_sales_${timestamp()}"
+    query_param_name  = "/snowflake/queries/daily_sales"
+  })
+}
+
+resource "aws_cloudwatch_event_target" "monthly_summary_target" {
+  rule      = aws_cloudwatch_event_rule.monthly_summary_schedule.name
+  target_id = "StartMonthlySummary"
+  arn       = aws_sfn_state_machine.run_snow_query.arn
+  role_arn  = aws_iam_role.eb_to_sfn.arn
+  input = jsonencode({
+    run_id            = "monthly_summary_${timestamp()}"
+    query_param_name  = "/snowflake/queries/monthly_summary"
+  })
+}
+
+resource "aws_cloudwatch_event_target" "top_customers_target" {
+  rule      = aws_cloudwatch_event_rule.top_customers_schedule.name
+  target_id = "StartTopCustomers"
+  arn       = aws_sfn_state_machine.run_snow_query.arn
+  role_arn  = aws_iam_role.eb_to_sfn.arn
+  input = jsonencode({
+    run_id            = "top_customers_${timestamp()}"
+    query_param_name  = "/snowflake/queries/top_customers"
+  })
+}
+
+
+⸻
+
+🧰 What Happens at Runtime
+	•	Step Function Input Example
+
+{
+  "run_id": "daily_sales_20251107T020000Z",
+  "query_param_name": "/snowflake/queries/daily_sales"
+}
+
+
+	•	Container Environment Variables
+
+SECRETS_NAME=snowflake/credentials
+SSM_QUERIES_PREFIX=/snowflake/queries/
+QUERY_PARAM_PATH=/snowflake/queries/daily_sales
+RESULTS_BUCKET=my-snowflake-results
+RUN_ID=daily_sales_20251107T020000Z
+
+
+	•	Inside your Fargate container:
+	•	Fetch credentials from Secrets Manager.
+	•	Fetch query text from SSM Parameter Store.
+	•	Execute Snowflake query.
+	•	Write to s3://my-snowflake-results/daily_sales_20251107T020000Z/results.csv.
+
+⸻
+
+✅ Benefits of This Setup
+
+Feature	Description
+🔐 Secure	Credentials never hardcoded; stored in Secrets Manager.
+⚙️ Configurable	Queries stored and versioned in SSM, easily updatable.
+⏰ Flexible Scheduling	Each query has its own EventBridge cron/rate expression.
+💰 Cost Efficient	Step Functions only orchestrates; Fargate runs per query (pay-per-use).
+🧩 Scalable	Add new queries just by adding new SSM parameters + schedule rules.
+
+
+⸻
+
+Would you like me to add:
+	•	A Python container script (and Dockerfile) that reads the SSM query and Secrets Manager credentials and executes the Snowflake query (via PrivateLink), then uploads to S3?
+That would complete the whole working chain end-to-end.
