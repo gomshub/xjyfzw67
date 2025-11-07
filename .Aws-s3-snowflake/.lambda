@@ -1,0 +1,91 @@
+Exactly — great questions 👇
+
+⸻
+
+✅ 1. “Short queries” = query execution duration
+
+Yes — when I said short queries, I meant the total execution time of the Snowflake SQL query itself, not the Lambda runtime.
+
+In practice, what matters is:
+	•	⏱️ How long Snowflake takes to execute and return the result
+	•	📦 How large the result set is (because large data transfer → longer Lambda runtime + more memory usage)
+
+Lambda timeout limit = 15 minutes, so:
+	•	If the query finishes + S3 upload completes within ~10–12 minutes → ✅ fine for Lambda.
+	•	If queries sometimes take >15 minutes → ❌ you’ll risk timeout → should move to ECS Fargate or use async query polling.
+
+⸻
+
+✅ 2. Storing Snowflake credentials and queries in SSM
+
+That’s a solid and secure design choice.
+
+You can store them in AWS Systems Manager Parameter Store (SSM) or AWS Secrets Manager, depending on your needs:
+
+Item	Recommended Store	Notes
+Snowflake credentials (user, password/private key, account, role, warehouse, DB, schema)	Secrets Manager	Supports encryption, automatic rotation, and policy-based access
+SQL queries or query metadata	SSM Parameter Store	Easy to read via AWS SDK; you can version, tag, or prefix them for each schedule (e.g. /snowflake/query/daily_sales)
+
+In Lambda or Fargate:
+	•	Fetch secrets at runtime (AWS SDK call)
+	•	Establish secure Snowflake connection via PrivateLink
+	•	Execute query and push results to S3
+
+⸻
+
+✅ Example setup (Lambda-based)
+
+import boto3
+import snowflake.connector
+import os
+import pandas as pd
+
+ssm = boto3.client('ssm')
+secrets = boto3.client('secretsmanager')
+
+# Fetch Snowflake credentials from Secrets Manager
+secret_value = secrets.get_secret_value(SecretId="snowflake/credentials")
+creds = json.loads(secret_value['SecretString'])
+
+# Fetch SQL query from SSM
+query = ssm.get_parameter(Name="/snowflake/query/daily_sales", WithDecryption=True)['Parameter']['Value']
+
+# Connect to Snowflake via PrivateLink
+conn = snowflake.connector.connect(
+    account=creds['account'],
+    user=creds['user'],
+    password=creds['password'],
+    warehouse=creds['warehouse'],
+    database=creds['database'],
+    schema=creds['schema']
+)
+
+# Execute query
+df = pd.read_sql(query, conn)
+
+# Write to S3
+s3 = boto3.client('s3')
+csv_buffer = io.StringIO()
+df.to_csv(csv_buffer, index=False)
+s3.put_object(Bucket="my-snowflake-exports", Key="daily/sales.csv", Body=csv_buffer.getvalue())
+
+
+⸻
+
+✅ Bonus Tip: Organize your queries
+
+For easy maintenance:
+
+/snowflake/query/daily_sales
+/snowflake/query/monthly_summary
+/snowflake/query/customer_snapshot
+
+Then use EventBridge rules with targets like:
+	•	lambda-daily-sales
+	•	lambda-monthly-summary
+
+Each Lambda just knows which SSM parameter to fetch.
+
+⸻
+
+Would you like me to show how to define this full setup (Lambda + PrivateLink + SSM/Secrets + EventBridge + S3) in Terraform next — including the cost optimization notes (e.g., concurrency control and parallel runs)?
