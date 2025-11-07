@@ -1,0 +1,292 @@
+Perfect — let’s build you a complete, Kubernetes-ready MCP + Bedrock Chat Module
+with a toggle to enable or disable AWS Bedrock integration.
+
+Below is one unified module that you can directly use — everything included (code, Dockerfile, YAML, README).
+
+⸻
+
+🧩 MCP + Bedrock Chat Module
+
+This module lets your Streamlit MCP chat UI talk to your MCP server (deployed in Kubernetes).
+Optionally, you can enable AWS Bedrock LLM integration inside the MCP server to let users chat via Bedrock models (like Claude).
+
+⸻
+
+📁 Folder Structure
+
+mcp_chat_bedrock_module/
+│
+├── mcp_server/
+│   └── server.py
+│
+├── mcp_chat_ui.py
+├── Dockerfile
+├── kube-mcp-chat.yaml
+├── .dockerignore
+└── README.md
+
+
+⸻
+
+🧠 1. MCP Server (mcp_server/server.py)
+
+import os
+import json
+import boto3
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "https://mcp-server.intg/mcp")
+ENABLE_BEDROCK = os.getenv("ENABLE_BEDROCK", "false").lower() == "true"
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+
+if ENABLE_BEDROCK:
+    print("✅ Bedrock LLM integration enabled.")
+    bedrock_client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+else:
+    bedrock_client = None
+    print("⚙️  Bedrock LLM integration disabled. Running in standard MCP mode.")
+
+
+@app.route("/mcp", methods=["POST"])
+def handle_mcp():
+    data = request.json
+    tool = data.get("tool", "default")
+    message = data.get("message", "")
+
+    if tool == "bedrock-llm":
+        if not ENABLE_BEDROCK:
+            return jsonify({"error": "Bedrock integration disabled"}), 400
+
+        try:
+            body = json.dumps({
+                "messages": [
+                    {"role": "user", "content": message}
+                ],
+                "max_tokens": 512
+            })
+            response = bedrock_client.invoke_model(
+                modelId=os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-v2"),
+                body=body,
+                contentType="application/json"
+            )
+            output = response["body"].read().decode("utf-8")
+            return jsonify({"response": output})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    else:
+        # Default MCP response
+        return jsonify({"response": f"MCP server received: {message} via tool {tool}"})
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000)
+
+
+⸻
+
+💬 2. Streamlit Chat UI (mcp_chat_ui.py)
+
+import os
+import streamlit as st
+import requests
+
+st.set_page_config(page_title="MCP Chat Client", layout="wide")
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://mcp-server:8000/mcp")
+
+st.title("💬 MCP Chat Client")
+
+tool = st.selectbox("Select MCP Tool", ["default", "bedrock-llm"])
+user_input = st.text_area("Enter message", "")
+
+if st.button("Send"):
+    if not user_input.strip():
+        st.warning("Please enter a message")
+    else:
+        payload = {"tool": tool, "message": user_input}
+        try:
+            res = requests.post(MCP_SERVER_URL, json=payload, timeout=30)
+            if res.status_code == 200:
+                st.success(res.json().get("response"))
+            else:
+                st.error(f"Error {res.status_code}: {res.text}")
+        except Exception as e:
+            st.error(f"Connection error: {e}")
+
+
+⸻
+
+🐳 3. Dockerfile (Multi-Service Image)
+
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY mcp_server /app/mcp_server
+COPY mcp_chat_ui.py /app/mcp_chat_ui.py
+
+RUN pip install --no-cache-dir flask boto3 streamlit requests
+
+ENV ENABLE_BEDROCK=false
+ENV AWS_REGION=us-east-1
+ENV MCP_SERVER_URL=http://localhost:8000/mcp
+
+EXPOSE 8000 8501
+
+CMD ["bash", "-c", "python3 mcp_server/server.py & streamlit run mcp_chat_ui.py --server.port=8501 --server.address=0.0.0.0"]
+
+
+⸻
+
+📦 4. .dockerignore
+
+__pycache__/
+*.pyc
+*.log
+*.tmp
+*.zip
+*.tar
+
+
+⸻
+
+☸️ 5. Kubernetes Deployment (kube-mcp-chat.yaml)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-chat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-chat
+  template:
+    metadata:
+      labels:
+        app: mcp-chat
+    spec:
+      serviceAccountName: mcp-chat-sa  # Use IRSA if Bedrock enabled
+      containers:
+      - name: mcp-chat
+        image: yourrepo/mcp-chat:latest
+        ports:
+        - containerPort: 8501
+        - containerPort: 8000
+        env:
+        - name: ENABLE_BEDROCK
+          value: "true"  # toggle here
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: BEDROCK_MODEL_ID
+          value: "anthropic.claude-v2"
+        - name: MCP_SERVER_URL
+          value: "http://localhost:8000/mcp"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-chat-service
+spec:
+  selector:
+    app: mcp-chat
+  ports:
+  - name: ui
+    port: 8501
+    targetPort: 8501
+  - name: mcp
+    port: 8000
+    targetPort: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mcp-chat-ingress
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: mcp-chat.intg.company.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: mcp-chat-service
+            port:
+              number: 8501
+
+
+⸻
+
+📘 6. README.md
+
+# MCP + Bedrock Chat Module (Kubernetes Compatible)
+
+## 🚀 Features
+- Simple MCP server & Streamlit UI
+- Optional AWS Bedrock LLM integration (Claude, Titan, etc.)
+- One container runs both services
+- Deployable on Kubernetes
+
+---
+
+## 🧩 Environment Variables
+| Variable | Default | Description |
+|-----------|----------|-------------|
+| ENABLE_BEDROCK | false | Enable Bedrock integration |
+| BEDROCK_MODEL_ID | anthropic.claude-v2 | Bedrock model ID |
+| AWS_REGION | us-east-1 | Region for Bedrock API |
+| MCP_SERVER_URL | http://localhost:8000/mcp | Internal MCP endpoint |
+
+---
+
+## 🐳 Docker Build & Run
+
+```bash
+docker build -t yourrepo/mcp-chat:latest .
+docker run -p 8501:8501 -p 8000:8000 -e ENABLE_BEDROCK=true yourrepo/mcp-chat:latest
+
+Then open: http://localhost:8501￼
+
+⸻
+
+☸️ Deploy to Kubernetes
+
+kubectl apply -f kube-mcp-chat.yaml
+
+If Bedrock is enabled:
+	•	Ensure IAM Role / IRSA for Bedrock permissions (bedrock:InvokeModel).
+
+⸻
+
+✅ Test Bedrock
+
+Set ENABLE_BEDROCK=true in deployment and select bedrock-llm from the UI tool dropdown.
+
+---
+
+## 🔐 Notes for EKS Integration
+
+- If Bedrock integration is **enabled**, attach an **IAM Role** with:
+  ```json
+  {
+    "Effect": "Allow",
+    "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+    "Resource": "*"
+  }
+
+	•	Use IRSA for secure credential injection.
+	•	You can scale replicas or separate UI and MCP servers if needed.
+
+⸻
+
+Would you like me to generate this module as a ZIP file (ready to download and deploy)?
+I can package and give you /mnt/data/mcp_bedrock_chat_module.zip.
