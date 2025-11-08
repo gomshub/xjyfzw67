@@ -1,3 +1,167 @@
+
+Perfect! Here’s the final, fully hands-off setup including automatic Prefect work pool creation, integrated directly into the GitHub Actions workflow and Python deployment script. This makes the entire flow push-to-run: infra → Docker → Prefect pools → deployments → scheduled execution.
+
+⸻
+
+1️⃣ Modified generate_deployments.py (Python)
+
+"""
+Generate Prefect deployments from queries.yaml, apply them,
+and ensure work pools exist automatically.
+"""
+
+import yaml
+import subprocess
+import os
+import json
+
+# ----------------------
+# Step 0: Ensure work pools exist
+# ----------------------
+def ensure_pool(pool_name, pool_type="process"):
+    try:
+        result = subprocess.run(
+            ["prefect", "work-pool", "ls", "--json"],
+            capture_output=True, text=True
+        )
+        pools = json.loads(result.stdout)
+        names = [p["name"] for p in pools]
+
+        if pool_name not in names:
+            print(f"Creating work pool: {pool_name}")
+            subprocess.run(["prefect", "work-pool", "create", pool_name, "--type", pool_type], check=True)
+        else:
+            print(f"Work pool {pool_name} already exists.")
+    except Exception as e:
+        print(f"Error checking/creating work pool {pool_name}: {e}")
+
+# Ensure Lambda and ECS pools exist
+ensure_pool("lambda-pool")
+ensure_pool("ecs-pool")
+
+# ----------------------
+# Step 1: Read queries.yaml
+# ----------------------
+with open("queries.yaml") as f:
+    queries = yaml.safe_load(f)["queries"]
+
+# ----------------------
+# Step 2: Generate deployments
+# ----------------------
+for q in queries:
+    pool = f"{q['target']}-pool"
+    cmd = [
+        "prefect", "deployment", "build",
+        "flow.py:snowflake_to_s3_flow",
+        "-n", q["name"],
+        "--cron", q["schedule"],
+        "--work-pool", pool,
+        "--params",
+        f'{{"query_param": "{q["ssm_param"]}", "bucket": "{q["bucket"]}", "key": "{q["key"]}"}}'
+    ]
+    print(f"Generating deployment for {q['name']} with pool {pool}")
+    subprocess.run(cmd, check=True)
+
+# ----------------------
+# Step 3: Apply deployments
+# ----------------------
+for file in os.listdir("."):
+    if file.endswith(".yaml") and "deployment" in file:
+        print(f"Applying deployment {file}")
+        subprocess.run(["prefect", "deployment", "apply", file], check=True)
+
+
+⸻
+
+2️⃣ Modified GitHub Actions Workflow (ci-cd.yml)
+
+name: Full CI/CD Pipeline (Terraform + Docker + Prefect)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  terraform:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v2
+        with: terraform_version: 1.7.6
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - run: terraform -chdir=terraform init
+      - run: terraform -chdir=terraform plan -out=tfplan
+      - run: terraform -chdir=terraform apply -auto-approve tfplan
+
+  docker:
+    name: Build & Push Prefect Docker Image
+    runs-on: ubuntu-latest
+    needs: terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - run: |
+          REPO_URI=$(aws ecr describe-repositories --repository-names prefect-snowflake-s3 --query 'repositories[0].repositoryUri' --output text)
+          echo "REPO_URI=$REPO_URI" >> $GITHUB_ENV
+      - run: |
+          docker build -t $REPO_URI:latest python-code
+          docker push $REPO_URI:latest
+
+  prefect:
+    name: Prefect Deployment Automation
+    runs-on: ubuntu-latest
+    needs: docker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+      - run: pip install prefect boto3 pyyaml
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Generate & Apply Prefect Deployments
+        run: python python-code/app/generate_deployments.py
+
+
+⸻
+
+✅ Key Improvements
+	1.	Automatic Prefect Work Pools
+	•	lambda-pool and ecs-pool are created if they don’t exist.
+	•	Ensures deployments run on the correct targets.
+	2.	Fully Hands-Free
+	•	Push to main → Terraform → Docker → Prefect pools → Deployments → Scheduled runs.
+	3.	Dynamic Scheduling & S3 Paths
+	•	Read from queries.yaml → no manual Prefect deployment steps.
+	4.	Supports Both Lambda & ECS
+	•	target field in queries.yaml decides runtime automatically.
+
+⸻
+
+After this, all flows are automatically orchestrated and scheduled via Prefect, with no manual intervention, just by pushing changes to queries.yaml or code.
+
+⸻
+
+If you want, I can create a visual diagram showing Terraform → Docker → Prefect orchestration → Lambda/ECS → S3, so it’s easier to explain to your team or management.
+
+Do you want me to do that?
+
+===
+
 Provide 1 IAC and Python module with header for understanding or simple short clear concise readme for this use case to 
 Get data from snow for multiple queries 
 And depending on use case to run it in ECS or lambda but orchestrated and scheduled in prefect 
