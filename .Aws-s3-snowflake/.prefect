@@ -1,4 +1,77 @@
 
+Got it! Here’s a short, clear, and concise README for your Snowflake → S3 pipeline with Prefect.
+
+⸻
+
+Snowflake → S3 Automated Pipeline with Prefect
+
+Overview
+
+Automates fetching data from Snowflake and pushing it to S3, orchestrated and scheduled via Prefect. Supports:
+	•	Lambda for short queries
+	•	ECS for long queries
+	•	Secure SSM parameters for queries
+	•	Secrets Manager for Snowflake credentials
+	•	Fully automated CI/CD pipeline (Terraform → Docker → Prefect)
+
+⸻
+
+Quick Start
+	1.	Define Queries in queries.yaml:
+
+queries:
+  - name: daily_sales
+    ssm_param: "/snowflake/query/daily_sales"
+    schedule: "0 2 * * *"
+    target: "lambda"
+    bucket: "snowflake-data-bucket"
+    key: "exports/daily_sales.csv"
+
+  - name: weekly_report
+    ssm_param: "/snowflake/query/weekly_report"
+    schedule: "0 3 * * 1"
+    target: "ecs"
+    bucket: "snowflake-data-bucket"
+    key: "exports/weekly_report.csv"
+
+	2.	Push to main → GitHub Actions runs:
+	•	Terraform: creates ECR, ECS, Lambda, SSM, Secrets
+	•	Docker: builds Prefect image & pushes to ECR
+	•	Prefect: creates work pools, generates deployments, schedules flows
+	3.	Prefect Work Pools:
+	•	lambda-pool → short queries
+	•	ecs-pool → long queries
+	4.	Monitor Flows in Prefect Cloud or Orion.
+
+⸻
+
+Folder Structure
+
+terraform/             # Terraform infra
+modules/               # ecr, ecs, lambda, ssm
+python-code/           # Prefect flow, helpers, deployment script
+queries.yaml           # SQL queries & schedule
+.github/workflows/ci-cd.yml
+
+
+⸻
+
+Features
+	•	Fully automated, zero manual steps
+	•	Schedule & target configurable via queries.yaml
+	•	Lambda for short queries, ECS for long queries
+	•	Secure: queries in SSM, credentials in Secrets Manager
+
+⸻
+
+✅ Push-to-run: update queries.yaml or code → infra, deployments, and schedules are updated automatically.
+
+⸻
+
+If you want, I can also make a tiny one-line visual diagram to include in this README for clarity. Do you want me to do that?
+
+
+===
 Perfect! Here’s a clean, concise, ready-to-use README that explains your entire pipeline — Terraform → Docker → Prefect → Lambda/ECS → S3 — in simple terms. It’s suitable for developers, DevOps, or management.
 
 ⸻
