@@ -1,4 +1,211 @@
 
+Perfect — since your infra (VPC, subnets, security groups) already exists and you only need to reference it (not create anything), you can cleanly handle this using a data.tf + module wiring setup.
+
+Here’s how to structure it step-by-step 👇
+
+⸻
+
+🧩 Folder Structure
+
+infra/
+├── main.tf
+├── data.tf
+├── variables.tf
+├── terraform.tfvars
+└── modules/
+    ├── lambda/
+    │   └── lambda.tf
+    └── ecs/
+        └── ecs.tf
+
+
+⸻
+
+🗂️ data.tf
+
+This file fetches existing VPC, subnets, and SGs that your infra team already created.
+
+✅ You only need to fill in names or IDs once; Terraform reads them dynamically.
+
+# data.tf
+data "aws_vpc" "existing" {
+  id = var.vpc_id
+}
+
+data "aws_subnet" "private" {
+  for_each = toset(var.private_subnet_ids)
+  id       = each.value
+}
+
+data "aws_security_group" "existing" {
+  for_each = toset(var.security_group_ids)
+  id       = each.value
+}
+
+# Output these for reuse in main.tf
+output "vpc_id" {
+  value = data.aws_vpc.existing.id
+}
+
+output "subnet_ids" {
+  value = [for s in data.aws_subnet.private : s.id]
+}
+
+output "security_group_ids" {
+  value = [for sg in data.aws_security_group.existing : sg.id]
+}
+
+
+⸻
+
+⚙️ variables.tf
+
+Define the variables to feed in IDs.
+
+variable "vpc_id" {
+  description = "VPC ID where Snowflake PrivateLink exists"
+  type        = string
+}
+
+variable "private_subnet_ids" {
+  description = "List of private subnet IDs in the VPC"
+  type        = list(string)
+}
+
+variable "security_group_ids" {
+  description = "List of security group IDs to attach Lambda/ECS"
+  type        = list(string)
+}
+
+
+⸻
+
+🧾 terraform.tfvars
+
+This is where you paste the info from the VPC endpoint page.
+
+vpc_id             = "vpc-0a123b45cdef67890"
+private_subnet_ids = ["subnet-01abc111", "subnet-02def222"]
+security_group_ids = ["sg-01234abcd5678efgh"]
+
+
+⸻
+
+🚀 main.tf
+
+Now we’ll pass those data outputs into both Lambda and ECS modules.
+
+# main.tf
+module "lambda" {
+  source = "./modules/lambda"
+
+  vpc_id             = data.aws_vpc.existing.id
+  subnet_ids         = [for s in data.aws_subnet.private : s.id]
+  security_group_ids = [for sg in data.aws_security_group.existing : sg.id]
+}
+
+module "ecs" {
+  source = "./modules/ecs"
+
+  vpc_id             = data.aws_vpc.existing.id
+  subnet_ids         = [for s in data.aws_subnet.private : s.id]
+  security_group_ids = [for sg in data.aws_security_group.existing : sg.id]
+}
+
+
+⸻
+
+🪣 modules/lambda/lambda.tf
+
+Example of using those network values in a Lambda resource.
+
+# modules/lambda/lambda.tf
+resource "aws_lambda_function" "snowflake_lambda" {
+  function_name = "snowflake-fetch-lambda"
+  role          = aws_iam_role.lambda_exec.arn
+  handler       = "handler.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 900
+
+  filename = "build/lambda_package.zip"
+
+  vpc_config {
+    subnet_ids         = var.subnet_ids
+    security_group_ids = var.security_group_ids
+  }
+
+  environment {
+    variables = {
+      SNOWFLAKE_URL = "https://<account>.privatelink.snowflakecomputing.com"
+    }
+  }
+}
+
+variable "vpc_id" {}
+variable "subnet_ids" {
+  type = list(string)
+}
+variable "security_group_ids" {
+  type = list(string)
+}
+
+
+⸻
+
+🐳 modules/ecs/ecs.tf
+
+Similarly, your ECS service will reuse the same values.
+
+# modules/ecs/ecs.tf
+resource "aws_ecs_service" "snow_service" {
+  name            = "snowflake-query-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.snow_task.arn
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = var.subnet_ids
+    security_groups  = var.security_group_ids
+    assign_public_ip = false
+  }
+}
+
+variable "vpc_id" {}
+variable "subnet_ids" {
+  type = list(string)
+}
+variable "security_group_ids" {
+  type = list(string)
+}
+
+
+⸻
+
+✅ Result
+
+✔ You don’t create or modify any infra.
+✔ Both ECS and Lambda attach automatically to the same Snowflake PrivateLink network.
+✔ You can switch environments easily by just changing values in terraform.tfvars.
+
+⸻
+
+🧾 Summary
+
+File	Purpose
+data.tf	Reads existing infra objects (no creation)
+variables.tf	Defines variables for your VPC, subnets, SGs
+terraform.tfvars	Stores IDs from Infra team
+main.tf	Passes network info to modules
+modules/lambda/lambda.tf	Creates Lambda attached to VPC
+modules/ecs/ecs.tf	Creates ECS service attached to same VPC
+
+
+⸻
+
+Would you like me to extend this so that the same data.tf also exports the PrivateLink DNS name (Snowflake endpoint URL) to inject into your Lambda and ECS environment variables automatically?
+
+
+===
 Got it! Here’s a short, clear, and concise README for your Snowflake → S3 pipeline with Prefect.
 
 ⸻
