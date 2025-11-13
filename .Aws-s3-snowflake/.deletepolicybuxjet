@@ -1,0 +1,169 @@
+Perfect — here’s a complete Terraform + Lambda code solution that deploys a Lambda inside your VPC with access to the S3 private interface endpoint, sets the environment variable for the bucket, and allows it to delete the bucket policy. No Docker needed since we have no dependencies.
+
+⸻
+
+1️⃣ Terraform — Lambda, Role, Security Group (all in one)
+
+provider "aws" {
+  region = "us-east-1"  # change to your region
+}
+
+# -------------------------
+# Security Group for Lambda
+# -------------------------
+resource "aws_security_group" "lambda_sg" {
+  name        = "lambda-s3-access"
+  description = "Security group for Lambda to access S3 via VPC endpoint"
+  vpc_id      = var.vpc_id
+
+  # Allow outbound HTTPS (S3 endpoint)
+  egress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "lambda-s3-access"
+  }
+}
+
+# -------------------------
+# IAM Role for Lambda
+# -------------------------
+resource "aws_iam_role" "lambda_role" {
+  name = "lambda-s3-full-access-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "lambda_policy" {
+  role = aws_iam_role.lambda_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "s3:*"
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# -------------------------
+# Lambda Function
+# -------------------------
+resource "aws_lambda_function" "delete_bucket_policy" {
+  function_name = "delete-bucket-policy"
+  role          = aws_iam_role.lambda_role.arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.12"
+
+  # Lambda code directly from local file
+  filename = "lambda_function.zip"
+
+  vpc_config {
+    subnet_ids         = var.subnet_ids
+    security_group_ids = [aws_security_group.lambda_sg.id]
+  }
+
+  environment {
+    variables = {
+      BUCKET = var.bucket_name
+    }
+  }
+
+  timeout     = 30
+  memory_size = 128
+}
+
+# -------------------------
+# Variables
+# -------------------------
+variable "vpc_id" {}
+variable "subnet_ids" {
+  type = list(string)
+}
+variable "bucket_name" {}
+
+
+⸻
+
+2️⃣ Lambda Function — lambda_function.py
+
+import boto3
+import os
+
+def lambda_handler(event, context):
+    bucket = os.environ.get('BUCKET')
+    if not bucket:
+        return {"status": "error", "message": "BUCKET environment variable not set"}
+
+    s3 = boto3.client('s3')
+    try:
+        s3.delete_bucket_policy(Bucket=bucket)
+        return {"status": "success", "message": f"Bucket policy deleted for {bucket}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+⸻
+
+3️⃣ Package Lambda Function
+
+Since there are no external dependencies, just create a ZIP:
+
+zip lambda_function.zip lambda_function.py
+
+This ZIP will be referenced in Terraform:
+
+filename = "lambda_function.zip"
+
+
+⸻
+
+4️⃣ How to Deploy
+	1.	Update Terraform variables:
+
+vpc_id       = "vpc-xxxxxxxx"
+subnet_ids   = ["subnet-aaaa", "subnet-bbbb"]  # subnets where S3 endpoint exists
+bucket_name  = "my-private-bucket"
+
+	2.	Run Terraform:
+
+terraform init
+terraform plan
+terraform apply
+
+	3.	Invoke Lambda via AWS Console or Terraform to delete the bucket policy.
+
+⸻
+
+✅ Key Points
+	•	Lambda runs inside your VPC + subnets of the S3 interface endpoint → passes the aws:SourceVpce restriction.
+	•	IAM role has full S3 access (s3:*).
+	•	No Docker needed because no extra packages are used.
+
+⸻
+
+If you want, I can also extend this Terraform setup to restore the original bucket policy after deletion safely, in case you need rollback.
+
+Do you want me to add that?
