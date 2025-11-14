@@ -1,0 +1,397 @@
+Nice — below is a self-contained HTML snippet you can copy-paste into your architecture design report.
+It includes:
+	•	A Before vs After cost table with editable fields and automatic delta calculations.
+	•	A simple Architecture diagram (SVG) you can edit or replace with your own image.
+	•	An Executive summary section with placeholders you can update.
+	•	Recommendations & Risk analysis text blocks you can customize.
+
+You can either paste this directly into your existing HTML file or save it as a standalone file (e.g., s3-gis-cost-summary.html) and then embed/include it in your report.
+
+⸻
+
+How to use
+	1.	Paste the HTML into your report.
+	2.	Fill the numeric fields in the Cost input box (values are monthly costs in USD).
+	3.	The table will auto-calc increases and percentages.
+	4.	Edit the executive summary, diagram labels, and recommendations to match your environment.
+
+⸻
+
+Here is the HTML:
+
+<!-- Begin S3 GIS Cost Summary HTML -->
+<section id="s3-gis-cost-summary" style="font-family: Arial,Helvetica,sans-serif; color:#222; max-width:1100px; margin:auto;">
+  <style>
+    #s3-gis-cost-summary h2 { color:#0b57a4; margin-bottom:6px; }
+    #s3-gis-cost-summary .panel { border:1px solid #e0e0e0; padding:18px; border-radius:6px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,0.02); margin-bottom:18px; }
+    #s3-gis-cost-summary label { font-weight:600; font-size:13px; display:block; margin-bottom:6px; color:#333; }
+    #s3-gis-cost-summary input[type="number"] { width:140px; padding:6px 8px; border:1px solid #ccd; border-radius:4px; }
+    #s3-gis-cost-summary table { width:100%; border-collapse:collapse; margin-top:12px; }
+    #s3-gis-cost-summary th, #s3-gis-cost-summary td { text-align:left; padding:10px; border-bottom:1px solid #f0f0f0; font-size:14px; }
+    #s3-gis-cost-summary th { background:#fafafa; font-weight:700; color:#333; }
+    .muted { color:#666; font-size:13px; }
+    .summary-key { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .kpi { background:#f6f9ff; padding:8px 12px; border-radius:6px; border:1px solid #e4efff; font-weight:700; color:#0b57a4; }
+    .percent-up { color:#c0392b; font-weight:700; }
+    .percent-down { color:#1f9d55; font-weight:700; }
+    .svg-wrap { text-align:center; margin-top:12px; }
+    .notes { font-size:13px; color:#444; margin-top:8px; }
+    .section-title { font-size:16px; margin-bottom:8px; font-weight:700; color:#0b57a4; }
+    .btn { display:inline-block; padding:8px 12px; border-radius:6px; text-decoration:none; background:#0b57a4; color:#fff; font-weight:700; }
+    @media (max-width:700px) { #s3-gis-cost-summary input[type="number"] { width:100%; } }
+  </style>
+
+  <h2>S3 — GIS Cost Impact Summary</h2>
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;">
+      <div>
+        <div class="muted">Component</div>
+        <div style="font-size:18px;font-weight:700;">Governance, Integrity & Security (GIS) — Proposed Changes</div>
+      </div>
+      <div class="summary-key">
+        <div class="kpi" id="total-current">$0</div>
+        <div class="muted">Current monthly</div>
+        <div class="kpi" id="total-future">$0</div>
+        <div class="muted">Future monthly</div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px;" class="muted">
+      Use the inputs below to enter your current and proposed monthly cost breakdown. Values are monthly USD costs. The table calculates the absolute and percentage increase.
+    </div>
+
+    <!-- Input fields -->
+    <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;">
+      <div style="min-width:280px;">
+        <label>Storage — Current monthly ($)</label>
+        <input type="number" id="storage-current" value="400" step="0.01" />
+        <div class="muted">Total storage cost in source bucket</div>
+      </div>
+
+      <div style="min-width:280px;">
+        <label>Storage — Future monthly ($)</label>
+        <input type="number" id="storage-future" value="650" step="0.01" />
+        <div class="muted">Include destination (replication) + extra versions</div>
+      </div>
+
+      <div style="min-width:280px;">
+        <label>Requests (PUT/GET/Other) — Current monthly ($)</label>
+        <input type="number" id="requests-current" value="20" step="0.01" />
+        <div class="muted">PUT/GET/Lifecycle/API request costs</div>
+      </div>
+
+      <div style="min-width:280px;">
+        <label>Requests — Future monthly ($)</label>
+        <input type="number" id="requests-future" value="35" step="0.01" />
+        <div class="muted">Include replication PUTs and extra KMS calls</div>
+      </div>
+
+      <div style="min-width:280px;">
+        <label>Inter-Region / Data Transfer — Current monthly ($)</label>
+        <input type="number" id="transfer-current" value="0" step="0.01" />
+        <div class="muted">Often zero if no replication</div>
+      </div>
+
+      <div style="min-width:280px;">
+        <label>Inter-Region / Data Transfer — Future monthly ($)</label>
+        <input type="number" id="transfer-future" value="180" step="0.01" />
+        <div class="muted">Replication transfer egress cost</div>
+      </div>
+
+      <div style="min-width:280px;">
+        <label>KMS / Envelope Keys — Current monthly ($)</label>
+        <input type="number" id="kms-current" value="10" step="0.01" />
+        <div class="muted">If SSE-KMS used today</div>
+      </div>
+
+      <div style="min-width:280px;">
+        <label>KMS / Envelope Keys — Future monthly ($)</label>
+        <input type="number" id="kms-future" value="25" step="0.01" />
+        <div class="muted">Extra GenerateDataKey/Decrypt calls for replication & GETs</div>
+      </div>
+
+      <div style="min-width:280px;">
+        <label>Storage Lens / Monitoring — Future monthly ($)</label>
+        <input type="number" id="lens-future" value="20" step="0.01" />
+        <div class="muted">Optional advanced tier</div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px;">
+      <button class="btn" onclick="computeAll()">Recalculate</button>
+      <span style="margin-left:12px;color:#555;font-size:13px;">Tip: edit values and click Recalculate to update the table & KPIs.</span>
+    </div>
+
+    <!-- Results table -->
+    <table aria-label="Cost comparison table" style="margin-top:14px;">
+      <thead>
+        <tr>
+          <th>Cost component</th>
+          <th style="width:160px">Current (monthly $)</th>
+          <th style="width:160px">Future (monthly $)</th>
+          <th style="width:160px">Increase ($)</th>
+          <th style="width:120px">Increase (%)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Storage (source + destination + versions)</td>
+          <td id="tbl-storage-current">$0</td>
+          <td id="tbl-storage-future">$0</td>
+          <td id="tbl-storage-diff">$0</td>
+          <td id="tbl-storage-pct">0%</td>
+        </tr>
+        <tr>
+          <td>Requests (PUT/GET + replication PUTs)</td>
+          <td id="tbl-requests-current">$0</td>
+          <td id="tbl-requests-future">$0</td>
+          <td id="tbl-requests-diff">$0</td>
+          <td id="tbl-requests-pct">0%</td>
+        </tr>
+        <tr>
+          <td>Inter-region / Data transfer</td>
+          <td id="tbl-transfer-current">$0</td>
+          <td id="tbl-transfer-future">$0</td>
+          <td id="tbl-transfer-diff">$0</td>
+          <td id="tbl-transfer-pct">0%</td>
+        </tr>
+        <tr>
+          <td>KMS / Envelope key usage</td>
+          <td id="tbl-kms-current">$0</td>
+          <td id="tbl-kms-future">$0</td>
+          <td id="tbl-kms-diff">$0</td>
+          <td id="tbl-kms-pct">0%</td>
+        </tr>
+        <tr>
+          <td>S3 Storage Lens & monitoring</td>
+          <td id="tbl-lens-current">$0</td>
+          <td id="tbl-lens-future">$0</td>
+          <td id="tbl-lens-diff">$0</td>
+          <td id="tbl-lens-pct">0%</td>
+        </tr>
+        <tr style="font-weight:800; background:#f8fbff;">
+          <td>Total monthly cost</td>
+          <td id="tbl-total-current">$0</td>
+          <td id="tbl-total-future">$0</td>
+          <td id="tbl-total-diff">$0</td>
+          <td id="tbl-total-pct">0%</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="notes">
+      <strong>Notes:</strong> This is a presentation-level estimate. For precise charges, run the same numbers in the <em>AWS Pricing Calculator</em>, and validate KMS key request counts, replication bytes, and actual object counts from AWS S3 Storage Lens / Billing reports.
+    </div>
+  </div>
+
+  <!-- Architecture diagram -->
+  <div class="panel">
+    <div class="section-title">Architecture diagram (proposed)</div>
+    <div class="muted">Simple diagram showing source bucket, replication (CRR/SRR), KMS, and retention / Object Lock.</div>
+
+    <div class="svg-wrap">
+      <!-- Editable SVG; replace or expand as needed -->
+      <svg width="760" height="220" viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg" aria-label="S3 GIS architecture">
+        <defs>
+          <style>
+            .b{fill:#0b57a4; font:700 13px sans-serif; color:#fff}
+            .lbl{font:600 12px Arial; fill:#123}
+            .box{fill:#f6fbff; stroke:#cfe6ff; stroke-width:1.5}
+            .line{stroke:#9fbfe8; stroke-width:2; marker-end:url(#arrow)}
+          </style>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#9fbfe8" />
+          </marker>
+        </defs>
+
+        <!-- Source bucket -->
+        <rect x="24" y="40" width="220" height="120" rx="8" class="box"></rect>
+        <text x="43" y="72" class="lbl">Source: s3://my-app-bucket</text>
+        <text x="43" y="92" class="muted" style="font-size:12px; fill:#446;">Versioning: Enabled</text>
+        <text x="43" y="110" class="muted" style="font-size:12px; fill:#446;">SSE-KMS: CMK</text>
+        <rect x="40" y="136" width="140" height="20" rx="6" fill="#fff" stroke="#e6eefb"></rect>
+        <text x="48" y="150" style="font:600 12px Arial; fill:#0b57a4">WORM / Object Lock</text>
+
+        <!-- Replication arrow -->
+        <line x1="246" y1="100" x2="360" y2="100" class="line"></line>
+        <text x="260" y="88" style="font:600 12px Arial; fill:#446">CRR / SRR</text>
+
+        <!-- Destination bucket -->
+        <rect x="364" y="40" width="220" height="120" rx="8" class="box"></rect>
+        <text x="383" y="72" class="lbl">Destination: s3://dr-bucket</text>
+        <text x="383" y="92" class="muted" style="font-size:12px; fill:#446;">Region: eu-west-1</text>
+        <text x="383" y="110" class="muted" style="font-size:12px; fill:#446;">Versioning: Enabled</text>
+
+        <!-- KMS -->
+        <rect x="616" y="30" width="110" height="48" rx="8" style="fill:#fff;stroke:#e9f0ff"></rect>
+        <text x="630" y="56" style="font:700 12px Arial; fill:#0b57a4">KMS (CMK)</text>
+        <text x="630" y="72" style="font:12px Arial; fill:#666">Encrypt / Decrypt</text>
+
+        <!-- Lines to KMS -->
+        <line x1="320" y1="60" x2="616" y2="54" class="line" stroke-dasharray="6,4"></line>
+        <line x1="560" y1="120" x2="616" y2="78" class="line" stroke-dasharray="6,4"></line>
+
+        <!-- Small legend -->
+        <rect x="24" y="170" width="110" height="36" rx="6" fill="#fff" stroke="#eef6ff"></rect>
+        <text x="34" y="190" style="font:12px Arial; fill:#333">Legend: </text>
+        <text x="34" y="206" style="font:12px Arial; fill:#666">CRR = Cross-region replication</text>
+      </svg>
+    </div>
+
+    <div class="muted" style="margin-top:8px;">
+      <strong>Edit:</strong> Replace the SVG with your existing architecture diagram if you have one (SVG/PNG). If you want a high-fidelity diagram I can produce a more detailed SVG when you provide bucket names, regions, and KMS key alias.
+    </div>
+  </div>
+
+  <!-- Executive summary -->
+  <div class="panel" id="exec-summary">
+    <div class="section-title">Executive summary (editable)</div>
+    <p contenteditable="true" style="min-height:60px; border:1px dashed #e9f3ff; padding:10px; border-radius:6px;">
+      <strong>Summary:</strong> Implementing GIS controls (S3 replication, versioning, KMS-based encryption, and Object Lock/WORM) will increase the monthly S3 cost from <span id="exec-cur">$0</span> to <span id="exec-fut">$0</span> — an increase of <span id="exec-inc">$0</span> (<span id="exec-inc-pct">0%</span>). These changes improve data durability, regulatory compliance, and ransomware resilience.
+    </p>
+
+    <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:8px;">
+      <div style="flex:1;min-width:260px;">
+        <div class="section-title" style="font-size:14px;">Business impact</div>
+        <ul>
+          <li>Replication provides a second copy in <em>another region</em> for disaster recovery and compliance.</li>
+          <li>Object Lock (WORM) enforces retention for regulatory requirements and anti-tampering.</li>
+          <li>Versioning ensures recoverability from accidental deletes or application errors.</li>
+        </ul>
+      </div>
+
+      <div style="flex:1;min-width:260px;">
+        <div class="section-title" style="font-size:14px;">Operational notes</div>
+        <ul>
+          <li>Lifecycle rules should be reviewed to offset replication storage cost (e.g., move older versions to IA/Glacier).</li>
+          <li>Evaluate using S3 Intelligent-Tiering for part of the dataset to reduce storage costs for infrequently accessed objects.</li>
+          <li>Monitor KMS usage — customer-managed CMKs incur request costs and throttling considerations.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recommendations & risk analysis -->
+  <div class="panel">
+    <div class="section-title">Recommendations & risk analysis</div>
+
+    <div style="display:flex;gap:18px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:300px;">
+        <div style="font-weight:700;margin-bottom:8px;">Recommended actions</div>
+        <ol>
+          <li><strong>Enable versioning</strong> on the source bucket (required for replication & Object Lock).</li>
+          <li><strong>Configure cross-region replication (CRR)</strong> to the selected DR region and account for replication PUTs and transfer in the budget.</li>
+          <li><strong>Enable Object Lock (Compliance mode if required)</strong> for regulated datasets; use Governance mode for operational flexibility.</li>
+          <li><strong>Use SSE-KMS with a CMK</strong> and monitor KMS requests; consider AWS-managed key for limited KMS cost exposure.</li>
+          <li><strong>Tune lifecycle rules</strong> to transition non-current versions to IA/Glacier to reduce long-term cost.</li>
+          <li><strong>Enable S3 Storage Lens (Advanced)</strong> for object-level telemetry to refine estimates and policies.</li>
+        </ol>
+      </div>
+
+      <div style="flex:1;min-width:300px;">
+        <div style="font-weight:700;margin-bottom:8px;">Risks & mitigations</div>
+        <ul>
+          <li><strong>Cost increase:</strong> major driver is replication & additional storage. <em>Mitigation:</em> lifecycle transitions and selective replication (replicate only regulated prefixes).</li>
+          <li><strong>Operational complexity:</strong> Object Lock in compliance mode is immutable — test in Governance mode first.</li>
+          <li><strong>KMS limits & costs:</strong> high request rates can increase cost — consider envelope encryption patterns and aggregate small PUTs.</li>
+          <li><strong>Data residency / sovereignty:</strong> replication to another region may be restricted by policy — confirm with legal/compliance.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div style="text-align:right; margin-top:12px;">
+    <small class="muted">Generated: S3 GIS cost summary (editable). Copy into your architecture report and replace sample numbers with actuals.</small>
+  </div>
+</section>
+
+<script>
+  // Simple calculator logic to update table and KPIs
+  function money(v){ return Number(v || 0).toFixed(2); }
+  function pct(curr, fut){
+    curr = Number(curr || 0); fut = Number(fut || 0);
+    if(curr === 0 && fut === 0) return '0%';
+    if(curr === 0) return '∞';
+    return (( (fut - curr) / curr ) * 100).toFixed(1) + '%';
+  }
+
+  function setEl(id, v){ const e = document.getElementById(id); if(e) e.textContent = typeof v === 'number' ? '$' + money(v) : v; }
+
+  function computeAll(){
+    const sC = Number(document.getElementById('storage-current').value || 0);
+    const sF = Number(document.getElementById('storage-future').value || 0);
+    const rC = Number(document.getElementById('requests-current').value || 0);
+    const rF = Number(document.getElementById('requests-future').value || 0);
+    const tC = Number(document.getElementById('transfer-current').value || 0);
+    const tF = Number(document.getElementById('transfer-future').value || 0);
+    const kC = Number(document.getElementById('kms-current').value || 0);
+    const kF = Number(document.getElementById('kms-future').value || 0);
+    const lC = 0;
+    const lF = Number(document.getElementById('lens-future').value || 0);
+
+    const totalC = sC + rC + tC + kC + lC;
+    const totalF = sF + rF + tF + kF + lF;
+    const diffTotal = totalF - totalC;
+
+    // update table
+    setEl('tbl-storage-current', sC);
+    setEl('tbl-storage-future', sF);
+    setEl('tbl-storage-diff', sF - sC);
+    document.getElementById('tbl-storage-pct').textContent = pct(sC, sF);
+
+    setEl('tbl-requests-current', rC);
+    setEl('tbl-requests-future', rF);
+    setEl('tbl-requests-diff', rF - rC);
+    document.getElementById('tbl-requests-pct').textContent = pct(rC, rF);
+
+    setEl('tbl-transfer-current', tC);
+    setEl('tbl-transfer-future', tF);
+    setEl('tbl-transfer-diff', tF - tC);
+    document.getElementById('tbl-transfer-pct').textContent = pct(tC, tF);
+
+    setEl('tbl-kms-current', kC);
+    setEl('tbl-kms-future', kF);
+    setEl('tbl-kms-diff', kF - kC);
+    document.getElementById('tbl-kms-pct').textContent = pct(kC, kF);
+
+    setEl('tbl-lens-current', lC);
+    setEl('tbl-lens-future', lF);
+    setEl('tbl-lens-diff', lF - lC);
+    document.getElementById('tbl-lens-pct').textContent = pct(lC, lF);
+
+    setEl('tbl-total-current', totalC);
+    setEl('tbl-total-future', totalF);
+    setEl('tbl-total-diff', diffTotal);
+    document.getElementById('tbl-total-pct').textContent = pct(totalC, totalF);
+
+    // KPIs
+    document.getElementById('total-current').textContent = '$' + money(totalC);
+    document.getElementById('total-future').textContent = '$' + money(totalF);
+
+    // Exec summary quick-fill
+    document.getElementById('exec-cur').textContent = '$' + money(totalC);
+    document.getElementById('exec-fut').textContent = '$' + money(totalF);
+    document.getElementById('exec-inc').textContent = '$' + money(diffTotal);
+    document.getElementById('exec-inc-pct').textContent = pct(totalC, totalF);
+
+    // colorize percent
+    const pctEl = document.getElementById('tbl-total-pct');
+    if(pctEl){
+      const txt = pctEl.textContent;
+      if(txt === '∞' || txt.includes('-')) pctEl.className = 'percent-down'; else pctEl.className = 'percent-up';
+    }
+  }
+
+  // initial compute
+  computeAll();
+</script>
+<!-- End S3 GIS Cost Summary HTML -->
+
+
+⸻
+
+If you want, I can:
+	•	Replace the sample default numbers with the actual values you tried in the Pricing Calculator (paste them here) and return a version with pre-filled numbers.
+	•	Generate a PNG/SVG diagram matching your real bucket names, regions, and replication direction.
+
+Which would you like next?
