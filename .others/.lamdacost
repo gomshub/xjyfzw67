@@ -1,0 +1,278 @@
+Nice — I put together a complete architecture design report (HTML) you can use to request approval. It includes: executive summary, architecture diagrams (SVG), component-by-component design, cost assumptions & an example monthly cost estimate (with sources), risk/operational notes, and a short “approval” section you can send to stakeholders.
+
+Below is the full HTML. You can copy & paste this into a file (e.g. snowflake-to-s3-architecture-report.html) and share it with your approvers.
+
+⸻
+
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Architecture Design Report — Snowflake → S3 (short-run: Lambda/ECR/EventBridge; long-run: ECS/Step Functions)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; line-height:1.5; color:#111; padding:24px; max-width:980px; margin:auto; }
+    h1,h2,h3 { color:#0b66c3; }
+    .section { margin-bottom:28px; }
+    .card { border:1px solid #ddd; padding:16px; border-radius:8px; background:#fbfbfe; }
+    table { width:100%; border-collapse:collapse; margin-top:8px;}
+    th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; }
+    th { background:#f4f8ff; }
+    pre { background:#0f1724; color:#e6eef8; padding:12px; border-radius:6px; overflow:auto; }
+    .small { font-size:0.9em; color:#555; }
+    .cta { background:#0b66c3; color:white; padding:10px 14px; border-radius:6px; display:inline-block; text-decoration:none; }
+    .diagram { text-align:center; margin-top:12px; }
+    .note { font-size:0.9em; color:#444; margin-top:6px; }
+  </style>
+</head>
+<body>
+  <h1>Architecture Design Report</h1>
+  <p class="small">Use case: Export/transfer data from Snowflake to an existing S3 landing bucket for short-run queries (serverless pipeline using EventBridge + Lambda + ECR where applicable) and a planned future upgrade to run long-run/large queries via ECS + Step Functions.</p>
+
+  <div class="section card">
+    <h2>Executive summary</h2>
+    <p>
+      This design enables a low-cost, serverless-first pipeline to extract result sets or files from Snowflake into an existing S3 bucket for short-run ad-hoc queries and analytics. The initial implementation uses EventBridge (scheduler / event bus) to trigger Lambda executions (or a container image executed by Lambda using ECR) that run the Snowflake export/unload and write the results to S3. For future higher-duration / higher-throughput jobs (long-run queries, heavy transforms), we propose migrating execution to ECS tasks orchestrated by AWS Step Functions for reliability, visibility and cost-control.
+    </p>
+    <p class="small">Key benefits: fast time-to-market (serverless), small steady cost footprint for light usage, clear migration path to ECS/Step Functions for heavy workloads.</p>
+  </div>
+
+  <div class="section card">
+    <h2>High-level architecture (current / short-run)</h2>
+
+    <div class="diagram">
+      <!-- simple inline SVG diagram -->
+      <svg width="820" height="220" viewBox="0 0 820 220" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <style>.lbl{font:12px/1.2 sans-serif; fill:#fff}</style>
+        </defs>
+
+        <!-- Snowflake -->
+        <rect x="20" y="60" rx="8" ry="8" width="140" height="80" fill="#2a9ee8" />
+        <text x="90" y="100" class="lbl" text-anchor="middle">Snowflake</text>
+
+        <!-- EventBridge -->
+        <rect x="190" y="30" rx="8" ry="8" width="130" height="60" fill="#1f8b4c"/>
+        <text x="255" y="60" class="lbl" text-anchor="middle">EventBridge</text>
+        <text x="255" y="76" class="lbl" text-anchor="middle" font-size="10">rules / schedule</text>
+
+        <!-- Lambda -->
+        <rect x="360" y="30" rx="8" ry="8" width="140" height="120" fill="#7b61ff"/>
+        <text x="430" y="80" class="lbl" text-anchor="middle">Lambda</text>
+        <text x="430" y="96" class="lbl" text-anchor="middle" font-size="10">snowflake-connector</text>
+
+        <!-- ECR (optional) -->
+        <rect x="520" y="10" rx="8" ry="8" width="120" height="50" fill="#f39c12"/>
+        <text x="580" y="40" class="lbl" text-anchor="middle">ECR (container)</text>
+        <text x="580" y="52" class="lbl" text-anchor="middle" font-size="10">(Lambda container image)</text>
+
+        <!-- S3 -->
+        <rect x="520" y="110" rx="8" ry="8" width="180" height="70" fill="#0099a8"/>
+        <text x="610" y="150" class="lbl" text-anchor="middle">S3 landing bucket</text>
+
+        <!-- arrows -->
+        <line x1="160" y1="100" x2="190" y2="60" stroke="#333" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="320" y1="60" x2="360" y2="60" stroke="#333" stroke-width="2"/>
+        <line x1="500" y1="60" x2="520" y2="60" stroke="#333" stroke-width="2"/>
+        <line x1="430" y1="150" x2="520" y2="150" stroke="#333" stroke-width="2"/>
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#333" />
+          </marker>
+        </defs>
+      </svg>
+    </div>
+
+    <ul class="note">
+      <li><strong>Flow:</strong> EventBridge triggers a scheduled or rule-based event → Lambda (or Lambda container image stored in ECR) executes Snowflake export (e.g., SQL <code>COPY INTO</code> or Snowflake Python connector to unload result) → write files to S3 landing bucket.</li>
+      <li><strong>Why Lambda/ECR:</strong> fastest to deploy, auto-scaling, minimal operational overhead. Use a container image in ECR if you need custom native libraries or larger packages beyond Lambda layer limits. ECR storage is charged separately. See pricing references below.</li>
+    </ul>
+  </div>
+
+  <div class="section card">
+    <h2>Planned architecture (future / long-run jobs)</h2>
+    <p>
+      For long-running or resource-intensive jobs (multi-hour queries, heavy transformation), switch compute from Lambda to ECS (EC2 launch type or Fargate depending on the preference/cost) and orchestrate with Step Functions to:
+    </p>
+    <ul>
+      <li>Start ECS tasks (task definition pulls container image from ECR).</li>
+      <li>Monitor progress (Step Functions state machine, retries, error handling, human approval steps if needed).</li>
+      <li>Write results to S3 or a data lake (partitioned prefix by date/job-id).</li>
+    </ul>
+    <div class="diagram">
+      <!-- small svg showing step functions -> ecs -> s3 -->
+      <svg width="820" height="180" viewBox="0 0 820 180" xmlns="http://www.w3.org/2000/svg">
+        <rect x="40" y="40" rx="8" ry="8" width="200" height="80" fill="#6b5b95"/>
+        <text x="140" y="90" fill="#fff" font-size="13" text-anchor="middle">Step Functions (orchestration)</text>
+
+        <rect x="320" y="30" rx="8" ry="8" width="160" height="110" fill="#e94e77"/>
+        <text x="400" y="90" fill="#fff" font-size="13" text-anchor="middle">ECS (EC2 launch type tasks)</text>
+
+        <rect x="560" y="50" rx="8" ry="8" width="200" height="70" fill="#0099a8"/>
+        <text x="660" y="90" fill="#fff" font-size="13" text-anchor="middle">S3 landing / data lake</text>
+
+        <line x1="240" y1="80" x2="320" y2="80" stroke="#333" stroke-width="2"/>
+        <line x1="480" y1="80" x2="560" y2="80" stroke="#333" stroke-width="2"/>
+      </svg>
+    </div>
+    <p class="small">Step Functions gives visibility, retries & gradual rollout (and cost transparency via state transition billing).</p>
+  </div>
+
+  <div class="section card">
+    <h2>Component details</h2>
+    <h3>1) Snowflake → data export</h3>
+    <ul>
+      <li>Prefer using Snowflake's recommended unload patterns (e.g. <code>COPY INTO 's3://...'</code> external stage) or Snowflake Python connector to stream results into S3. If Snowflake account and S3 are in the same cloud-region, Snowflake docs indicate intra-region transfers are generally free — verify your Snowflake cloud-region & egress policy.  [oai_citation:0‡Snowflake Documentation](https://docs.snowflake.com/en/user-guide/cost-understanding-data-transfer?utm_source=chatgpt.com)</li>
+      <li>Authentication: use Snowflake service user with least privilege for exports; use secrets in AWS Secrets Manager or SSM Parameter Store (encrypted) for credentials.</li>
+    </ul>
+
+    <h3>2) EventBridge</h3>
+    <ul>
+      <li>Use EventBridge rules for scheduled exports (cron/rate) or as a fan-in for push events. EventBridge pricing is usage-based (events ingested). For typical volumes EventBridge cost is tiny.  [oai_citation:1‡Amazon Web Services, Inc.](https://aws.amazon.com/de/eventbridge/pricing/?utm_source=chatgpt.com)</li>
+    </ul>
+
+    <h3>3) Lambda (short-run)</h3>
+    <ul>
+      <li>Use Lambda for short queries where execution time < ~15 minutes and resource needs fit the memory/CPU of Lambda. Use container images (ECR) if you need larger dependency sets. Lambda pricing: request + duration (GB-second) model.  [oai_citation:2‡Amazon Web Services, Inc.](https://aws.amazon.com/lambda/pricing/?utm_source=chatgpt.com)</li>
+      <li>Packaging options: native zip (small deps) or container image (ECR) for larger libraries e.g., Snowflake connector, pandas, pyarrow.</li>
+    </ul>
+
+    <h3>4) ECR</h3>
+    <ul>
+      <li>Store Lambda container images and ECS images in ECR. ECR charges for storage and (potentially) egress if pulling across accounts/regions. Example storage price is ~$0.10/GB-month.  [oai_citation:3‡Amazon Web Services, Inc.](https://aws.amazon.com/ecr/pricing/?utm_source=chatgpt.com)</li>
+    </ul>
+
+    <h3>5) S3 landing bucket</h3>
+    <ul>
+      <li>Use existing S3 bucket. Partition/object prefix by job/date (e.g. <code>/<job-name>/YYYY/MM/DD/</code>) for lifecycle rules. S3 Standard storage pricing (example region first tier ≈ $0.023/GB-month). Use lifecycle rules to move older data to Standard-IA or Glacier for cost savings.  [oai_citation:4‡CloudZero](https://www.cloudzero.com/blog/s3-pricing/?utm_source=chatgpt.com)</li>
+    </ul>
+
+    <h3>6) Long-run processing — ECS + Step Functions</h3>
+    <ul>
+      <li>When queries exceed Lambda duration or need more CPU/RAM, run tasks as ECS tasks (EC2 launch type) or Fargate. ECS does not add a service charge for EC2 launch type — you pay the underlying EC2/EBS. For orchestration/visibility use Step Functions (charged per state transition for Standard workflows).  [oai_citation:5‡Amazon Web Services, Inc.](https://aws.amazon.com/ecs/pricing/?utm_source=chatgpt.com)</li>
+    </ul>
+  </div>
+
+  <div class="section card">
+    <h2>Cost design & example monthly estimate (illustrative)</h2>
+    <p class="small">All estimates are illustrative. I used current AWS public pricing pages and Snowflake documentation. See references under "Sources". If you need exact budgeting for your account/region, run the <a href="https://calculator.aws/" target="_blank">AWS Pricing Calculator</a> and/or provide actual usage numbers.</p>
+
+    <h3>Assumptions used for this example</h3>
+    <ul>
+      <li>Short-run (serverless) baseline: <strong>1,000 invocations/day</strong> → 30,000 Lambda invocations/month.</li>
+      <li>Each Lambda: 512 MB memory, avg duration 5 seconds.</li>
+      <li>Landing storage growth: 50 GB/month (S3 Standard).</li>
+      <li>ECR image storage: 5 GB.</li>
+      <li>EventBridge events: 30,000 events/month (one event per invocation).</li>
+      <li>Long-run example: single ECS instance for heavier workloads (example uses <code>m5.large</code> on-demand), run 24/7 if needed as baseline.</li>
+      <li>Step Functions: 1,000 executions/month, average 20 state transitions each.</li>
+    </ul>
+
+    <h3>Pricing sources (selected)</h3>
+    <ul class="small">
+      <li>AWS Lambda pricing (requests + GB-seconds).  [oai_citation:6‡Amazon Web Services, Inc.](https://aws.amazon.com/lambda/pricing/?utm_source=chatgpt.com)</li>
+      <li>Amazon S3 Standard pricing (example tier ~$0.023/GB-month).  [oai_citation:7‡CloudZero](https://www.cloudzero.com/blog/s3-pricing/?utm_source=chatgpt.com)</li>
+      <li>Amazon EventBridge pricing (ingestion/rules model).  [oai_citation:8‡Amazon Web Services, Inc.](https://aws.amazon.com/de/eventbridge/pricing/?utm_source=chatgpt.com)</li>
+      <li>Amazon ECR storage pricing (~$0.10/GB-month).  [oai_citation:9‡Amazon Web Services, Inc.](https://aws.amazon.com/ecr/pricing/?utm_source=chatgpt.com)</li>
+      <li>AWS Step Functions pricing (per state transition).  [oai_citation:10‡Amazon Web Services, Inc.](https://aws.amazon.com/step-functions/pricing/?utm_source=chatgpt.com)</li>
+      <li>Snowflake data transfer guidance: intra-region transfers usually free; cross-region egress may be charged by Snowflake. Verify your Snowflake & AWS region alignment.  [oai_citation:11‡Snowflake Documentation](https://docs.snowflake.com/en/user-guide/cost-understanding-data-transfer?utm_source=chatgpt.com)</li>
+    </ul>
+
+    <h3>Estimated monthly cost (example)</h3>
+
+    <table>
+      <thead>
+        <tr><th>Line item</th><th>Assumption (monthly)</th><th>Estimated $/month</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Lambda — compute (GB-seconds)</td><td>30k invocations, 0.5GB * 5s</td><td>$0.58</td></tr>
+        <tr><td>Lambda — requests</td><td>30k requests</td><td>$0.01</td></tr>
+        <tr><td>EventBridge</td><td>30k events</td><td>$0.03</td></tr>
+        <tr><td>S3 storage (Standard)</td><td>50 GB</td><td>$1.15</td></tr>
+        <tr><td>ECR image storage</td><td>5 GB</td><td>$0.50</td></tr>
+        <tr><td><strong>Short-run pipeline total (example)</strong></td><td></td><td><strong>$2.27 / month</strong></td></tr>
+
+        <tr><td>Example ECS baseline (m5.large, on-demand)</td><td>1 instance, 24/7</td><td>$69.12</td></tr>
+        <tr><td>Step Functions (long-run)</td><td>1k runs × 20 states</td><td>$0.50</td></tr>
+        <tr><td><strong>Long-run pipeline total (example)</strong></td><td></td><td><strong>$71.27 / month</strong></td></tr>
+      </tbody>
+    </table>
+
+    <p class="note">Notes: these numbers are illustrative and intentionally conservative. Real costs depend on actual query duration, concurrency, EC2 instance type and utilization, data egress between clouds/regions (Snowflake egress), and storage lifecycle choices. For larger workloads, EC2 instance or spot/Reserved/SavingsPlan pricing will dominate costs and should be optimized. Source links are cited above.</p>
+  </div>
+
+  <div class="section card">
+    <h2>Operational & security considerations</h2>
+    <ul>
+      <li>Secrets: store Snowflake credentials in AWS Secrets Manager or encrypted SSM Parameter Store. Grant Lambda/ECS task role read access only to required secrets.</li>
+      <li>Least privilege IAM: role for Lambda and ECS tasks should be scoped to S3 PutObject for the landing prefix, EventBridge PutEvents permissions for producers, and Secrets Manager read permission for the secret name only.</li>
+      <li>Network: if the Snowflake account is on a private network or requires IP allowlisting, ensure Lambda/ECS tasks run in a VPC with NAT or use a dedicated VPC endpoint pattern. Consider VPC endpoints for S3 to avoid NAT costs for S3 traffic.</li>
+      <li>Monitoring: use CloudWatch metrics and logs for Lambda and ECS; set up alarms on failures, duration spikes, and S3 object counts. Consider centralized observability (CloudWatch Logs + container insights + X-Ray if helpful).</li>
+      <li>Data validation: verify file format, checksum(s), and optionally run a lightweight validation lambda that checks the object after upload and sends SNS alerts on mismatch.</li>
+    </ul>
+  </div>
+
+  <div class="section card">
+    <h2>Migration & rollout plan (recommended)</h2>
+    <ol>
+      <li><strong>Stage 0 — PoC (1–2 weeks):</strong> Implement EventBridge → Lambda (zip function) that runs a simple Snowflake unload and writes to a test S3 prefix. Validate credentials, performance, and permissions.</li>
+      <li><strong>Stage 1 — Prod pilot (2–4 weeks):</strong> Harden code, add retries & idempotency, move secrets to Secrets Manager, route to existing S3 landing prefix with lifecycle rules and fine-grained prefixes. Add CloudWatch alarms.</li>
+      <li><strong>Stage 2 — Scale & observe (1 month):</strong> Run production short-run queries, gather metrics (durations, concurrency, storage). Decide when to move heavy jobs to ECS/Step Functions.</li>
+      <li><strong>Stage 3 — Long-run migration:</strong> Build ECS task definitions & Step Functions state machines for long-running jobs, test on sample heavy queries, and then move production traffic for large jobs.</li>
+    </ol>
+  </div>
+
+  <div class="section card">
+    <h2>Approvals</h2>
+    <p>Suggested approval text you can paste into an email or ticket:</p>
+    <pre>
+Request: Approve implementation of a Snowflake → S3 data-pipeline using EventBridge + Lambda (short-run), with an approved migration path to ECS + Step Functions (long-run).
+
+Purpose: Provide a low-cost, serverless pipeline for short ad-hoc/interactive queries and a predictable, orchestrated path for long-running jobs with retries and monitoring.
+
+Estimated monthly cost (example, illustrative): ~<strong>$2.27</strong> for the short-run setup; long-run baseline if an always-on m5.large ECS host is required ~<strong>$71.27</strong>. (Detailed assumptions are included in the attached architecture document.)
+
+Security & compliance: Secrets in Secrets Manager, least-privilege IAM roles, S3 lifecycle policies for retention, CloudWatch monitoring and alerts. Additional SOC/GDPR controls to be applied per policy.
+
+Please approve: [ ] Proceed with PoC (Stage 0) & secrets setup
+                 [ ] Proceed to Prod pilot after PoC
+                 [ ] Approve long-run ECS budget if required
+    </pre>
+    <p class="small">If you confirm, I will create a short checklist (IAM policies, Secrets Manager entries, EventBridge rule JSON, Lambda deployment file or container build instructions) and an AWS CloudFormation / Terraform skeleton to accelerate the PoC.</p>
+  </div>
+
+  <div class="section card">
+    <h2>References & sources</h2>
+    <ul class="small">
+      <li>AWS Lambda pricing documentation.  [oai_citation:12‡Amazon Web Services, Inc.](https://aws.amazon.com/lambda/pricing/?utm_source=chatgpt.com)</li>
+      <li>AWS EventBridge pricing & examples.  [oai_citation:13‡Amazon Web Services, Inc.](https://aws.amazon.com/de/eventbridge/pricing/?utm_source=chatgpt.com)</li>
+      <li>AWS ECR pricing (storage).  [oai_citation:14‡Amazon Web Services, Inc.](https://aws.amazon.com/ecr/pricing/?utm_source=chatgpt.com)</li>
+      <li>AWS S3 pricing (Standard, first tier).  [oai_citation:15‡CloudZero](https://www.cloudzero.com/blog/s3-pricing/?utm_source=chatgpt.com)</li>
+      <li>AWS Step Functions pricing (state transitions).  [oai_citation:16‡Amazon Web Services, Inc.](https://aws.amazon.com/step-functions/pricing/?utm_source=chatgpt.com)</li>
+      <li>AWS ECS pricing (EC2 launch type — see note that ECS itself has no separate charge).  [oai_citation:17‡Amazon Web Services, Inc.](https://aws.amazon.com/ecs/pricing/?utm_source=chatgpt.com)</li>
+      <li>Snowflake data transfer guidance (intra-region vs cross-region egress).  [oai_citation:18‡Snowflake Documentation](https://docs.snowflake.com/en/user-guide/cost-understanding-data-transfer?utm_source=chatgpt.com)</li>
+    </ul>
+  </div>
+
+  <footer class="small">
+    <p>Prepared by: <strong>Your Architecture Team</strong> — Date: <span id="today"></span></p>
+  </footer>
+
+  <script>
+    document.getElementById('today').innerText = new Date().toLocaleDateString();
+  </script>
+</body>
+</html>
+
+
+⸻
+
+Quick notes & next steps I can do for you right now
+	•	I can produce:
+	•	A ready-to-run minimal Lambda function (Python) that uses the Snowflake Python connector to COPY INTO or stream results into S3, plus a Terraform or CloudFormation snippet to create the EventBridge rule, Lambda, IAM role, and Secrets Manager secret.
+	•	An ECS task definition + Step Functions sample state machine (JSON) for the long-run workflow.
+	•	A short checklist / runbook for PoC and production hardening.
+	•	Tell me which of those you’d like first and I’ll generate it (I already have the architecture and cost assumptions above, so I can produce code or TF next).
+
+If you’d like, I’ll now generate the Lambda PoC (code + IAM policy + Terraform module) or the Step Functions + ECS example — pick one and I’ll produce it immediately.
