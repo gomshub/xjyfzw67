@@ -1,0 +1,196 @@
+Understood — you want EVERY network test to run in fully insecure mode, meaning:
+	•	No TLS verification anywhere
+	•	No certificate validation
+	•	All HTTPS calls use verify=False
+	•	Even boto3 (S3, KMS) should skip SSL validation
+
+Below is the final, clean, two-file structure (Flask + API module) where ALL network calls are insecure.
+
+This is exactly what you need when testing from on-prem Kubernetes through firewalls, SSL interceptors, VPC PrivateLink, KMS, or S3 endpoints.
+
+⸻
+
+✅ api.py (ALL insecure mode)
+
+# api.py
+import socket
+import ssl
+import boto3
+import botocore
+import requests
+
+# Disable boto3 SSL verification globally
+boto3_session = boto3.session.Session()
+config = botocore.client.Config(signature_version="s3v4", ssl_verify=False)
+
+
+# --------------------------
+# DNS TEST
+# --------------------------
+def dns_test(hostname):
+    try:
+        ip = socket.gethostbyname(hostname)
+        return {"status": "OK", "hostname": hostname, "ip": ip}
+    except Exception as e:
+        return {"status": "ERROR", "error": str(e)}
+
+
+# --------------------------
+# TCP CONNECT
+# --------------------------
+def tcp_test(host, port=443):
+    try:
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.close()
+        return {"status": "OK", "host": host, "port": port}
+    except Exception as e:
+        return {"status": "ERROR", "error": str(e)}
+
+
+# --------------------------
+# TLS TEST (INSECURE)
+# --------------------------
+def tls_insecure_test(url):
+    try:
+        r = requests.get(url, verify=False, timeout=5)
+        return {"status": "OK", "http_status": r.status_code, "url": url}
+    except Exception as e:
+        return {"status": "ERROR", "error": str(e)}
+
+
+# --------------------------
+# S3 TEST (NO SSL VALIDATION)
+# --------------------------
+def s3_test(bucket, key):
+    s3 = boto3.client("s3", config=config, verify=False)
+
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return {"status": "OK", "message": "S3 HeadObject succeeded"}
+    except botocore.exceptions.EndpointConnectionError as e:
+        return {"status": "NETWORK_ERROR", "error": str(e)}
+    except botocore.exceptions.ClientError as e:
+        return {"status": "API_ERROR", "error": str(e)}
+
+
+# --------------------------
+# KMS TEST (NO SSL VALIDATION)
+# --------------------------
+def kms_test(kms_key_id):
+    kms = boto3.client("kms", config=config, verify=False)
+
+    try:
+        kms.encrypt(KeyId=kms_key_id, Plaintext=b"test")
+        return {"status": "OK", "message": "KMS encryption succeeded"}
+    except botocore.exceptions.EndpointConnectionError as e:
+        return {"status": "NETWORK_ERROR", "error": str(e)}
+    except botocore.exceptions.ClientError as e:
+        return {"status": "API_ERROR", "error": str(e)}
+
+
+⸻
+
+✅ app.py (Flask API calling insecure functions)
+
+# app.py
+from flask import Flask, request, jsonify
+from api import dns_test, tcp_test, tls_insecure_test, s3_test, kms_test
+
+app = Flask(__name__)
+
+@app.route("/dns")
+def test_dns():
+    hostname = request.args.get("host")
+    return jsonify(dns_test(hostname))
+
+
+@app.route("/tcp")
+def test_tcp():
+    host = request.args.get("host")
+    port = int(request.args.get("port", 443))
+    return jsonify(tcp_test(host, port))
+
+
+@app.route("/tls")
+def test_tls():
+    url = request.args.get("url")
+    return jsonify(tls_insecure_test(url))
+
+
+@app.route("/s3")
+def test_s3():
+    bucket = request.args.get("bucket")
+    key = request.args.get("key")
+    return jsonify(s3_test(bucket, key))
+
+
+@app.route("/kms")
+def test_kms():
+    key_id = request.args.get("key")
+    return jsonify(kms_test(key_id))
+
+
+@app.route("/")
+def home():
+    return jsonify({
+        "message": "Network Diagnostic API (ALL SSL INSECURE)",
+        "routes": [
+            "/dns?host=s3.eu-west-1.amazonaws.com",
+            "/tcp?host=10.0.1.25&port=443",
+            "/tls?url=https://bucket.s3.amazonaws.com",
+            "/s3?bucket=mybucket&key=test.txt",
+            "/kms?key=<kms_key_id>"
+        ]
+    })
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
+
+
+⸻
+
+🔥 ALL calls now bypass SSL verification
+
+Component	Secured?	Notes
+requests.get(..., verify=False)	❌ Insecure	bypasses TLS cert validation
+boto3 S3 client	❌ Insecure	ssl_verify=False
+boto3 KMS client	❌ Insecure	ssl_verify=False
+TLS test	❌ Insecure	uses insecure GET
+TCP test	N/A	raw sockets
+
+
+⸻
+
+💡 Why this is important for your setup
+
+You said:
+
+“Note all are insecure verify false requests”
+
+This is exactly what you need when on-prem traffic goes through:
+	•	SSL-intercepting firewalls
+	•	TLS middleboxes
+	•	PrivateLink endpoint with mismatched cert
+	•	Corporate proxy
+	•	F5 / Palo Alto / Fortinet inspection
+	•	VPC endpoint with broken CA chain
+
+Running this from on-prem Kubernetes will finally tell you:
+
+✔ DNS to PrivateLink works or not
+✔ Routing to ENI works or not
+✔ Firewall blocks HTTPS or not
+✔ KMS endpoint reachable or not
+✔ S3 endpoint reachable or not
+
+⸻
+
+If you want, I can also give:
+
+📌 A Dockerfile
+📌 Kubernetes Deployment + Service YAML
+📌 A Helm chart
+📌 A version that logs to a file so you can collect logs from the pod
+
+Just tell me!
