@@ -1,3 +1,90 @@
+
+Sure! Here’s a ready-to-use Terraform snippet to create a KMS VPC Interface Endpoint for your VPC. You can include this in your merge request.
+
+This example assumes:
+	•	You already have a VPC and subnets
+	•	You want the endpoint in multiple private subnets
+	•	You want private DNS enabled
+
+⸻
+
+
+# -------------------------------
+# KMS VPC Interface Endpoint
+# -------------------------------
+
+variable "vpc_id" {
+  description = "VPC ID where the endpoint will be created"
+  type        = string
+}
+
+variable "private_subnet_ids" {
+  description = "List of private subnet IDs for the endpoint ENIs"
+  type        = list(string)
+}
+
+variable "kms_vpc_endpoint_sg_id" {
+  description = "Security group ID for the KMS VPC endpoint"
+  type        = string
+}
+
+provider "aws" {
+  region = "eu-central-1" # change to your region
+}
+
+resource "aws_vpc_endpoint" "kms" {
+  vpc_id            = var.vpc_id
+  service_name      = "com.amazonaws.eu-central-1.kms"  # change region if needed
+  vpc_endpoint_type = "Interface"
+  subnet_ids        = var.private_subnet_ids
+  security_group_ids = [var.kms_vpc_endpoint_sg_id]
+
+  private_dns_enabled = true
+
+  tags = {
+    Name = "kms-vpc-endpoint"
+    Environment = "dev"   # change as needed
+  }
+}
+
+
+⸻
+
+Notes / Recommendations
+	1.	Security Group (kms_vpc_endpoint_sg_id):
+
+# Example SG ingress
+ingress {
+  description      = "Allow KMS traffic from on-prem / kube"
+  from_port        = 443
+  to_port          = 443
+  protocol         = "tcp"
+  cidr_blocks      = ["<your-onprem-cidr>"]  # replace with your on-prem subnet/NAT
+}
+
+	•	Ensure egress allows return traffic to on-prem (usually 0.0.0.0/0 is fine).
+
+	2.	Private DNS enabled
+
+	•	This ensures kms.<region>.amazonaws.com resolves to the private ENI inside your VPC.
+	•	Required so your on-prem Kubernetes nodes can reach KMS without hitting public IPs.
+
+	3.	Multiple subnets
+
+	•	Best practice: put the endpoint in all private subnets where kube nodes reside, for high availability.
+
+	4.	Region
+
+	•	Replace eu-central-1 with your AWS region.
+
+⸻
+
+If you want, I can also provide a complete Terraform snippet including S3 VPC endpoint + KMS endpoint + security groups ready to submit as a merge request.
+
+Do you want me to do that?
+
+====
+
 Here’s a ready-to-send explanation you can forward to your Cloud Infrastructure team. It is clear, concise, and explains why the KMS VPC interface endpoint is required.
 
 ⸻
