@@ -1,3 +1,40 @@
+Here’s a ready-to-send explanation you can forward to your Cloud Infrastructure team. It is clear, concise, and explains why the KMS VPC interface endpoint is required.
+
+⸻
+
+Subject: Request to Create KMS VPC Interface Endpoint for On-Prem Kubernetes S3 Access
+
+Hi [Cloud Infra Team],
+
+We are currently trying to access an S3 bucket with SSE-KMS encryption from our on-prem Kubernetes cluster via a VPC Interface Endpoint for S3. While the S3 endpoint is reachable, all operations fail because the KMS API calls required for encryption/decryption are not reachable.
+
+Key points:
+	1.	S3 with SSE-KMS requires KMS API calls:
+	•	Every PUT/GET operation on S3 with KMS encryption triggers GenerateDataKey, Encrypt, and Decrypt calls to KMS.
+	•	These calls are separate from the S3 data plane.
+	2.	On-prem Kubernetes cannot reach public KMS endpoints:
+	•	Without a KMS interface endpoint, the AWS SDK attempts to reach kms.<region>.amazonaws.com over public IPs.
+	•	Our firewall blocks outbound access to public AWS IPs, causing timeouts.
+	3.	Local machines work because they have public internet access, but this does not apply to our on-prem Kubernetes nodes.
+	4.	Solution:
+	•	Create a KMS VPC Interface Endpoint (com.amazonaws.<region>.kms) in the same VPC and subnets as the S3 interface endpoint.
+	•	Attach appropriate security groups allowing inbound/outbound traffic from our on-prem network.
+	•	Enable private DNS so kms.<region>.amazonaws.com resolves to the private endpoint.
+
+Once this endpoint is in place, our on-prem Kubernetes cluster will be able to perform S3 PUT/GET operations using SSE-KMS entirely via private network traffic, without going through the public internet.
+
+Thank you,
+[Your Name / Team]
+
+⸻
+
+If you want, I can also create a shorter, more executive version that explains it in 2–3 sentences for managers or approvals.
+
+Do you want me to do that?
+
+
+====
+
 Got it — let’s simplify everything into VERY clear, step-by-step checks so you can immediately verify whether routing is correct for your Kubernetes cluster to reach the AWS S3 VPC endpoint.
 
 ⸻
