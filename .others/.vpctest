@@ -1,4 +1,12 @@
 
+(dst_ip >= 3.248.208.0 AND dst_ip <= 3.248.215.255)
+OR
+(dst_ip >= 52.212.0.0 AND dst_ip <= 52.215.255.255)
+OR
+(dst_ip >= 63.34.168.0 AND dst_ip <= 63.34.169.255)
+
+
+===
 Sure! Here’s a ready-to-use Terraform snippet to create a KMS VPC Interface Endpoint for your VPC. You can include this in your merge request.
 
 This example assumes:
