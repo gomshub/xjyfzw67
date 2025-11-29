@@ -1,0 +1,131 @@
+Got it — your organization wants you to use “Gateway Runner” to trigger Bamboo from GitHub.
+This is a common enterprise setup where GitHub Actions triggers Bamboo indirectly through a secure gateway runner (a small agent/API proxy your company exposes).
+
+Below is the clean explanation + architecture + sample GitHub workflow that uses a gateway runner to start a Bamboo plan.
+
+⸻
+
+✅ What is a Gateway Runner?
+
+A gateway runner is:
+	•	A proxy endpoint created by your DevOps/Infra team
+	•	It receives API calls from GitHub Actions
+	•	It authenticates/validates the request
+	•	It triggers Bamboo internally behind the firewall
+	•	GitHub never calls Bamboo directly
+
+✔ Why companies use it:
+	•	Bamboo is usually on-prem, not public
+	•	GitHub cannot reach internal networks
+	•	The gateway runner acts as a bridge
+
+⸻
+
+🟦 Current Architecture (GitHub → Gateway Runner → Bamboo)
+
+GitHub Actions (Repo A)
+        |
+        v
+ Gateway Runner  (HTTP/REST endpoint)
+        |
+        v
+     Bamboo Server
+        |
+        v
+   Tests + Build + Deploy
+
+This is the exact flow they want you to use.
+
+⸻
+
+🟦 Current GitHub Workflow Using Gateway Runner
+
+➤ Repo A: .github/workflows/release.yml
+
+name: Trigger Bamboo via Gateway Runner
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  trigger-bamboo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Gateway Runner
+        run: |
+          VERSION=${{ github.event.release.tag_name }}
+
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.GATEWAY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            https://gateway.company.com/run-bamboo \
+            -d "{\"plan\": \"PROJECT-PLAN\", \"version\": \"$VERSION\"}"
+
+Required Secret:
+	•	GATEWAY_TOKEN — a token provided by DevOps team for the gateway runner.
+
+Gateway Runner does:
+	•	Authenticates GitHub request
+	•	Calls Bamboo REST API:
+
+/rest/api/latest/queue/PROJECT-PLAN
+
+
+	•	Passes version/tag to Bamboo
+	•	Starts the CI/CD pipeline
+
+⸻
+
+🟩 Future Architecture (Once DevOps Moves Fully to GitHub)
+
+When DevOps also moves to GitHub:
+
+Repo A (Devs) ──→ Repo B (DevOps) ──→ ArgoCD ──→ Kubernetes
+       release        CI tests           GitOps        deploy
+
+No gateway runner needed.
+No Bamboo needed.
+Everything is GitHub → GitHub → ArgoCD.
+
+⸻
+
+🟩 Future GitHub-to-GitHub Workflow Example
+
+Repo A triggers Repo B
+
+curl -X POST \
+ -H "Authorization: Bearer ${{ secrets.DEVOPS_PAT }}" \
+ https://api.github.com/repos/org/repo-b/dispatches \
+ -d "{\"event_type\": \"deploy\", \"client_payload\": {\"version\": \"$VERSION\"}}"
+
+Repo B receives the event → tests → updates manifests → Argo deploys
+
+on:
+  repository_dispatch:
+    types: [deploy]
+
+
+⸻
+
+🟢 Summary
+
+NOW (Hybrid GH + Bamboo):
+	•	Use gateway runner to trigger Bamboo plan.
+	•	GitHub Action → Gateway → Bamboo.
+
+LATER (Full GitHub):
+	•	Use repository_dispatch to trigger DevOps repo workflows.
+	•	GitHub → GitHub → ArgoCD GitOps.
+
+⸻
+
+🟦 I can also provide:
+
+✔ Gateway runner sample code (Python Flask / NodeJS)
+✔ Bamboo REST trigger example
+✔ Secure secret management
+✔ Full future GitHub DevOps pipeline diagram
+
+Would you like the gateway runner code as well?
