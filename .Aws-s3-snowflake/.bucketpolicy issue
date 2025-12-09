@@ -1,0 +1,105 @@
+Here is the best, final, correct answer in one place — no ambiguity, no options, no back-and-forth.
+
+⸻
+
+✅ THE REAL REASON IAM USER WORKS BUT LAMBDA FAILS
+
+✔ IAM user works
+
+Because IAM user traffic does NOT go through the S3 VPC endpoint →
+It directly hits public S3 over HTTPS, so the bucket policy condition:
+
+"Deny": {
+  "Condition": { "Bool": { "aws:SecureTransport": "false" } }
+}
+
+and
+
+"Condition": { "StringEquals": { "aws:SourceVpce": "vpce-xxxx" } }
+
+does NOT block the IAM user.
+
+IAM user = public S3 = bucket policy doesn’t evaluate VPCE conditions → allowed.
+
+⸻
+
+❌ WHY LAMBDA FAILS EVEN WHEN IN SAME VPC
+
+Lambda is in your VPC, but the key mistake is:
+
+❗ S3 Control-plane actions do NOT use the VPC endpoint
+
+The following actions:
+	•	DeleteBucketPolicy
+	•	PutBucketPolicy
+	•	GetBucketPolicy
+
+are control-plane actions.
+
+S3 control-plane requests ALWAYS go out to public AWS endpoints, NOT through your VPCE.
+
+Therefore the bucket policy sees:
+	•	No aws:SourceVpce
+	•	No aws:SourceVpc
+
+And your bucket policy has:
+
+"Effect": "Deny",
+"Principal": "*",
+"Action": "s3:*",
+"Condition": {
+    "StringNotEquals": { "aws:SourceVpce": "vpce-xxxx" }
+}
+
+Because the aws:SourceVpce key is missing, AWS interprets it as NOT matching → explicit Deny applies.
+
+Explicit Deny beats Lambda role always.
+
+⸻
+
+🎯 THE ONLY WAY TO FIX IT (THE BEST SOLUTION)
+
+Since control-plane does not go through VPCE, and explicit Deny blocks Lambda, the ONLY correct fix is:
+
+✅ Add an Allow for the Lambda Role that overrides the Deny condition
+
+Update your bucket policy with this exact block:
+
+{
+  "Effect": "Allow",
+  "Principal": { "AWS": "arn:aws:iam::<ACCOUNT-ID>:role/lambda-s3-full-access-role" },
+  "Action": [
+      "s3:DeleteBucketPolicy",
+      "s3:PutBucketPolicy",
+      "s3:GetBucketPolicy"
+  ],
+  "Resource": "arn:aws:s3:::your-bucket-name"
+}
+
+✔ This works because:
+	•	An Allow without conditions takes precedence before evaluating the Deny condition.
+	•	This gives Lambda permission even if request does not come from VPCE.
+
+⸻
+
+🚫 NOT NEEDED & NOT EFFECTIVE
+	•	You do NOT need to add SourceVpce to Lambda IAM policy
+	•	You do NOT need to modify the VPC endpoint
+	•	You do NOT need to use SourceVpc
+	•	You do NOT need to redeploy Lambda into another subnet
+
+None of those fix the root cause.
+
+⸻
+
+🟢 FINAL SUMMARY (1-Minute Version)
+
+IAM user works → uses public S3 → bucket policy VPCE conditions not evaluated.
+
+Lambda fails → control-plane does not use VPCE → bucket policy sees missing aws:SourceVpce → explicit Deny triggers → Lambda blocked.
+
+Fix → Add explicit “Allow” for the Lambda role to bypass SourceVpce Deny match.
+
+⸻
+
+If you want, I can generate the exact full corrected bucket policy with your bucket name + account ID.
