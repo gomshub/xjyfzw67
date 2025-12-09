@@ -1,3 +1,77 @@
+Ah — now I see exactly where the confusion is. Let’s make this crystal clear in one go.
+
+⸻
+
+1️⃣ Why IAM user can do S3 actions but Lambda cannot
+
+Your setup:
+	•	Bucket policy has:
+
+"Deny": {
+  "Principal": "*",
+  "Action": "s3:*",
+  "Condition": {
+      "Bool": {"aws:SecureTransport": "false"},
+      "StringNotEquals": {"aws:SourceVpce": "vpce-xxxx"}
+  }
+}
+
+	•	IAM user is connecting via the VPCE → matches the condition → Deny does NOT apply → IAM user’s Allow permissions work → can Get/Put objects.
+	•	Lambda is in the same VPC → should also go through VPCE, but control-plane calls like DeleteBucketPolicy do NOT go through the VPCE.
+
+Key point:
+	•	IAM user uses the VPCE for data-plane operations (GetObject, PutObject) → works
+	•	Lambda attempts DeleteBucketPolicy (control-plane) → VPCE not used → aws:SourceVpce missing → Deny triggers → blocked
+	•	IAM Allow cannot override Deny → Lambda fails
+
+✅ So IAM user works because the request matches the VPCE condition. Lambda fails because control-plane requests ignore the VPCE.
+
+⸻
+
+2️⃣ Can IAM user delete the bucket policy if allowed?
+
+Yes — IAM Allow can delete the bucket policy only if the bucket policy does not have a Deny that blocks this user.
+	•	If bucket policy has no Deny on s3:DeleteBucketPolicy, then:
+
+{
+  "Effect": "Allow",
+  "Action": "s3:*",
+  "Resource": "*",
+  "Principal": { "AWS": "arn:aws:iam::<ACCOUNT-ID>:user/<IAM-USER>" }
+}
+
+→ The IAM user can delete the bucket policy.
+	•	If bucket policy has a Deny (like the SourceVpce or SecureTransport deny), then even IAM user cannot delete unless the request satisfies the Deny condition.
+
+⸻
+
+3️⃣ Bottom line
+
+Principal	Action	Why it works or fails
+IAM user	Get/Put	Works because IAM user request satisfies the bucket policy Deny conditions (via VPCE or public endpoint).
+IAM user	DeleteBucketPolicy	Works only if bucket policy does not Deny it. If Deny exists, IAM Allow cannot override.
+Lambda	DeleteBucketPolicy	Fails if bucket policy Deny exists (VPCE condition or other) because Lambda control-plane calls do not go through VPCE → Deny triggers.
+Lambda IAM policy	Add Allow	Alone cannot fix Deny → must also add explicit Allow in bucket policy for Lambda role.
+
+
+⸻
+
+✅ Solution for Lambda
+	1.	Add explicit Allow in the bucket policy for the Lambda role for:
+
+s3:DeleteBucketPolicy
+s3:PutBucketPolicy
+s3:GetBucketPolicy
+
+	2.	Keep existing Deny statements for all other principals.
+
+⸻
+
+If you want, I can draw a simple diagram showing IAM user vs Lambda vs S3 bucket policy evaluation — it usually makes this crystal clear in 30 seconds.
+
+Do you want me to do that?
+==
+
 Here is the best, final, correct answer in one place — no ambiguity, no options, no back-and-forth.
 
 ⸻
