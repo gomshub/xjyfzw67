@@ -1,4 +1,60 @@
 
+import boto3
+import snowflake.connector
+import os
+
+def get_secret(secret_name):
+    client = boto3.client("secretsmanager")
+    resp = client.get_secret_value(SecretId=secret_name)
+    return resp["SecretString"]
+
+def lambda_handler(event, context):
+
+    # 1. Fetch the key (1-line inside Secrets Manager)
+    secret_name = os.environ["SSH_KEY_SECRET_NAME"]
+    raw_key = get_secret(secret_name)
+
+    # 2. Convert literal "\n" into real newlines
+    private_key = raw_key.replace("\\n", "\n")
+
+    # 3. Write to /tmp (Snowflake connector expects a file)
+    key_path = "/tmp/sf_key.pem"
+    with open(key_path, "w") as f:
+        f.write(private_key)
+
+    # 4. MOST IMPORTANT: secure file permissions (Linux requirement)
+    import os
+    os.chmod(key_path, 0o600)
+
+    # 5. Snowflake connection test
+    try:
+        conn = snowflake.connector.connect(
+            user=os.environ["SNOWFLAKE_USER"],
+            account=os.environ["SNOWFLAKE_ACCOUNT"],
+            private_key_file=key_path,
+            warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE"),
+            database=os.environ.get("SNOWFLAKE_DATABASE"),
+            schema=os.environ.get("SNOWFLAKE_SCHEMA"),
+            role=os.environ.get("SNOWFLAKE_ROLE")
+        )
+
+        cur = conn.cursor()
+        cur.execute("SELECT CURRENT_VERSION()")
+        version = cur.fetchone()[0]
+
+        return {
+            "status": "OK",
+            "sf_version": version
+        }
+
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "message": str(e)
+        }
+
+
+
 Below is the FINAL, CLEAN, FULLY WORKING solution to build a Python 3.12 Lambda Layer for Snowflake SSH key authentication, which requires:
 	•	cryptography
 	•	cffi
