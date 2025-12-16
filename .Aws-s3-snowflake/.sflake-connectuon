@@ -1,0 +1,174 @@
+Here is the single, complete checklist you can follow end-to-end to fix Snowflake PrivateLink timeouts from Lambda in VPC.
+If any one item is missing, the connection will hang.
+
+⸻
+
+✅ Snowflake PrivateLink from Lambda — CHECK & FIX LIST
+
+1️⃣ Snowflake account URL (MOST COMMON ISSUE)
+
+✅ MUST use Snowflake PrivateLink URL
+
+<account>.<region>.privatelink.snowflakecomputing.com
+
+❌ DO NOT use
+	•	vpce-xxxx
+	•	account.region.snowflakecomputing.com
+
+📌 Fix: Update account= in code/config
+
+⸻
+
+2️⃣ Snowflake Interface VPC Endpoint exists
+
+AWS Console → VPC → Endpoints
+
+✅ Must exist
+	•	Type: Interface
+	•	Service name: vpce-svc-xxxxxxxx (Snowflake provided)
+	•	VPC: same as Lambda
+	•	Subnets: same as Lambda
+
+📌 Fix: Create endpoint in Lambda VPC/subnets
+
+⸻
+
+3️⃣ Private DNS is ENABLED on endpoint (CRITICAL)
+
+Endpoint → Edit
+
+Private DNS: ENABLED ✅
+
+📌 Fix: Enable Private DNS and save
+
+⸻
+
+4️⃣ Security Groups (MOST MISSED)
+
+a) Lambda Security Group
+
+Outbound rules
+
+TCP 443 → 0.0.0.0/0
+
+(or Snowflake endpoint SG)
+
+b) Snowflake Endpoint Security Group
+
+Inbound rules
+
+TCP 443 → Lambda Security Group
+
+📌 Fix: Add missing inbound/outbound rules
+
+⸻
+
+5️⃣ Lambda subnet routing
+
+✅ Lambda must be in private subnets
+
+Route table must include:
+
+local VPC route (automatic)
+
+❌ No NAT required for PrivateLink
+
+📌 Fix: Ensure Lambda subnets are correct
+
+⸻
+
+6️⃣ DNS resolution test (INSIDE Lambda)
+
+Add temporarily:
+
+import socket
+print(socket.gethostbyname(
+    "<account>.<region>.privatelink.snowflakecomputing.com"
+))
+
+✅ If IP returned → DNS OK
+
+❌ If timeout → endpoint or Private DNS broken
+
+📌 Fix: Recheck steps 2 & 3
+
+⸻
+
+7️⃣ Snowflake connector code (correct)
+
+snowflake.connector.connect(
+    user=USER,
+    account="<account>.<region>.privatelink",
+    private_key=PRIVATE_KEY,
+    protocol="https",
+    port=443,
+    login_timeout=10,
+    network_timeout=10
+)
+
+📌 Fix: Ensure protocol, port, and timeouts are set
+
+⸻
+
+8️⃣ SSH private key formatting (NOT the root cause, but must be correct)
+
+Stored as 1 line with \\n:
+
+-----BEGIN PRIVATE KEY-----\\nMIIEv...\\n-----END PRIVATE KEY-----
+
+In code:
+
+private_key = key_str.replace("\\n", "\n")
+
+📌 Fix: Replace \\n → \n before loading key
+
+⸻
+
+9️⃣ S3 access (since no Secrets Manager endpoint)
+
+✅ Must exist
+	•	S3 Gateway VPC Endpoint
+	•	IAM role allows s3:GetObject
+
+📌 Fix: Add endpoint or IAM permission if missing
+
+⸻
+
+1️⃣0️⃣ Optional but HIGHLY recommended endpoints
+
+Create these to avoid future timeouts:
+
+Service	Endpoint
+CloudWatch Logs	Interface
+STS	Interface
+KMS	Interface
+
+
+⸻
+
+🧠 FINAL TRUTH (remember this)
+
+If DNS + Endpoint + SG are correct, Snowflake NEVER times out.
+Timeout = network path missing, not code.
+
+⸻
+
+✅ Minimal working architecture
+
+Lambda (VPC)
+ ├─ S3 Gateway Endpoint
+ ├─ Snowflake Interface Endpoint (PrivateLink)
+ ├─ Private DNS ENABLED
+ ├─ SG allows TCP 443
+ └─ Snowflake privatelink URL in code
+
+
+⸻
+
+If you want next, I can:
+	•	Validate your setup step-by-step
+	•	Provide Terraform for all endpoints
+	•	Give VPC Flow Log queries to pinpoint failures
+	•	Create a one-click connectivity test Lambda
+
+Just say 👍
