@@ -1,0 +1,255 @@
+
+Example code from snowflake team to connect to snowflake via ssh key:
+
+# !/usr/bin/env python
+
+import os
+import snowflake.connector
+
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+
+# Reads the key
+
+with open("rsa_key.p8", "rb") as key:
+  p_key= serialization.load_pem_private_key(
+    key.read(),
+    password=os.environ['PRIVATE_KEY_PASSPHRASE'].encode(), # Set to None if no passphrase
+    backend=default_backend()
+  )
+
+pkb = p_key.private_bytes(
+  encoding=serialization.Encoding.DER,
+  format=serialization.PrivateFormat.PKCS8,
+  encryption_algorithm=serialization.NoEncryption())
+
+# Gets the version
+
+with snowflake.connector.connect(
+  user="TECH_USER",
+  account="COMPANY-COMPANY.privatelink",
+  private_key=pkb
+) as ctx:
+  cs = ctx.cursor()
+  cs.execute("SELECT current_version()")
+  print(cs.fetchone())
+
+
+
+app.py : my code to connect to s3 to get ssh key and the connect to snowflake
+
+"""
+TEMPORARY VERSION - Uses S3 for credentials instead of Secrets Manager
+This works with your existing S3 Gateway Endpoint while you wait for Secrets Manager VPC endpoint
+"""
+import os
+import io
+import csv
+import json
+import boto3
+import yaml
+import logging
+import snowflake.connector
+from datetime import datetime
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+
+# Logger setup
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# VPC Endpoint URL for S3 (required for VPC enforcement)
+S3_ENDPOINT_URL = os.getenv('S3_ENDPOINT_URL', 'https://vpce-0cb61a012583d3d0d-53uzp76d.s3.eu-west-1.vpce.amazonaws.com')
+
+# KMS Key ID for S3 encryption (mandatory)
+KMS_KEY_ID = os.getenv('KMS_KEY_ID', 'arn:aws:kms:eu-west-1:768361274405:key/93b3d568-d4ba-4bdc-ac51-3e3205c5b998')
+
+# AWS clients - with VPC endpoint
+s3 = boto3.client(
+    's3',
+    endpoint_url=S3_ENDPOINT_URL,
+    verify=False  # Disable SSL verification for VPC endpoint
+)
+
+# Environment variables
+OUTPUT_S3_BUCKET = os.getenv('OUTPUT_S3_BUCKET')
+CREDS_S3_KEY = os.getenv('CREDS_S3_KEY')  # S3 key for creds in OUTPUT_S3_BUCKET
+SNOWFLAKE_PRIVATELINK_ENDPOINT = os.getenv('SNOWFLAKE_PRIVATELINK_ENDPOINT')
+
+
+TASK_ROOT = os.getenv('LAMBDA_TASK_ROOT', '/var/task')
+LOCAL_CONFIG_PATH = os.path.join(TASK_ROOT, 'config', 'queries.yml')
+
+def get_config():
+    """Load SQL queries from local YAML config if present"""
+    try:
+        if os.path.exists(LOCAL_CONFIG_PATH):
+            logger.info("Loading queries from %s", LOCAL_CONFIG_PATH)
+            with open(LOCAL_CONFIG_PATH, 'rb') as f:
+                cfg = yaml.safe_load(f) or {}
+                return cfg
+        else:
+            logger.info("No local queries file found at %s", LOCAL_CONFIG_PATH)
+    except Exception as e:
+        logger.exception("Failed to load config file: %s", e)
+    return {'queries': {}}
+
+def get_snowflake_creds():
+    """Fetch Snowflake credentials from S3 (temporary workaround)"""
+    logger.info("Fetching Snowflake creds from S3: s3://%s/%s", OUTPUT_S3_BUCKET, CREDS_S3_KEY)
+    response = s3.get_object(Bucket=OUTPUT_S3_BUCKET, Key=CREDS_S3_KEY)
+    return json.loads(response['Body'].read())
+
+def run_query(sql, prefix='result'):
+    logger.info("Starting run_query for prefix=%s", prefix)
+    creds = get_snowflake_creds()
+    
+    # Extract account locator (remove .snowflakecomputing.com if present)
+    account = creds.get('account', '').replace('.snowflakecomputing.com', '').replace('.privatelink', '')
+    
+    logger.info("Connecting to Snowflake account=%s user=%s", account, creds.get('user'))
+    
+    # Handle authentication: private key only
+    if not creds.get('private_key'):
+        raise ValueError("'private_key' must be provided in secrets")
+    
+    logger.info("Using private key authentication")
+    
+    # Convert PEM private key string to binary DER format (Snowflake's preferred format)
+    # 1. Get private key from credentials (single-line format with \\n)
+    raw_key = creds.get('private_key')
+    
+    # 2. Convert literal "\\n" into real newlines
+    private_key_pem = raw_key.replace('\\n', '\n')
+    
+    # 3. Load the PEM key and convert to DER binary format
+    p_key = serialization.load_pem_private_key(
+        private_key_pem.encode('utf-8'),
+        password=None,  # No passphrase
+        backend=default_backend()
+    )
+    
+    # 4. Serialize to DER/PKCS8 binary format (what Snowflake expects)
+    pkb = p_key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    )
+    
+    # For PrivateLink, use VPC endpoint URL as host
+    if SNOWFLAKE_PRIVATELINK_ENDPOINT:
+        logger.info("Using Snowflake PrivateLink configuration")
+        logger.info("PrivateLink VPC endpoint: %s", SNOWFLAKE_PRIVATELINK_ENDPOINT)
+        
+        # Prepare connection parameters for PrivateLink
+        # Use lowercase account and explicit VPC endpoint host
+        conn_params = {
+            'user': creds.get('user'),
+            'account': account.lower(),  # Lowercase account: pictet-pictet
+            'role': creds.get('role'),
+            'host': SNOWFLAKE_PRIVATELINK_ENDPOINT,  # VPC endpoint DNS
+            'protocol': 'https',
+            'port': 443,
+            'private_key': pkb,  # Binary DER format
+            'login_timeout': 30,
+            'network_timeout': 30
+        }
+        logger.info("Connecting via PrivateLink with account=%s, host=%s", account.lower(), SNOWFLAKE_PRIVATELINK_ENDPOINT)
+    else:
+        logger.info("No PrivateLink endpoint configured, using default Snowflake connection")
+        # Prepare connection parameters for standard connection
+        conn_params = {
+            'user': creds.get('user'),
+            'account': account,
+            'role': creds.get('role'),
+            'private_key': pkb  # Binary DER format
+        }
+    
+    logger.info("Connection parameters: account=%s, user=%s, role=%s", 
+                conn_params.get('account'), conn_params.get('user'), 
+                conn_params.get('role'))
+    
+    ctx = snowflake.connector.connect(**conn_params)
+    cs = ctx.cursor()
+    try:
+        logger.info("Executing SQL: %s", sql if len(sql) < 200 else sql[:200] + "...")
+        cs.execute(sql)
+        cols = [c[0] for c in cs.description] if cs.description else []
+        rows = cs.fetchall()
+        logger.info("Query returned %d rows", len(rows))
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        if cols:
+            writer.writerow(cols)
+        writer.writerows(rows)
+        data = buf.getvalue().encode('utf-8')
+        datepart = datetime.utcnow().strftime('%Y-%m-%d')
+        key = f"{prefix}/{datepart}/{prefix}_{datetime.utcnow().strftime('%H%M%S')}.csv"
+        
+        logger.info("Uploading to s3://%s/%s via VPC endpoint", OUTPUT_S3_BUCKET, key)
+        logger.info("S3 VPC Endpoint: %s", S3_ENDPOINT_URL)
+        logger.info("Using KMS key for encryption: %s", KMS_KEY_ID)
+        
+        # Upload to S3 with KMS encryption (mandatory)
+        s3.put_object(
+            Bucket=OUTPUT_S3_BUCKET,
+            Key=key,
+            Body=data,
+            ServerSideEncryption='aws:kms',  # Use KMS encryption
+            SSEKMSKeyId=KMS_KEY_ID  # Specify KMS key ID
+        )
+        
+        logger.info("Upload complete")
+        return {'rows': len(rows), 's3_key': key}
+    finally:
+        try:
+            cs.close()
+            ctx.close()
+        except Exception:
+            pass
+
+def lambda_handler(event, context):
+    logger.info("=" * 60)
+    logger.info("Snowflake to S3 Export - Using S3 for Credentials")
+    logger.info("=" * 60)
+    logger.info("VPC Endpoint Configuration:")
+    logger.info("  S3 Endpoint: %s", S3_ENDPOINT_URL)
+    logger.info("  KMS Key: %s", KMS_KEY_ID)
+    logger.info("Environment:")
+    logger.info("  Output S3 Bucket: %s", OUTPUT_S3_BUCKET)
+    logger.info("  Credentials S3: s3://%s/%s", OUTPUT_S3_BUCKET, CREDS_S3_KEY)
+    logger.info("=" * 60)
+    
+    # Prioritize event-provided queries (for manual testing)
+    cfg = get_config()
+    queries = event.get('queries') if isinstance(event, dict) and event.get('queries') else cfg.get('queries', {})
+    logger.info("Queries to run: %s", list(queries.keys()))
+    results = {}
+    for name, sql in queries.items():
+        try:
+            logger.info('Running query %s', name)
+            results[name] = run_query(sql, prefix=name)
+        except Exception as exc:
+            logger.exception("Error running query %s: %s", name, exc)
+            results[name] = {'error': str(exc)}
+    logger.info("Lambda completed. Results: %s", results)
+    return {'status': 'ok', 'results': results}
+
+
+
+
+
+Log on KO:
+
+[INFO]	2025-12-16T16:44:33.158Z	dd66b20b-c25b-4287-8e2d-b54d26add709	Using Snowflake PrivateLink configuration
+[INFO]	2025-12-16T16:44:33.158Z	dd66b20b-c25b-4287-8e2d-b54d26add709	PrivateLink VPC endpoint: vpce-0351.vpce-svc-03594486c11f7955a.eu-west-1.vpce.amazonaws.com
+[INFO]	2025-12-16T16:44:33.158Z	dd66b20b-c25b-4287-8e2d-b54d26add709	Connecting via PrivateLink with account=COMPANY-COMPANY, host=vpce-.vpce-svc-03594486c11f7955a.eu-west-1.vpce.amazonaws.com
+[INFO]	2025-12-16T16:44:33.158Z	dd66b20b-c25b-4287-8e2d-b54d26add709	Connection parameters: account=COMPANY-COMPANY, user=ndh_ci, role=PAM_TECH_CONSUMER
+[INFO]	2025-12-16T16:44:33.158Z	dd66b20b-c25b-4287-8e2d-b54d26add709	Snowflake Connector for Python Version: 4.1.1, Python Version: 3.9.23, Platform: Linux-5.10.245-271.979.amzn2.x86_64-x86_64-with-glibc2.26
+[INFO]	2025-12-16T16:44:33.159Z	dd66b20b-c25b-4287-8e2d-b54d26add709	Connecting to GLOBAL Snowflake domain
+END RequestId: dd66b20b-c25b-4287-8e2d-b54d26add709
+REPORT RequestId: dd66b20b-c25b-4287-8e2d-b54d26add709	Duration: 3000.00 ms	Billed Duration: 3000 ms	Memory Size: 128 MB	Max Memory Used: 102 MB	Status: timeout
+
+
+
+provide the fix in app.py to resolve the connectivity issue
