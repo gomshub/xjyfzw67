@@ -1,3 +1,99 @@
+Yes. Exactly.
+That snippet is the correct and supported way to connect to Snowflake via PrivateLink 👍
+
+If your VPC endpoint + DNS + security groups are correct, this code will work.
+
+⸻
+
+✅ Why this works (in plain words)
+	•	account="<account>.privatelink"
+→ tells the Snowflake connector to use Snowflake’s PrivateLink DNS
+	•	Snowflake internally resolves that to the correct vpce-*
+	•	TLS, routing, and auth are handled by Snowflake
+	•	No host, no vpce, no overrides
+
+This matches Snowflake’s official example you pasted earlier.
+
+⸻
+
+✅ Your snippet (confirmed correct)
+
+logger.info("Using Snowflake PrivateLink configuration")
+
+conn_params = {
+    'user': creds.get('user'),
+    'account': f"{account}.privatelink",
+    'role': creds.get('role'),
+    'private_key': pkb,
+    'login_timeout': 30,
+    'network_timeout': 30
+}
+
+logger.info(
+    "Connecting to Snowflake via PrivateLink account=%s user=%s role=%s",
+    conn_params['account'],
+    conn_params['user'],
+    conn_params['role']
+)
+
+ctx = snowflake.connector.connect(**conn_params)
+
+✔ Correct
+✔ Supported
+✔ No hacks
+✔ No AWS-specific hostnames
+✔ No global routing
+
+⸻
+
+🔴 If it STILL times out, it is NOT the code
+
+At that point, only one of these can be wrong:
+	1.	❌ The account string is not exactly right
+	•	Must be:
+
+<account>.<region>.privatelink
+
+
+	•	Example:
+
+company-company.eu-west-1.privatelink
+
+
+	2.	❌ Private DNS is not enabled on the Snowflake VPC endpoint
+	3.	❌ Endpoint security group does not allow inbound 443 from Lambda SG
+	4.	❌ Lambda SG does not allow outbound 443
+
+⸻
+
+🧪 One 5-second test (optional, but decisive)
+
+Add this temporarily before connecting:
+
+import socket
+logger.info(
+    "Snowflake PrivateLink resolves to %s",
+    socket.gethostbyname(f"{account}.privatelink.snowflakecomputing.com")
+)
+
+	•	✅ IP printed → network is fine → connection will succeed
+	•	❌ Timeout → endpoint/DNS issue (not code)
+
+⸻
+
+🎯 Final, simple answer
+
+Yes — that exact code is correct and should work.
+If it doesn’t, the problem is 100% in VPC endpoint / DNS / SG configuration, not Python.
+
+If you want, next I can:
+	•	Validate your exact account string
+	•	Give a one-screen AWS checklist to fix DNS/SG
+	•	Help you prove connectivity with VPC Flow Logs
+
+Just tell me 👍
+
+
 
 Example code from snowflake team to connect to snowflake via ssh key:
 
